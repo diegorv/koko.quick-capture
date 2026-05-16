@@ -8,9 +8,9 @@ Status: ready-for-agent
 
 ## What to build
 
-Bootstrap the project as a Tauri 2 desktop app with a Svelte frontend. macOS-only target. Bundle identifier `com.koko.quick-capture`. The result is a runnable shell with a single empty main window — no Capture logic yet — that compiles, launches, and quits cleanly. This is the foundation every later slice builds on.
+Bootstrap the project as a Tauri 2 desktop app with a SvelteKit frontend. macOS-only target. Bundle identifier `com.koko.quick-capture`. The result is a runnable shell with a single empty main window — no Capture logic yet — that compiles, launches, and quits cleanly. This is the foundation every later slice builds on.
 
-Choose Vite + plain Svelte (not SvelteKit) and pnpm unless there is a concrete reason to deviate. Keep configuration minimal: the goal is a working baseline, not a feature-rich template.
+Use SvelteKit with `@sveltejs/adapter-static` (see ADR-0007). pnpm is the package manager. Generate the project via `pnpm create tauri-app` and the `svelte-ts` template. Keep configuration minimal: the goal is a working baseline, not a feature-rich template.
 
 The Rust side is wired up with the workspace and dependencies that v0.1 will need (`rusqlite`, `ulid`, `tauri-plugin-global-shortcut`), even though they are not invoked yet, so later slices add usage rather than packaging.
 
@@ -24,7 +24,7 @@ Test tooling is set up in this slice (per ADR-0005) so later slices add tests ra
 - [ ] Repo has a working Tauri 2 + Svelte project that builds with `pnpm tauri build` and runs with `pnpm tauri dev` on macOS.
 - [ ] Bundle identifier is `com.koko.quick-capture`.
 - [ ] Target platforms config excludes non-macOS platforms.
-- [ ] Frontend is plain Svelte via Vite (not SvelteKit). pnpm is the package manager.
+- [ ] Frontend is SvelteKit with `@sveltejs/adapter-static` (per ADR-0007). pnpm is the package manager.
 - [ ] `Cargo.toml` declares `rusqlite`, `ulid`, and `tauri-plugin-global-shortcut` as dependencies (no usage required yet).
 - [ ] Launching the app shows a single empty window titled "quick-capture".
 - [ ] `README.md` (or equivalent in package.json scripts) documents how to run dev and build.

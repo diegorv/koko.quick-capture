@@ -39,8 +39,9 @@ Captures land in a local SQLite store managed entirely by the Rust side of the a
 ## Implementation Decisions
 
 ### Stack and platform
-- Tauri 2 with a Svelte frontend. macOS only. No multi-OS scaffolding in v0.1.
+- Tauri 2 with a SvelteKit frontend built via `@sveltejs/adapter-static` (see ADR-0007). macOS only. No multi-OS scaffolding in v0.1.
 - Rust owns SQLite, clipboard, blob filesystem, ULID generation, and global shortcut registration. The Svelte side calls Rust via `invoke`. See ADR-0004.
+- Multiple Tauri windows (Composer in v0.1; Dock, Inbox, Settings later) all load the same built SvelteKit bundle and point at different routes (`/composer`, `/inbox`, etc.).
 
 ### Module layout (Rust)
 
