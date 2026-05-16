@@ -12,9 +12,16 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "quick-capture",
-        "width": 800,
-        "height": 600
+        "url": "/composer",
+        "width": 600,
+        "height": 320,
+        "visible": false,
+        "focus": true,
+        "center": true,
+        "decorations": true,
+        "alwaysOnTop": false
       }
     ],
     "security": {
