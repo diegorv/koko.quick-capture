@@ -9,6 +9,10 @@ edition = "2021"
 name = "quick_capture_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "dev_list"
+path = "src/bin/dev_list.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

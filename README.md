@@ -33,3 +33,28 @@ cargo check   # Rust typecheck (run from src-tauri/)
 ```
 
 Every slice must leave all four green before commit (see ADR-0006).
+
+## Dev verification
+
+v0.1 has no Inbox UI yet. The `dev_list` binary is the verification path: it opens the same SQLite store the app writes to and prints recent Captures, newest first.
+
+```sh
+cd src-tauri
+cargo run --bin dev_list -- --limit 5
+```
+
+Each line has four columns, separated by two spaces:
+
+```
+<short-ulid>  <kind>  <created_at>  <payload preview>
+```
+
+- `<short-ulid>` — first 8 chars of the Capture's ULID.
+- `<kind>` — one of `Link`, `Clip`, `Shot`, `File`, `Note`.
+- `<created_at>` — ISO-8601 UTC timestamp.
+- `<payload preview>` — single-line preview of the payload. For `Note`, the first 60 chars of the text with newlines escaped as `\n` and a `...` suffix if truncated.
+
+Flags:
+
+- `--limit N` — number of rows to print (default 20).
+- `--db <path>` — read from a specific SQLite file instead of the default location. Mainly used by the integration test for a hermetic fixture DB.
