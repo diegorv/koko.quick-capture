@@ -1,0 +1,3 @@
+# Captures are immutable after creation
+
+Once a Capture is written, its kind and payload never change. The only mutations allowed against a Capture row are toggling `starred` and soft-deleting it (tombstone). If the user captured the wrong thing, the workflow is delete + recapture, not edit. This keeps the write path branch-free, the Inbox a pure read surface, and any future downstream consumer (a separate processing app, a sync target) free to treat Captures as an append-only event stream. Editing was rejected because allowing it would force the Inbox to grow form UI per kind and turn `quick-capture` into a small PIM, which is explicitly out of scope (see ADR-0001 framing).
