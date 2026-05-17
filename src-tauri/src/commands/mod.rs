@@ -265,6 +265,30 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Read the macOS clipboard, decide a capture kind, persist, and
+/// broadcast the change to every interested surface. Lives on the
+/// command surface so the global-shortcut handler in `lib.rs` is a
+/// thin dispatcher rather than re-implementing the
+/// capture+emit ceremony inline.
+///
+/// Multi-file pastes turn into N captures — we emit `CAPTURES_CHANGED`
+/// + `DOCK_PULSE` per row so the Inbox can prepend each new row live
+/// and the Dock pulses once per save.
+pub fn capture_clipboard_and_broadcast(app: &AppHandle) {
+    let store = app.state::<Store>();
+    match capture_clipboard_now_with(&SystemClipboard::new(), &store) {
+        Ok(captures) => {
+            for capture in &captures {
+                let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+                let _ = app.emit(DOCK_PULSE_EVENT, ());
+            }
+        }
+        Err(e) => {
+            eprintln!("capture_clipboard_now failed: {e}");
+        }
+    }
+}
+
 /// One place that knows how to bring the Composer to screen. Used by
 /// the global shortcut, the tray menu, the Dock click invoke, and any
 /// future entry point. Records the prior frontmost macOS app FIRST

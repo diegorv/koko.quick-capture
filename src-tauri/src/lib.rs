@@ -21,8 +21,7 @@ use tauri_plugin_global_shortcut::{
     Builder as ShortcutBuilder, Shortcut, ShortcutState,
 };
 
-use crate::clipboard::SystemClipboard;
-use crate::commands::{capture_clipboard_now_with, save_dropped_files_with_store};
+use crate::commands::save_dropped_files_with_store;
 use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::events::{
     CAPTURES_CHANGED, DOCK_DRAG_ENTER, DOCK_DRAG_LEAVE, DOCK_PULSE, TRAY_OPEN_INBOX,
@@ -227,6 +226,22 @@ fn tray_menu_item_accelerator(item: TrayMenuItem) -> &'static str {
     }
 }
 
+/// Pure dispatch from `ShortcutId` to the side-effecting action that
+/// should run when its accelerator fires. Kept as a free function so
+/// the shortcut handler closure stays a single line and so the three
+/// arms are each one call to a separately-testable `commands::*`
+/// helper. The OpenInbox arm intentionally does NOT emit
+/// `shortcuts::default_registry()`'s `open_inbox` event because
+/// nothing in JS listens for it; same for the dropped
+/// `capture_clipboard` event.
+fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
+    match id {
+        ShortcutId::OpenComposer => commands::show_composer(app),
+        ShortcutId::CaptureClipboard => commands::capture_clipboard_and_broadcast(app),
+        ShortcutId::OpenInbox => commands::show_inbox(app),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let registry = default_registry();
@@ -253,37 +268,7 @@ pub fn run() {
         let Some((_, binding)) = dispatch_table.iter().find(|(s, _)| s == shortcut) else {
             return;
         };
-        match binding.id {
-            ShortcutId::OpenComposer => {
-                commands::show_composer(app);
-            }
-            ShortcutId::CaptureClipboard => {
-                let store = app.state::<Store>();
-                match capture_clipboard_now_with(&SystemClipboard::new(), &store) {
-                    Ok(captures) => {
-                        // Emit the full batch so future UI surfaces can
-                        // count N rows (e.g. for a multi-file copy).
-                        let _ = app.emit(binding.event, &captures);
-                        // Emit one captures.changed + dock.pulse per row
-                        // so the Inbox can prepend each new Capture live
-                        // and the Dock can pulse per row.
-                        for capture in &captures {
-                            let _ = app.emit(CAPTURES_CHANGED, capture);
-                            let _ = app.emit(DOCK_PULSE, ());
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("capture_clipboard_now failed: {e}");
-                    }
-                }
-            }
-            ShortcutId::OpenInbox => {
-                // The `binding.event` ("open_inbox") is intentionally
-                // not emitted here — the Inbox window is shown
-                // directly and nothing in JS listens for it.
-                commands::show_inbox(app);
-            }
-        }
+        dispatch_shortcut(app, binding.id);
     });
     for (shortcut, _) in &parsed {
         builder = builder
