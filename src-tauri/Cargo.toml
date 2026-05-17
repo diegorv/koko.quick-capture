@@ -28,6 +28,19 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 mime_guess = "2"
 
+# Dock fullscreen observer (slice 05): NSWorkspace subscription via
+# closure-based `addObserverForName:...:usingBlock:`. `objc2` is the
+# current maintained Rust binding for ObjC runtime, supersedes the
+# legacy `cocoa` crate; `objc2-app-kit` and `objc2-foundation` give us
+# typed NSWorkspace / NSString / NSNotification wrappers; `block2`
+# bridges Rust closures to ObjC blocks. Versions follow the lines Tauri
+# already pulls in transitively so we don't fork the dep graph.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+block2 = "0.6"
+
 [dev-dependencies]
 tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }

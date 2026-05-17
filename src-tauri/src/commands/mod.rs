@@ -8,10 +8,12 @@
 
 use std::str::FromStr;
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::menu::MenuBuilder;
+use tauri::{AppHandle, Emitter, LogicalPosition, Manager, State};
 use ulid::Ulid;
 
 use crate::clipboard::{Clipboard, SystemClipboard};
+use crate::dock::default_context_menu;
 use crate::kind_detect::decide;
 use crate::store::{Capture, CaptureInput, Store};
 
@@ -102,4 +104,53 @@ pub fn list_captures(
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
     list_captures_with_store(&store, cursor.as_deref(), limit)
+}
+
+/// Show + focus the Composer (main) window. The Dock JS calls this on
+/// click; the same path is exercised by the `Ctrl+Alt+Cmd+Space`
+/// shortcut and the Tray's "Open Composer" item, so all three entry
+/// points behave identically.
+///
+/// macOS requires `show()` / `set_focus()` to run on the main thread
+/// for the app to actually activate and grab keyboard focus. The
+/// command runs on a Tauri worker thread, so we hop to main via
+/// `run_on_main_thread`.
+#[tauri::command]
+pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
+    let app_handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = app_handle.emit("open_composer", ());
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Open the Dock's right-click context menu at the given Dock-window
+/// coordinates. The menu shape mirrors the Tray (Open Composer, Open
+/// Inbox, Quit) via `dock::default_context_menu()` — same labels and
+/// event names as `tray::default_menu()`, only the `menu_id` differs
+/// so the app-level `on_menu_event` dispatcher (registered in
+/// `lib::run` setup) can route Dock-popup clicks separately.
+///
+/// `x` and `y` are in the Dock window's logical coordinate space (i.e.
+/// the `event.clientX` / `event.clientY` from the contextmenu event).
+#[tauri::command]
+pub fn open_dock_context_menu(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
+    let bindings = default_context_menu();
+    let mut menu = MenuBuilder::new(&app);
+    for b in &bindings {
+        menu = menu.text(b.menu_id, b.tray.label);
+    }
+    let menu = menu
+        .build()
+        .map_err(|e| format!("build dock context menu: {e}"))?;
+
+    let dock = app
+        .get_webview_window("dock")
+        .ok_or_else(|| "dock window not found".to_string())?;
+    dock.popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(|e| format!("popup dock context menu: {e}"))
 }

@@ -1,5 +1,6 @@
 pub mod clipboard;
 pub mod commands;
+pub mod dock;
 pub mod kind_detect;
 pub mod shortcuts;
 pub mod store;
@@ -10,7 +11,8 @@ use std::str::FromStr;
 use tauri::{
     menu::MenuBuilder,
     tray::TrayIconBuilder,
-    Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Listener, LogicalPosition, LogicalSize, Manager, PhysicalPosition, WebviewUrl,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{
     Builder as ShortcutBuilder, Shortcut, ShortcutState,
@@ -18,6 +20,7 @@ use tauri_plugin_global_shortcut::{
 
 use crate::clipboard::SystemClipboard;
 use crate::commands::{capture_clipboard_now_with, CAPTURES_CHANGED_EVENT};
+use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
 use crate::store::Store;
 use crate::tray::{default_menu, TrayMenuItem};
@@ -187,12 +190,102 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Dock window. A small, frameless, always-on-top,
+            // non-activating widget pinned to the bottom-left of the
+            // active monitor. macOS NSPanel-like behavior is requested
+            // via `focus(false) + accept_first_mouse(true)`. ADR-0008
+            // expects this window to grow drag-drop wiring in slice 06.
+            let dock_window = WebviewWindowBuilder::new(
+                app,
+                "dock",
+                WebviewUrl::App("/dock".into()),
+            )
+            .title("")
+            .inner_size(80.0, 80.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .accept_first_mouse(true)
+            .visible(true)
+            .build()?;
+
+            // Position at bottom-left of the primary monitor with a
+            // 16px margin from both edges. `primary_monitor()` returns
+            // physical pixels; normalize through the monitor's scale
+            // factor so the same `(16, 16)` margin lands correctly on
+            // Retina and non-Retina displays.
+            if let Some(monitor) = dock_window.primary_monitor()? {
+                let scale = monitor.scale_factor();
+                let m_pos = monitor.position();
+                let m_size = monitor.size();
+                // Top-left of monitor in logical coords:
+                let monitor_logical_x = m_pos.x as f64 / scale;
+                let monitor_logical_y = m_pos.y as f64 / scale;
+                let monitor_logical_h = m_size.height as f64 / scale;
+                // Window 80x80, margin 16, anchored bottom-left.
+                let x = monitor_logical_x + 16.0;
+                let y = monitor_logical_y + monitor_logical_h - 80.0 - 16.0;
+                dock_window.set_position(LogicalPosition::new(x, y))?;
+            } else {
+                // Fallback: place at a sane physical default so the
+                // window is at least visible on first launch.
+                let _ = dock_window
+                    .set_position(PhysicalPosition::new(16i32, 16i32));
+            }
+            // Ensure the size took (some platforms reset on first show).
+            let _ = dock_window.set_size(LogicalSize::new(80.0, 80.0));
+
+            // App-level menu event dispatcher for the Dock's
+            // right-click popup menu. The popup is built and shown
+            // per-invocation in `commands::open_dock_context_menu`,
+            // but the click on a menu item lands here. The same item
+            // intents are mirrored from the Tray (Open Composer, Open
+            // Inbox, Quit) via `dock::default_context_menu()`; only
+            // the `menu_id` prefix differs (`dock.*` vs `tray.*`).
+            let dock_dispatch = default_context_menu();
+            app.on_menu_event(move |app, event| {
+                let id = event.id().as_ref();
+                let Some(binding) = dock_dispatch.iter().find(|b| b.menu_id == id) else {
+                    return;
+                };
+                match binding.tray.item {
+                    TrayMenuItem::OpenComposer => {
+                        let app_handle = app.clone();
+                        let event_name = binding.tray.event;
+                        let _ = app.run_on_main_thread(move || {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            let _ = app_handle.emit(event_name, ());
+                        });
+                    }
+                    TrayMenuItem::OpenInbox => {
+                        let _ = app.emit(binding.tray.event, ());
+                    }
+                    TrayMenuItem::Quit => {
+                        app.exit(0);
+                    }
+                }
+            });
+
+            // Start the macOS fullscreen observer. The handle holds
+            // the NSWorkspace observer token; dropping it (e.g. on
+            // app exit) unregisters the notification. We stash it in
+            // app state so it lives for the app's lifetime.
+            let observer = FullscreenObserver::start(app.handle().clone());
+            app.manage(observer);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::save_note,
             commands::capture_clipboard_now,
-            commands::list_captures
+            commands::list_captures,
+            commands::open_composer_window,
+            commands::open_dock_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

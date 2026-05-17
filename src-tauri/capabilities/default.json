@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main and inbox windows",
-  "windows": ["main", "inbox"],
+  "description": "Capability for the main, inbox, and dock windows",
+  "windows": ["main", "inbox", "dock"],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
