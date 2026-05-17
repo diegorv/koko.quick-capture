@@ -18,9 +18,9 @@ use quick_capture_lib::tray::{default_menu, TrayMenuItem};
 use std::sync::Mutex;
 
 #[test]
-fn default_context_menu_has_three_items_in_order_mirroring_tray() {
+fn default_context_menu_has_four_items_in_order_mirroring_tray() {
     let menu = default_context_menu();
-    assert_eq!(menu.len(), 3);
+    assert_eq!(menu.len(), 4);
 
     assert_eq!(menu[0].tray.item, TrayMenuItem::OpenComposer);
     assert_eq!(menu[0].tray.label, "Open Composer");
@@ -32,10 +32,15 @@ fn default_context_menu_has_three_items_in_order_mirroring_tray() {
     assert_eq!(menu[1].tray.event, "tray:open_inbox");
     assert_eq!(menu[1].menu_id, "dock:open_inbox");
 
-    assert_eq!(menu[2].tray.item, TrayMenuItem::Quit);
-    assert_eq!(menu[2].tray.label, "Quit");
-    assert_eq!(menu[2].tray.event, "tray:quit");
-    assert_eq!(menu[2].menu_id, "dock:quit");
+    assert_eq!(menu[2].tray.item, TrayMenuItem::OpenSettings);
+    assert_eq!(menu[2].tray.label, "Settings…");
+    assert_eq!(menu[2].tray.event, "tray:open_settings");
+    assert_eq!(menu[2].menu_id, "dock:open_settings");
+
+    assert_eq!(menu[3].tray.item, TrayMenuItem::Quit);
+    assert_eq!(menu[3].tray.label, "Quit");
+    assert_eq!(menu[3].tray.event, "tray:quit");
+    assert_eq!(menu[3].menu_id, "dock:quit");
 }
 
 #[test]

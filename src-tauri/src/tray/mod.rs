@@ -11,6 +11,7 @@
 pub enum TrayMenuItem {
     OpenComposer,
     OpenInbox,
+    OpenSettings,
     Quit,
 }
 
@@ -42,6 +43,12 @@ pub fn default_menu() -> Vec<TrayMenuBinding> {
             label: "Open Inbox",
             event: "tray:open_inbox",
             menu_id: "tray:open_inbox",
+        },
+        TrayMenuBinding {
+            item: TrayMenuItem::OpenSettings,
+            label: "Settings…",
+            event: "tray:open_settings",
+            menu_id: "tray:open_settings",
         },
         TrayMenuBinding {
             item: TrayMenuItem::Quit,

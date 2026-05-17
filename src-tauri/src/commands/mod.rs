@@ -395,6 +395,20 @@ pub fn show_inbox(app: &AppHandle) {
     });
 }
 
+/// One place that knows how to bring the Settings window to screen.
+/// Mirrors `show_inbox` but does not touch the activation policy
+/// because Settings is meant as a transient configuration popover;
+/// Cmd+Tab still surfaces the app via whatever the Inbox last set.
+pub fn show_settings(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("settings") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    });
+}
+
 /// Tauri-managed slot that holds the macOS PID of whichever app was
 /// frontmost just before quick-capture summoned the Composer.
 /// `dismiss_composer` reads + clears the slot to hand focus back to

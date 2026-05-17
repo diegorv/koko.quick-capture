@@ -50,6 +50,9 @@ const INBOX_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 /// Lucide `x` (close / quit), stroke parameterised.
 const X_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
 
+/// Lucide `settings` (cog), stroke parameterised.
+const SETTINGS_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>"##;
+
 /// Pick the menu-item stroke colour based on the current macOS
 /// appearance. Dark menubar -> white; light menubar -> black. Detected
 /// once at menu-build time. Live theme switching while the app is
@@ -144,6 +147,7 @@ pub(crate) fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::im
     let template = match item {
         TrayMenuItem::OpenComposer => SQUARE_PEN_SVG,
         TrayMenuItem::OpenInbox => INBOX_SVG,
+        TrayMenuItem::OpenSettings => SETTINGS_SVG,
         TrayMenuItem::Quit => X_SVG,
     };
     let svg = template.replace("{STROKE}", stroke);
@@ -222,6 +226,11 @@ fn tray_menu_item_accelerator(item: TrayMenuItem) -> &'static str {
     match item {
         TrayMenuItem::OpenComposer => "Ctrl+Alt+Cmd+Space",
         TrayMenuItem::OpenInbox => "Ctrl+Alt+Cmd+I",
+        // No global shortcut bound for Settings yet — the accelerator
+        // hint is display-only on every menu item anyway, so Cmd+,
+        // (the macOS convention) is shown for familiarity even
+        // though pressing it outside an open menu is a no-op.
+        TrayMenuItem::OpenSettings => "Cmd+,",
         TrayMenuItem::Quit => "Cmd+Q",
     }
 }
@@ -259,6 +268,7 @@ fn dispatch_menu_item(app: &tauri::AppHandle, item: TrayMenuItem) {
         TrayMenuItem::OpenInbox => {
             let _ = app.emit(TRAY_OPEN_INBOX, ());
         }
+        TrayMenuItem::OpenSettings => commands::show_settings(app),
         TrayMenuItem::Quit => {
             app.exit(0);
         }
@@ -374,6 +384,24 @@ pub fn run() {
             .center()
             .build()?;
             intercept_close_as_hide(&composer_window, || {});
+
+            // Settings window. Standard decorated window, hidden at
+            // startup, summoned by the tray menu "Settings…" item.
+            // Lives for the life of the app so subsequent opens just
+            // show the existing window instead of recreating it.
+            let settings_window = WebviewWindowBuilder::new(
+                app,
+                "settings",
+                WebviewUrl::App("/settings".into()),
+            )
+            .title("Settings")
+            .inner_size(560.0, 420.0)
+            .visible(false)
+            .focused(true)
+            .center()
+            .resizable(true)
+            .build()?;
+            intercept_close_as_hide(&settings_window, || {});
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
