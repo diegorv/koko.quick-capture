@@ -15,6 +15,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Dock from "$lib/dock/Dock.svelte";
+  import "./dock.css";
 
   // Visual hover state for Finder drags. Driven by Rust events
   // emitted from the Dock window's native drag-drop handler (see
@@ -118,17 +119,3 @@
   {pulseKey}
 />
 
-<style>
-  :global(html),
-  :global(body) {
-    /* The Dock window is decoration-less and 96x96 (80x80 disc
-       centered with an 8px ring of slack around it for the unread
-       badge to overflow into); the body should be transparent so the
-       rounded button reads as a free-floating widget rather than a
-       square panel. */
-    margin: 0;
-    padding: 0;
-    background: transparent;
-    overflow: hidden;
-  }
-</style>
