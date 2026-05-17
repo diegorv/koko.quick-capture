@@ -44,6 +44,29 @@ pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock:drag:leave";
 /// theme; the colour values here only matter for the alpha channel.
 const TRAY_ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M12 13h4"/><path d="M12 18h6a2 2 0 0 1 2 2v1"/><path d="M12 8h8"/><path d="M16 8V5a2 2 0 0 1 2-2"/><circle cx="16" cy="13" r=".5" fill="black"/><circle cx="18" cy="3" r=".5" fill="black"/><circle cx="20" cy="21" r=".5" fill="black"/><circle cx="20" cy="8" r=".5" fill="black"/></svg>"##;
 
+/// Lucide `square-pen` (compose / new note).
+const SQUARE_PEN_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>"##;
+
+/// Lucide `inbox`.
+const INBOX_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"##;
+
+/// Lucide `x` (close / quit).
+const X_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+
+/// Rasterise a Lucide SVG string into a square RGBA buffer at the
+/// given pixel size. macOS reads only the alpha channel for tray /
+/// menu icons so the source stroke colour does not matter, but we
+/// fix it to black for clarity.
+fn rasterise_svg(svg: &str, size: u32) -> tauri::image::Image<'static> {
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_str(svg, &opt).expect("parse svg");
+    let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("alloc pixmap");
+    let scale = size as f32 / 24.0;
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    tauri::image::Image::new_owned(pixmap.take(), size, size)
+}
+
 /// Rasterise the Lucide brain-circuit SVG into a 44x44 RGBA template
 /// icon for the macOS Tray. 44px = 22pt @2x so it stays crisp on
 /// Retina menubars. macOS reads the alpha channel and recolours.
@@ -64,6 +87,17 @@ fn build_brain_tray_icon_rgba() -> (Vec<u8>, u32, u32) {
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
     (pixmap.take(), SIZE, SIZE)
+}
+
+/// Tray menu items wear a per-item icon. Picks the right Lucide glyph
+/// for each `TrayMenuItem` and rasterises at 32x32 (16pt @2x).
+fn tray_menu_item_icon(item: TrayMenuItem) -> tauri::image::Image<'static> {
+    let svg = match item {
+        TrayMenuItem::OpenComposer => SQUARE_PEN_SVG,
+        TrayMenuItem::OpenInbox => INBOX_SVG,
+        TrayMenuItem::Quit => X_SVG,
+    };
+    rasterise_svg(svg, 32)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -259,7 +293,8 @@ pub fn run() {
             let menu_items = default_menu();
             let mut menu = MenuBuilder::new(app);
             for binding in &menu_items {
-                menu = menu.text(binding.menu_id, binding.label);
+                let icon = tray_menu_item_icon(binding.item);
+                menu = menu.icon(binding.menu_id, binding.label, icon);
             }
             let menu = menu.build()?;
 
