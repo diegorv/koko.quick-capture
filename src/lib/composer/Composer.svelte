@@ -6,9 +6,18 @@
   interface Props {
     save: (text: string) => void | Promise<void>;
     onclose?: () => void;
+    /**
+     * Bumped by the parent every time the window is shown so the
+     * Composer can re-focus the textarea and clear stale text. The
+     * Composer window is created once at app startup and hidden/shown
+     * on every shortcut press, so the `use:focusOnMount` action only
+     * fires the first time; without an external focus signal,
+     * subsequent shows leave focus wherever the OS left it.
+     */
+    focusKey?: number;
   }
 
-  let { save, onclose }: Props = $props();
+  let { save, onclose, focusKey = 0 }: Props = $props();
 
   let text = $state("");
   let textarea: HTMLTextAreaElement | undefined = $state();
@@ -16,6 +25,14 @@
   function focusOnMount(node: HTMLTextAreaElement) {
     node.focus();
   }
+
+  $effect(() => {
+    // Re-run on every `focusKey` change. Reset text so each open
+    // starts from an empty draft, and re-focus the textarea.
+    focusKey;
+    text = "";
+    textarea?.focus();
+  });
 
   function quietTextarea(node: HTMLTextAreaElement) {
     // WebKit-specific attributes that the Svelte type system does not

@@ -4,7 +4,16 @@
   // hides the window.
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { onMount, onDestroy } from "svelte";
   import Composer from "$lib/composer/Composer.svelte";
+
+  // Bumped on every `open_composer` event from Rust so the Composer
+  // component re-focuses its textarea and clears stale text. The
+  // window is created once at startup and only hidden / shown after
+  // that, so the Svelte component never remounts.
+  let focusKey = $state(0);
+  let unlisten: UnlistenFn | undefined;
 
   async function save(text: string) {
     try {
@@ -22,6 +31,20 @@
       console.error("hide window failed", err);
     }
   }
+
+  onMount(async () => {
+    try {
+      unlisten = await listen("open_composer", () => {
+        focusKey += 1;
+      });
+    } catch (err) {
+      console.error("listen open_composer failed", err);
+    }
+  });
+
+  onDestroy(() => {
+    unlisten?.();
+  });
 </script>
 
-<Composer {save} onclose={close} />
+<Composer {save} onclose={close} {focusKey} />
