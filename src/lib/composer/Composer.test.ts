@@ -1,4 +1,4 @@
-import { render, fireEvent } from "@testing-library/svelte";
+import { render, fireEvent, waitFor } from "@testing-library/svelte";
 import { describe, it, expect, vi } from "vitest";
 import Composer from "./Composer.svelte";
 
@@ -35,9 +35,12 @@ describe("Composer", () => {
     await fireEvent.input(textarea, { target: { value: "hello capture" } });
     await fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
+    // `save` is awaited synchronously inside the handler, so it lands
+    // by the next microtask. `onclose` fires after the ~180ms save
+    // flash; wait for it instead of asserting synchronously.
     expect(save).toHaveBeenCalledTimes(1);
     expect(save).toHaveBeenCalledWith("hello capture");
-    expect(onclose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
   });
 
   it("a fresh mount starts with an empty textarea (no leakage)", () => {

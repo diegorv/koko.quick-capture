@@ -21,6 +21,10 @@
 
   let text = $state("");
   let textarea: HTMLTextAreaElement | undefined = $state();
+  // Flipped true for a beat after a successful save so the composer
+  // can flash a brief green confirmation before the window hides.
+  let saved = $state(false);
+  const SAVE_FLASH_MS = 180;
 
   function focusOnMount(node: HTMLTextAreaElement) {
     node.focus();
@@ -28,9 +32,11 @@
 
   $effect(() => {
     // Re-run on every `focusKey` change. Reset text so each open
-    // starts from an empty draft, and re-focus the textarea.
+    // starts from an empty draft, and re-focus the textarea. Also
+    // clear any leftover `saved` flash from a previous capture.
     focusKey;
     text = "";
+    saved = false;
     textarea?.focus();
   });
 
@@ -52,12 +58,17 @@
     if (event.key === "Enter" && event.metaKey) {
       event.preventDefault();
       await save(text);
+      saved = true;
+      // Hold the green confirmation flash briefly so the user sees a
+      // visual ack before the window is hidden by the parent.
+      await new Promise<void>((resolve) => setTimeout(resolve, SAVE_FLASH_MS));
+      saved = false;
       onclose?.();
     }
   }
 </script>
 
-<div class="composer">
+<div class="composer" class:saved>
   <textarea
     bind:this={textarea}
     bind:value={text}
@@ -88,6 +99,14 @@
       "Segoe UI",
       sans-serif;
     border-radius: 12px;
+    transition: box-shadow 100ms ease-out;
+  }
+
+  /* Brief success ring after Cmd+Enter, held for ~180ms in the script
+     before the parent hides the window. Inset so the rounded corners
+     stay clean. */
+  .composer.saved {
+    box-shadow: inset 0 0 0 3px rgba(34, 197, 94, 0.55);
   }
 
   textarea {
