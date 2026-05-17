@@ -1,5 +1,8 @@
 # quick-capture
 
+> [!WARNING]
+> **Early stage project.** This is an early-stage work in progress. APIs, schemas, and behavior may change without notice. Not ready for production use. Expect bugs, breaking changes, and missing features.
+
 Frictionless macOS capture inbox. Tauri 2 + SvelteKit + Rust.
 
 See `CONTEXT.md` for the domain glossary, `docs/adr/` for architectural decisions, and `.scratch/v0-1-mvp/` for the active plan.
