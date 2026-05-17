@@ -61,6 +61,23 @@
     }
   });
 
+  // Keep the selected row in view as arrow nav advances. `block:
+  // "nearest"` is a no-op when the row is already on screen, so a
+  // mouse click on a visible row does not jolt the viewport. Reads
+  // `selectedId` so the effect re-runs on every selection change.
+  // ULIDs are [0-9A-Z]+ so no CSS escaping is needed (jsdom in tests
+  // does not implement CSS.escape anyway).
+  $effect(() => {
+    if (!selectedId || !listEl) return;
+    const row = listEl.querySelector<HTMLElement>(
+      `#capture-row-${selectedId}`,
+    );
+    // jsdom (used in unit tests) does not implement scrollIntoView.
+    if (row && typeof row.scrollIntoView === "function") {
+      row.scrollIntoView({ block: "nearest" });
+    }
+  });
+
   // When the inbox window is hidden + reshown, focus is reset on the
   // OS side. Re-grab it on every window-level focus so arrow keys
   // keep working without an extra click. Guarded so we only steal
