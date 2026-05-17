@@ -294,7 +294,12 @@
       {/if}
     </section>
     <section class="detail-pane">
-      <InboxDetail capture={selectedCapture} {onOpenLink} {onReveal} />
+      <InboxDetail
+        capture={selectedCapture}
+        {onOpenLink}
+        {onReveal}
+        {onStarToggle}
+      />
     </section>
   </div>
   <footer class="statusbar" aria-label="Inbox stats">

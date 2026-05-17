@@ -32,9 +32,12 @@
     capture: Capture | null;
     onOpenLink: (url: string) => void;
     onReveal: (id: string) => void;
+    /** Optional star toggle. When omitted, the header star is
+        display-only — useful for tests that do not exercise mutations. */
+    onStarToggle?: (id: string, next: boolean) => void;
   }
 
-  const { capture, onOpenLink, onReveal }: Props = $props();
+  const { capture, onOpenLink, onReveal, onStarToggle }: Props = $props();
 
   function str(value: unknown): string | null {
     return typeof value === "string" ? value : null;
@@ -87,8 +90,19 @@
           <HeaderIcon size={22} strokeWidth={1.6} />
         </span>
         <h2 class="kind">{kindLabel(capture.kind)}</h2>
-        {#if capture.starred}
-          <span class="star" title="Starred">★</span>
+        {#if onStarToggle}
+          <button
+            type="button"
+            class="star-btn"
+            class:active={capture.starred}
+            aria-label={capture.starred ? "Unstar capture" : "Star capture"}
+            aria-pressed={capture.starred}
+            onclick={() => onStarToggle(capture.id, !capture.starred)}
+          >
+            {capture.starred ? "★" : "☆"}
+          </button>
+        {:else if capture.starred}
+          <span class="star-btn active" title="Starred" aria-hidden="true">★</span>
         {/if}
       </div>
       <p class="timestamp">{formatTimestamp(capture.created_at)}</p>
@@ -255,9 +269,28 @@
     letter-spacing: -0.01em;
   }
 
-  .star {
+  .star-btn {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    padding: 0.15rem 0.4rem;
+    font-size: 1.05rem;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.55;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: opacity 80ms ease, background 80ms ease;
+  }
+
+  .star-btn:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .star-btn.active {
     color: #f59e0b;
-    font-size: 1rem;
+    opacity: 1;
   }
 
   .timestamp {
@@ -403,6 +436,9 @@
     .placeholder-hint kbd {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(255, 255, 255, 0.12);
+    }
+    .star-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
     }
   }
 </style>
