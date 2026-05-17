@@ -479,6 +479,22 @@ pub fn run() {
             .visible(true)
             .build()?;
 
+            // Mark the Dock window as non-hideable so `[NSApp hide:nil]`
+            // (used by `dismiss_composer` to return focus to the prior
+            // app) does not also hide the Dock. macOS keeps any window
+            // with `canHide == NO` on screen across an app-level hide.
+            #[cfg(target_os = "macos")]
+            {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                if let Ok(ns_window_ptr) = dock_window.ns_window() {
+                    unsafe {
+                        let ns_window: *mut AnyObject = ns_window_ptr as *mut AnyObject;
+                        let _: () = msg_send![ns_window, setCanHide: false];
+                    }
+                }
+            }
+
             // Position at bottom-left of the primary monitor with a
             // 16px margin from both edges. `primary_monitor()` returns
             // physical pixels; normalize through the monitor's scale

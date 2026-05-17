@@ -298,47 +298,58 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
 /// app held it before the Composer opened.
 ///
 /// macOS background: `window.hide()` alone removes the window from
-/// screen but the app stays "active" until the OS hands key status to
-/// somebody else — which it does not do automatically for an Accessory
-/// app that simply hides a window. The user has to Cmd+Tab back. Fix:
-/// after hiding, either focus the Inbox if it is on screen (keeps the
-/// user inside the app) or call `[NSApp deactivate]` so macOS picks
-/// the next non-quick-capture app as frontmost.
+/// screen but the app stays "active" — the OS does not hand key
+/// status to anybody else automatically. This is tauri-apps/tauri
+/// issue #7540. The reliable fix is `[NSApp hide:nil]`, which mirrors
+/// Cmd+H: hides every window the app owns AND activates the next app
+/// in macOS's activation queue (i.e. whichever app the user was in
+/// before us). When the Inbox is on screen we deliberately do NOT
+/// take that path because it would also hide the Inbox; instead we
+/// hand focus to the Inbox so the user stays inside the app.
 #[tauri::command]
 pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
     let app_handle = app.clone();
     app.run_on_main_thread(move || {
-        if let Some(composer) = app_handle.get_webview_window("composer") {
-            let _ = composer.hide();
-        }
         let inbox_visible = app_handle
             .get_webview_window("inbox")
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false);
+
         if inbox_visible {
+            if let Some(composer) = app_handle.get_webview_window("composer") {
+                let _ = composer.hide();
+            }
             if let Some(inbox) = app_handle.get_webview_window("inbox") {
                 let _ = inbox.set_focus();
             }
         } else {
+            // `[NSApp hide:nil]` handles the Composer hide for us and
+            // also relinquishes activation so macOS hands focus back
+            // to the previously frontmost app.
             #[cfg(target_os = "macos")]
-            deactivate_nsapp();
+            hide_nsapp();
+            #[cfg(not(target_os = "macos"))]
+            if let Some(composer) = app_handle.get_webview_window("composer") {
+                let _ = composer.hide();
+            }
         }
     })
     .map_err(|e| e.to_string())
 }
 
-/// Send `[NSApp deactivate]` so macOS yields key status from our app
-/// without hiding any visible window. Used after the Composer hides
-/// while no other quick-capture window is on screen, so focus returns
-/// to whichever app was frontmost before the Composer opened.
+/// Send `[NSApp hide:nil]` to hide every window the app owns and
+/// hand activation to the next app in macOS's queue. Mirrors the
+/// Cmd+H menu item. See tauri#7540 for why this is the right call
+/// rather than `window.hide()` plus deactivate.
 #[cfg(target_os = "macos")]
-fn deactivate_nsapp() {
+fn hide_nsapp() {
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
     unsafe {
         let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
         if !app.is_null() {
-            let _: () = msg_send![app, deactivate];
+            let nil: *mut AnyObject = std::ptr::null_mut();
+            let _: () = msg_send![app, hide: nil];
         }
     }
 }
