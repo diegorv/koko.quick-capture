@@ -7,11 +7,20 @@
   import Composer from "$lib/composer/Composer.svelte";
 
   async function save(text: string) {
-    await invoke("save_note", { text });
+    try {
+      const result = await invoke("save_note", { text });
+      console.log("save_note ok", result);
+    } catch (err) {
+      console.error("save_note failed", err);
+    }
   }
 
   async function close() {
-    await getCurrentWindow().hide();
+    try {
+      await getCurrentWindow().hide();
+    } catch (err) {
+      console.error("hide window failed", err);
+    }
   }
 </script>
 

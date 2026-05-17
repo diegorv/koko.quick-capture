@@ -39,6 +39,10 @@
     use:focusOnMount
     placeholder="Capture a note..."
     aria-label="Note text"
+    autocomplete="off"
+    autocorrect="off"
+    autocapitalize="off"
+    spellcheck="false"
   ></textarea>
 </div>
 

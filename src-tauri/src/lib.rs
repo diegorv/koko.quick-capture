@@ -44,11 +44,18 @@ pub fn run() {
         };
         match binding.id {
             ShortcutId::OpenComposer => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-                let _ = app.emit(binding.event, ());
+                // macOS: show()/set_focus() must run on the main thread to
+                // actually activate the app and grab keyboard focus. The
+                // global-hotkey plugin invokes this handler on a worker.
+                let app_handle = app.clone();
+                let event = binding.event;
+                let _ = app.run_on_main_thread(move || {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                    let _ = app_handle.emit(event, ());
+                });
             }
             ShortcutId::CaptureClipboard => {
                 let store = app.state::<Store>();
