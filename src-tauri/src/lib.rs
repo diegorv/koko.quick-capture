@@ -617,6 +617,7 @@ pub fn run() {
             commands::total_count,
             commands::mark_read,
             commands::open_composer_window,
+            commands::dismiss_composer,
             commands::open_dock_context_menu,
             commands::open_link,
             commands::reveal_capture

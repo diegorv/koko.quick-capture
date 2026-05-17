@@ -3,7 +3,6 @@
   // Tauri side: `save` invokes the Rust `save_note` command, `onclose`
   // hides the window.
   import { invoke } from "@tauri-apps/api/core";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
   import Composer from "$lib/composer/Composer.svelte";
@@ -25,10 +24,14 @@
   }
 
   async function close() {
+    // dismiss_composer hides the Composer AND yields macOS key status
+    // back to the previously frontmost app (or focuses the Inbox if it
+    // is on screen). A plain window.hide() leaves the user without
+    // keyboard focus until they Cmd+Tab out.
     try {
-      await getCurrentWindow().hide();
+      await invoke("dismiss_composer");
     } catch (err) {
-      console.error("hide window failed", err);
+      console.error("dismiss_composer failed", err);
     }
   }
 

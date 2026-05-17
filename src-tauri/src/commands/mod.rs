@@ -294,6 +294,55 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Hide the Composer popover and return keyboard focus to whichever
+/// app held it before the Composer opened.
+///
+/// macOS background: `window.hide()` alone removes the window from
+/// screen but the app stays "active" until the OS hands key status to
+/// somebody else — which it does not do automatically for an Accessory
+/// app that simply hides a window. The user has to Cmd+Tab back. Fix:
+/// after hiding, either focus the Inbox if it is on screen (keeps the
+/// user inside the app) or call `[NSApp deactivate]` so macOS picks
+/// the next non-quick-capture app as frontmost.
+#[tauri::command]
+pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
+    let app_handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(composer) = app_handle.get_webview_window("composer") {
+            let _ = composer.hide();
+        }
+        let inbox_visible = app_handle
+            .get_webview_window("inbox")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        if inbox_visible {
+            if let Some(inbox) = app_handle.get_webview_window("inbox") {
+                let _ = inbox.set_focus();
+            }
+        } else {
+            #[cfg(target_os = "macos")]
+            deactivate_nsapp();
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Send `[NSApp deactivate]` so macOS yields key status from our app
+/// without hiding any visible window. Used after the Composer hides
+/// while no other quick-capture window is on screen, so focus returns
+/// to whichever app was frontmost before the Composer opened.
+#[cfg(target_os = "macos")]
+fn deactivate_nsapp() {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        if !app.is_null() {
+            let _: () = msg_send![app, deactivate];
+        }
+    }
+}
+
 /// Open the Dock's right-click context menu at the given Dock-window
 /// coordinates. The menu shape mirrors the Tray (Open Composer, Open
 /// Inbox, Quit) via `dock::default_context_menu()` — same labels and
