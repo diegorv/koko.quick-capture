@@ -595,15 +595,19 @@
   .filterbar {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: 0.25rem;
     padding: 0.4rem 0.75rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .filterbar::-webkit-scrollbar {
+    display: none;
   }
 
   .filterbar .chip {
     appearance: none;
+    flex: 0 0 auto;
     border: 1px solid rgba(0, 0, 0, 0.12);
     background: transparent;
     color: inherit;
@@ -638,9 +642,10 @@
   }
 
   .filter-sep {
+    flex: 0 0 auto;
     width: 1px;
     height: 1rem;
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(0, 0, 0, 0.12);
     margin: 0 0.3rem;
   }
 
