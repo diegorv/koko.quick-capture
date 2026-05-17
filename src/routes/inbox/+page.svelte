@@ -13,7 +13,6 @@
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { Capture } from "$lib/captures/types";
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
@@ -50,7 +49,11 @@
 
   const defaultInvoke: InvokeFn = (cmd, args) => tauriInvoke(cmd, args);
 
-  const defaultHide: HideFn = () => getCurrentWindow().hide();
+  // hide_inbox (Rust command) hides the window AND reverts the macOS
+  // activation policy to Accessory. A plain getCurrentWindow().hide()
+  // would leave the system Dock icon stuck because Tauri does not
+  // fire CloseRequested for a programmatic hide.
+  const defaultHide: HideFn = () => tauriInvoke("hide_inbox");
 
   const {
     listFn = defaultList,

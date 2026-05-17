@@ -181,6 +181,24 @@ fn set_inbox_activation_policy(app: &tauri::AppHandle, inbox_visible: bool) {
 #[cfg(not(target_os = "macos"))]
 fn set_inbox_activation_policy(_app: &tauri::AppHandle, _inbox_visible: bool) {}
 
+/// Hide the Inbox window and revert the macOS activation policy to
+/// `.Accessory`. Mirrors the `CloseRequested` handler so the JS
+/// "Esc / Cmd+W" path produces the same end state as clicking the
+/// red traffic-light button — otherwise the JS-driven hide would
+/// leave the app in `.Regular` mode and the system Dock icon would
+/// linger until the next manual close.
+#[tauri::command]
+fn hide_inbox(app: tauri::AppHandle) -> Result<(), String> {
+    let app_handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(window) = app_handle.get_webview_window("inbox") {
+            let _ = window.hide();
+        }
+        set_inbox_activation_policy(&app_handle, false);
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// Tray menu items show their keyboard shortcut on the right side of
 /// the menu, matching the rest of the macOS app convention. For Open
 /// Composer / Open Inbox these mirror the global shortcuts registered
@@ -624,6 +642,7 @@ pub fn run() {
             commands::mark_read,
             commands::open_composer_window,
             commands::dismiss_composer,
+            hide_inbox,
             commands::open_dock_context_menu,
             commands::open_link,
             commands::reveal_capture
