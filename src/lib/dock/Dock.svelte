@@ -175,19 +175,27 @@
      Dock surface. Only rendered when `unread > 0`. */
   .badge {
     position: absolute;
-    top: 4px;
-    right: 4px;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 6px;
-    border-radius: 10px;
+    top: -2px;
+    right: -2px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 11px;
     background: #ef4444;
     color: white;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "SF Pro Text",
+      sans-serif;
     font-size: 11px;
-    font-weight: 600;
-    line-height: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 22px;
     text-align: center;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 0.95),
+      0 2px 6px rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
 </style>

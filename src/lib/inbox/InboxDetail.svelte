@@ -19,84 +19,153 @@
 
   const { capture, onOpenLink, onReveal }: Props = $props();
 
-  // Narrow the loosely-typed payload fields the Rust side hands us
-  // through serde_json. Each helper returns `null` rather than `""`
-  // so missing values do not render as empty strings.
   function str(value: unknown): string | null {
     return typeof value === "string" ? value : null;
+  }
+
+  function kindLabel(kind: Capture["kind"]): string {
+    return kind;
+  }
+
+  function kindGlyph(kind: Capture["kind"]): string {
+    switch (kind) {
+      case "Link":
+        return "🔗";
+      case "Clip":
+        return "📋";
+      case "Shot":
+        return "🖼";
+      case "File":
+        return "📄";
+      case "Note":
+        return "📝";
+    }
+  }
+
+  function formatTimestamp(iso: string): string {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (sameDay) {
+      return d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 </script>
 
 <div class="detail" data-testid="inbox-detail">
   {#if capture === null}
-    <p class="placeholder">Select a Capture</p>
-  {:else if capture.kind === "Link"}
-    {@const url = str(capture.payload.url) ?? ""}
-    {@const rawText = str(capture.payload.raw_text)}
-    {@const title = str(capture.payload.title)}
-    <section class="link">
-      <h2>Link</h2>
-      <p class="url">{url}</p>
-      {#if rawText !== null && rawText !== url}
-        <p class="raw">Raw: {rawText}</p>
-      {/if}
-      <p class="title">Title: {title ?? "(none)"}</p>
-      <button
-        type="button"
-        class="action"
-        onclick={() => onOpenLink(url)}
-      >
-        Open in Browser
-      </button>
-    </section>
-  {:else if capture.kind === "Clip"}
-    {@const text = str(capture.payload.text) ?? ""}
-    <section class="text">
-      <h2>Clip</h2>
-      <pre class="payload-text">{text}</pre>
-    </section>
-  {:else if capture.kind === "Note"}
-    {@const text = str(capture.payload.text) ?? ""}
-    <section class="text">
-      <h2>Note</h2>
-      <pre class="payload-text">{text}</pre>
-    </section>
-  {:else if capture.kind === "Shot"}
-    {@const sourcePath = str(capture.payload.source_path)}
-    {@const blobPath = str(capture.payload.blob_path)}
-    {@const displayPath = sourcePath ?? blobPath ?? ""}
-    {@const previewSrc = displayPath ? convertFileSrc(displayPath) : ""}
-    <section class="shot">
-      <h2>Shot</h2>
-      {#if previewSrc}
-        <img class="preview" src={previewSrc} alt="Shot preview" />
-      {/if}
-      <p class="path">{displayPath}</p>
-      <button
-        type="button"
-        class="action"
-        onclick={() => onReveal(capture.id)}
-      >
-        {sourcePath !== null ? "Reveal in Finder" : "Open Image"}
-      </button>
-    </section>
-  {:else if capture.kind === "File"}
-    {@const originalName = str(capture.payload.original_name)}
-    {@const mime = str(capture.payload.mime) ?? ""}
-    {@const sourcePath = str(capture.payload.source_path) ?? ""}
-    <section class="file">
-      <h2>File</h2>
-      <p class="name">{originalName ?? "(no name)"}</p>
-      <p class="mime">{mime}</p>
-      <p class="path">{sourcePath}</p>
-      <button
-        type="button"
-        class="action"
-        onclick={() => onReveal(capture.id)}
-      >
-        Reveal in Finder
-      </button>
-    </section>
+    <div class="placeholder">
+      <p class="placeholder-text">Select a Capture</p>
+    </div>
+  {:else}
+    <header class="header">
+      <div class="title-row">
+        <span class="glyph" aria-hidden="true">{kindGlyph(capture.kind)}</span>
+        <h2 class="kind">{kindLabel(capture.kind)}</h2>
+        {#if capture.starred}
+          <span class="star" title="Starred">★</span>
+        {/if}
+      </div>
+      <p class="timestamp">{formatTimestamp(capture.created_at)}</p>
+    </header>
+
+    {#if capture.kind === "Link"}
+      {@const url = str(capture.payload.url) ?? ""}
+      {@const rawText = str(capture.payload.raw_text)}
+      {@const title = str(capture.payload.title)}
+      <section class="body">
+        <p class="url">{url}</p>
+        <dl class="meta">
+          {#if title}
+            <dt>Title</dt>
+            <dd>{title}</dd>
+          {/if}
+          {#if rawText !== null && rawText !== url}
+            <dt>Raw</dt>
+            <dd class="mono">{rawText}</dd>
+          {/if}
+        </dl>
+      </section>
+      <footer class="actions">
+        <button
+          type="button"
+          class="action primary"
+          onclick={() => onOpenLink(url)}
+        >
+          Open in Browser
+        </button>
+      </footer>
+    {:else if capture.kind === "Clip" || capture.kind === "Note"}
+      {@const text = str(capture.payload.text) ?? ""}
+      <section class="body">
+        <pre class="payload-text">{text}</pre>
+      </section>
+    {:else if capture.kind === "Shot"}
+      {@const sourcePath = str(capture.payload.source_path)}
+      {@const blobPath = str(capture.payload.blob_path)}
+      {@const displayPath = sourcePath ?? blobPath ?? ""}
+      {@const previewSrc = displayPath ? convertFileSrc(displayPath) : ""}
+      {@const mime = str(capture.payload.mime)}
+      <section class="body">
+        {#if previewSrc}
+          <img class="preview" src={previewSrc} alt="Shot preview" />
+        {/if}
+        <dl class="meta">
+          {#if mime}
+            <dt>Type</dt>
+            <dd>{mime}</dd>
+          {/if}
+          <dt>Path</dt>
+          <dd class="mono">{displayPath}</dd>
+        </dl>
+      </section>
+      <footer class="actions">
+        <button
+          type="button"
+          class="action primary"
+          onclick={() => onReveal(capture.id)}
+        >
+          {sourcePath !== null ? "Reveal in Finder" : "Open Image"}
+        </button>
+      </footer>
+    {:else if capture.kind === "File"}
+      {@const originalName = str(capture.payload.original_name)}
+      {@const mime = str(capture.payload.mime) ?? ""}
+      {@const sourcePath = str(capture.payload.source_path) ?? ""}
+      <section class="body">
+        <p class="filename">{originalName ?? "(no name)"}</p>
+        <dl class="meta">
+          {#if mime}
+            <dt>Type</dt>
+            <dd>{mime}</dd>
+          {/if}
+          <dt>Path</dt>
+          <dd class="mono">{sourcePath}</dd>
+        </dl>
+      </section>
+      <footer class="actions">
+        <button
+          type="button"
+          class="action primary"
+          onclick={() => onReveal(capture.id)}
+        >
+          Reveal in Finder
+        </button>
+      </footer>
+    {/if}
   {/if}
 </div>
 
@@ -104,101 +173,189 @@
   .detail {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-start;
-    padding: 1rem 1.25rem;
     height: 100%;
     box-sizing: border-box;
     overflow-y: auto;
   }
 
   .placeholder {
-    opacity: 0.5;
     margin: auto;
-    align-self: center;
+    text-align: center;
+    opacity: 0.45;
   }
 
-  h2 {
-    margin: 0 0 0.75rem;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.6;
+  .placeholder-text {
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  .header {
+    padding: 1.25rem 1.5rem 0.75rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .glyph {
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+
+  .kind {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .star {
+    color: #f59e0b;
+    font-size: 1rem;
+  }
+
+  .timestamp {
+    margin: 0.35rem 0 0;
+    font-size: 0.78rem;
+    opacity: 0.55;
+  }
+
+  .body {
+    padding: 1rem 1.5rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
   }
 
   .url {
+    margin: 0;
+    font-size: 0.95rem;
     word-break: break-all;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9rem;
-    margin: 0 0 0.5rem;
+    color: #2563eb;
   }
 
-  .raw,
-  .title,
-  .mime,
-  .name,
-  .path {
-    margin: 0 0 0.5rem;
+  .filename {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  .meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1rem;
+    margin: 0;
     font-size: 0.85rem;
-    opacity: 0.75;
+  }
+
+  .meta dt {
+    opacity: 0.5;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+    padding-top: 0.15rem;
+  }
+
+  .meta dd {
+    margin: 0;
     word-break: break-all;
   }
 
-  .path {
+  .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+
+  .preview {
+    max-width: 100%;
+    max-height: 55vh;
+    object-fit: contain;
+    align-self: center;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.02);
   }
 
   .payload-text {
     flex: 1;
     overflow: auto;
     margin: 0;
-    padding: 0.75rem;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.03);
+    padding: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.02);
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85rem;
+    font-family:
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      monospace;
+    font-size: 0.88rem;
+    line-height: 1.5;
   }
 
-  .preview {
-    max-width: 100%;
-    max-height: 50vh;
-    object-fit: contain;
-    margin-bottom: 0.75rem;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 4px;
+  .actions {
+    padding: 0.75rem 1.5rem 1.25rem;
+    display: flex;
+    gap: 0.5rem;
   }
 
   .action {
-    align-self: flex-start;
-    padding: 0.4rem 0.9rem;
+    padding: 0.5rem 1rem;
     font-size: 0.9rem;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.04);
+    font-weight: 500;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.03);
     cursor: pointer;
+    color: inherit;
+    font-family: inherit;
   }
 
   .action:hover {
-    background: rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.07);
+  }
+
+  .action.primary {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: white;
+  }
+
+  .action.primary:hover {
+    background: #4338ca;
+    border-color: #4338ca;
   }
 
   @media (prefers-color-scheme: dark) {
-    .payload-text {
-      border-color: rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.04);
+    .header {
+      border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+    .url {
+      color: #93c5fd;
     }
     .preview {
-      border-color: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .payload-text {
+      border-color: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.03);
     }
     .action {
-      border-color: rgba(255, 255, 255, 0.2);
-      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.05);
     }
     .action:hover {
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.1);
     }
   }
 </style>

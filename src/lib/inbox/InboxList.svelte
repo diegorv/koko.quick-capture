@@ -231,64 +231,77 @@
   .row {
     display: grid;
     grid-template-columns: 1.5rem 1fr auto auto auto;
-    gap: 0.5rem;
+    gap: 0.6rem;
     align-items: center;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     cursor: pointer;
     outline: none;
+    transition: background 80ms ease;
+  }
+
+  .row:hover {
+    background: rgba(0, 0, 0, 0.03);
   }
 
   .row.selected {
-    background: rgba(0, 0, 0, 0.06);
+    background: rgba(79, 70, 229, 0.1);
   }
 
   .row:focus-visible {
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(79, 70, 229, 0.15);
   }
 
   .kind {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85rem;
-    opacity: 0.7;
+    font-size: 1.05rem;
+    line-height: 1;
+    text-align: center;
   }
 
   .payload {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.9rem;
   }
 
   .time {
-    font-size: 0.8rem;
-    opacity: 0.6;
+    font-size: 0.75rem;
+    opacity: 0.55;
     white-space: nowrap;
+    margin-right: 0.25rem;
   }
 
   .icon {
     background: transparent;
     border: none;
-    padding: 0.1rem 0.35rem;
+    padding: 0.2rem 0.4rem;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.95rem;
     color: inherit;
+    opacity: 0.55;
     line-height: 1;
+    border-radius: 4px;
+    transition: opacity 80ms ease, background 80ms ease;
   }
 
   .icon:hover {
+    opacity: 1;
     background: rgba(0, 0, 0, 0.08);
-    border-radius: 3px;
   }
 
   @media (prefers-color-scheme: dark) {
     .row {
-      border-bottom-color: rgba(255, 255, 255, 0.08);
+      border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .row:hover {
+      background: rgba(255, 255, 255, 0.04);
     }
     .row.selected {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(99, 102, 241, 0.18);
     }
     .row:focus-visible {
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(99, 102, 241, 0.25);
     }
     .icon:hover {
       background: rgba(255, 255, 255, 0.1);

@@ -214,17 +214,29 @@
 
 <div class="inbox" data-testid="inbox">
   <section class="list-pane" onscroll={onScroll}>
-    <InboxList
-      {captures}
-      {selectedId}
-      {onSelect}
-      {onStarToggle}
-      {onDelete}
-      {onOpen}
-      {onClose}
-    />
-    {#if loading}
-      <div class="spinner" aria-live="polite">Loading…</div>
+    {#if !loading && captures.length === 0}
+      <div class="empty">
+        <div class="empty-glyph" aria-hidden="true">📥</div>
+        <h2 class="empty-title">No captures yet</h2>
+        <p class="empty-hint">
+          Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
+          or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
+        </p>
+        <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
+      </div>
+    {:else}
+      <InboxList
+        {captures}
+        {selectedId}
+        {onSelect}
+        {onStarToggle}
+        {onDelete}
+        {onOpen}
+        {onClose}
+      />
+      {#if loading}
+        <div class="spinner" aria-live="polite">Loading…</div>
+      {/if}
     {/if}
   </section>
   <section class="detail-pane">
@@ -260,6 +272,47 @@
     opacity: 0.6;
   }
 
+  .empty {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    gap: 0.6rem;
+  }
+
+  .empty-glyph {
+    font-size: 3rem;
+    opacity: 0.6;
+  }
+
+  .empty-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .empty-hint {
+    margin: 0;
+    font-size: 0.82rem;
+    opacity: 0.7;
+    line-height: 1.5;
+    max-width: 28ch;
+  }
+
+  .empty-hint kbd {
+    display: inline-block;
+    padding: 0.05em 0.4em;
+    margin: 0 1px;
+    font-family: inherit;
+    font-size: 0.78em;
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+  }
+
   @media (prefers-color-scheme: dark) {
     .inbox {
       color: #f6f6f6;
@@ -267,6 +320,10 @@
     }
     .list-pane {
       border-right-color: rgba(255, 255, 255, 0.08);
+    }
+    .empty-hint kbd {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.12);
     }
   }
 </style>
