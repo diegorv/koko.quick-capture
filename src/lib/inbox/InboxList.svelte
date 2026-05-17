@@ -194,6 +194,7 @@
       <span class="time">{relativeTime(capture.created_at)}</span>
       <button
         class="icon star"
+        class:active={capture.starred}
         type="button"
         aria-label={capture.starred ? "Unstar capture" : "Star capture"}
         aria-pressed={capture.starred}
@@ -281,10 +282,23 @@
     cursor: pointer;
     font-size: 0.95rem;
     color: inherit;
-    opacity: 0.55;
+    opacity: 0;
     line-height: 1;
     border-radius: 4px;
     transition: opacity 80ms ease, background 80ms ease;
+  }
+
+  /* Reveal action icons when the row is hovered or selected. Starred
+     rows keep the star visible at all times so the affordance does
+     not disappear on idle. */
+  .row:hover .icon,
+  .row.selected .icon,
+  .icon.star.active {
+    opacity: 0.55;
+  }
+
+  .icon.star.active {
+    color: #f59e0b;
   }
 
   .icon:hover {
