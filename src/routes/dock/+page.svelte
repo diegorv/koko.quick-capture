@@ -16,6 +16,15 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Dock from "$lib/dock/Dock.svelte";
+  import {
+    CAPTURES_CHANGED,
+    DOCK_DRAG_ENTER,
+    DOCK_DRAG_LEAVE,
+    DOCK_FULLSCREEN_ENTERED,
+    DOCK_FULLSCREEN_EXITED,
+    DOCK_PULSE,
+    DOCK_UNREAD_CHANGED,
+  } from "$lib/events";
   import "./dock.css";
 
   // Visual hover state for Finder drags. Driven by Rust events
@@ -65,27 +74,27 @@
     })();
 
     const unlisteners: Promise<UnlistenFn>[] = [
-      listen("dock:fullscreen:entered", async () => {
+      listen(DOCK_FULLSCREEN_ENTERED, async () => {
         try {
           await win.hide();
         } catch (err) {
           console.error("dock hide failed", err);
         }
       }),
-      listen("dock:fullscreen:exited", async () => {
+      listen(DOCK_FULLSCREEN_EXITED, async () => {
         try {
           await win.show();
         } catch (err) {
           console.error("dock show failed", err);
         }
       }),
-      listen("dock:drag:enter", () => {
+      listen(DOCK_DRAG_ENTER, () => {
         dragActive = true;
       }),
-      listen("dock:drag:leave", () => {
+      listen(DOCK_DRAG_LEAVE, () => {
         dragActive = false;
       }),
-      listen<unknown>("captures:changed", (evt) => {
+      listen<unknown>(CAPTURES_CHANGED, (evt) => {
         // `captures.changed` carries a full `Capture` on save (slice 02
         // contract) and a thin `MutationNotice { id, kind }` on star /
         // soft-delete (slice 03). Only saves should bump the unread
@@ -96,10 +105,10 @@
           unread += 1;
         }
       }),
-      listen("dock:pulse", () => {
+      listen(DOCK_PULSE, () => {
         pulseKey += 1;
       }),
-      listen<number>("dock:unread:changed", (evt) => {
+      listen<number>(DOCK_UNREAD_CHANGED, (evt) => {
         unread = Number(evt.payload) || 0;
       }),
     ];

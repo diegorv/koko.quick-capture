@@ -14,6 +14,7 @@
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import type { Capture } from "$lib/captures/types";
+  import { CAPTURES_CHANGED } from "$lib/events";
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
 
@@ -269,7 +270,7 @@
       now = Date.now();
     }, 60_000);
     try {
-      unlisten = await listenFn("captures:changed", onChanged);
+      unlisten = await listenFn(CAPTURES_CHANGED, onChanged);
     } catch (err) {
       console.error("listen captures:changed failed", err);
     }

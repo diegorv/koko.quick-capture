@@ -20,34 +20,12 @@ use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
 use crate::store::{Capture, CaptureInput, CaptureKind, Store};
 
-/// Event emitted on every successful Capture mutation (save, star,
-/// soft-delete). Inbox / Dock JS subscribe to this to keep their list
-/// in sync.
-///
-/// Payload shape (option A from the v1.0 issue 03):
-/// - On `save`: the full new `Capture` (slice 02 contract, unchanged).
-/// - On `star_capture` / `delete_capture`: a thin `MutationNotice`
-///   with `{ id, kind: "starred" | "deleted" }` so subscribers can
-///   decide whether to refetch (mutation) or prepend (new row).
-pub const CAPTURES_CHANGED_EVENT: &str = "captures:changed";
+use crate::events::{
+    CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT,
+    DOCK_UNREAD_CHANGED as DOCK_UNREAD_CHANGED_EVENT, OPEN_COMPOSER,
+};
 
-/// Event emitted alongside `captures.changed` on every successful save
-/// (Note, clipboard, dropped files). The Dock subscribes to this to
-/// trigger its one-shot pulse animation. Kept distinct from
-/// `captures.changed` so the badge increment (driven by `captures.changed`)
-/// and the pulse animation (driven by this event) can be reasoned about
-/// independently — e.g. star / soft-delete must NOT pulse but DO emit
-/// `captures.changed`.
-pub const DOCK_PULSE_EVENT: &str = "dock:pulse";
-
-/// Event emitted whenever the unread count changes server-side (a
-/// `mark_read` flip, etc.). The payload is the new u64 unread count;
-/// the Dock JS overwrites its local badge state with the payload so a
-/// missed delta or a race never leaves the badge out of sync with the
-/// store.
-pub const DOCK_UNREAD_CHANGED_EVENT: &str = "dock:unread:changed";
-
-/// Thin payload emitted with `captures.changed` on star / soft-delete.
+/// Thin payload emitted with `captures:changed` on star / soft-delete.
 /// Slice 02 emits a full `Capture` on save; slice 03 emits this shape
 /// on mutations so the Inbox can tell "refetch page" from "prepend".
 #[derive(Debug, Clone, serde::Serialize)]
@@ -287,11 +265,6 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Event emitted on every Composer-summon so the Composer route can
-/// bump its `focusKey` and re-focus the textarea even though the
-/// component is mounted once for the life of the app.
-pub const OPEN_COMPOSER_EVENT: &str = "open_composer";
-
 /// One place that knows how to bring the Composer to screen. Used by
 /// the global shortcut, the tray menu, the Dock click invoke, and any
 /// future entry point. Records the prior frontmost macOS app FIRST
@@ -305,7 +278,7 @@ pub fn show_composer(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
-        let _ = handle.emit(OPEN_COMPOSER_EVENT, ());
+        let _ = handle.emit(OPEN_COMPOSER, ());
     });
 }
 

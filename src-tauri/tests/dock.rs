@@ -12,8 +12,8 @@
 
 use quick_capture_lib::dock::{
     default_context_menu, emit_transition, EventSink, FullscreenTransition,
-    EVENT_FULLSCREEN_ENTERED, EVENT_FULLSCREEN_EXITED,
 };
+use quick_capture_lib::events::{DOCK_FULLSCREEN_ENTERED, DOCK_FULLSCREEN_EXITED};
 use quick_capture_lib::tray::{default_menu, TrayMenuItem};
 use std::sync::Mutex;
 
@@ -78,14 +78,14 @@ impl EventSink for RecordingSink {
 fn emit_transition_fires_entered_event_for_enter() {
     let sink = RecordingSink::new();
     emit_transition(&sink, FullscreenTransition::Entered);
-    assert_eq!(sink.names(), vec![EVENT_FULLSCREEN_ENTERED]);
+    assert_eq!(sink.names(), vec![DOCK_FULLSCREEN_ENTERED]);
 }
 
 #[test]
 fn emit_transition_fires_exited_event_for_exit() {
     let sink = RecordingSink::new();
     emit_transition(&sink, FullscreenTransition::Exited);
-    assert_eq!(sink.names(), vec![EVENT_FULLSCREEN_EXITED]);
+    assert_eq!(sink.names(), vec![DOCK_FULLSCREEN_EXITED]);
 }
 
 #[test]
@@ -97,9 +97,9 @@ fn emit_transition_preserves_event_order_across_multiple_transitions() {
     assert_eq!(
         sink.names(),
         vec![
-            EVENT_FULLSCREEN_ENTERED.to_string(),
-            EVENT_FULLSCREEN_EXITED.to_string(),
-            EVENT_FULLSCREEN_ENTERED.to_string(),
+            DOCK_FULLSCREEN_ENTERED.to_string(),
+            DOCK_FULLSCREEN_EXITED.to_string(),
+            DOCK_FULLSCREEN_ENTERED.to_string(),
         ]
     );
 }

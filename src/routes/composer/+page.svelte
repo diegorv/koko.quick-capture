@@ -6,6 +6,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
   import Composer from "$lib/composer/Composer.svelte";
+  import { OPEN_COMPOSER } from "$lib/events";
 
   // Bumped on every `open_composer` event from Rust so the Composer
   // component re-focuses its textarea and clears stale text. The
@@ -37,7 +38,7 @@
 
   onMount(async () => {
     try {
-      unlisten = await listen("open_composer", () => {
+      unlisten = await listen(OPEN_COMPOSER, () => {
         focusKey += 1;
       });
     } catch (err) {

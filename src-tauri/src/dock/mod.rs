@@ -15,13 +15,8 @@
 //! Dock-specific so the Tauri menu builder can tell a Dock-popup click
 //! apart from a Tray click.
 
+use crate::events::{DOCK_FULLSCREEN_ENTERED, DOCK_FULLSCREEN_EXITED};
 use crate::tray::{default_menu, TrayMenuBinding};
-
-/// Event name emitted when the frontmost app enters fullscreen.
-pub const EVENT_FULLSCREEN_ENTERED: &str = "dock:fullscreen:entered";
-
-/// Event name emitted when the frontmost app exits fullscreen.
-pub const EVENT_FULLSCREEN_EXITED: &str = "dock:fullscreen:exited";
 
 /// Right-click menu binding for the Dock. Same intent as the Tray, but
 /// with Dock-scoped `menu_id`s so the menu builder can route the popup
@@ -65,8 +60,8 @@ pub enum FullscreenTransition {
 impl FullscreenTransition {
     pub fn event_name(self) -> &'static str {
         match self {
-            FullscreenTransition::Entered => EVENT_FULLSCREEN_ENTERED,
-            FullscreenTransition::Exited => EVENT_FULLSCREEN_EXITED,
+            FullscreenTransition::Entered => DOCK_FULLSCREEN_ENTERED,
+            FullscreenTransition::Exited => DOCK_FULLSCREEN_EXITED,
         }
     }
 }

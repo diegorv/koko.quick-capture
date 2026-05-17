@@ -2,6 +2,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod dock;
 pub mod drag_drop;
+pub mod events;
 pub mod kind_detect;
 pub mod shell;
 pub mod shortcuts;
@@ -21,23 +22,14 @@ use tauri_plugin_global_shortcut::{
 };
 
 use crate::clipboard::SystemClipboard;
-use crate::commands::{
-    capture_clipboard_now_with, save_dropped_files_with_store, CAPTURES_CHANGED_EVENT,
-    DOCK_PULSE_EVENT,
-};
+use crate::commands::{capture_clipboard_now_with, save_dropped_files_with_store};
 use crate::dock::{default_context_menu, FullscreenObserver};
+use crate::events::{
+    CAPTURES_CHANGED, DOCK_DRAG_ENTER, DOCK_DRAG_LEAVE, DOCK_PULSE, TRAY_OPEN_INBOX,
+};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
 use crate::store::Store;
 use crate::tray::{default_menu, TrayMenuItem};
-
-/// Event emitted by the Dock window's drag-drop handler when a drag
-/// gesture enters the Dock surface. The Dock JS subscribes to it to
-/// toggle the `drag-active` visual class.
-pub const DOCK_DRAG_ENTER_EVENT: &str = "dock:drag:enter";
-
-/// Event emitted by the Dock window's drag-drop handler when the drag
-/// gesture leaves the Dock (cancelled, drop fired, or cursor moved out).
-pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock:drag:leave";
 
 /// Lucide `brain-circuit` SVG source, recoloured to pure black for
 /// macOS template-mode treatment. macOS re-tints the icon per menubar
@@ -276,8 +268,8 @@ pub fn run() {
                         // so the Inbox can prepend each new Capture live
                         // and the Dock can pulse per row.
                         for capture in &captures {
-                            let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
-                            let _ = app.emit(DOCK_PULSE_EVENT, ());
+                            let _ = app.emit(CAPTURES_CHANGED, capture);
+                            let _ = app.emit(DOCK_PULSE, ());
                         }
                     }
                     Err(e) => {
@@ -376,7 +368,7 @@ pub fn run() {
             // on the first row interaction so a glance-and-dismiss
             // open does not silently clear pending captures.
             let inbox_app = app.handle().clone();
-            app.listen("tray:open_inbox", move |_evt| {
+            app.listen(TRAY_OPEN_INBOX, move |_evt| {
                 commands::show_inbox(&inbox_app);
             });
 
@@ -515,10 +507,10 @@ pub fn run() {
                 };
                 match drag {
                     DragDropEvent::Enter { .. } => {
-                        let _ = drag_drop_app.emit(DOCK_DRAG_ENTER_EVENT, ());
+                        let _ = drag_drop_app.emit(DOCK_DRAG_ENTER, ());
                     }
                     DragDropEvent::Leave => {
-                        let _ = drag_drop_app.emit(DOCK_DRAG_LEAVE_EVENT, ());
+                        let _ = drag_drop_app.emit(DOCK_DRAG_LEAVE, ());
                     }
                     DragDropEvent::Drop { paths, .. } => {
                         let app_handle = drag_drop_app.clone();
@@ -529,8 +521,8 @@ pub fn run() {
                                 Ok(captures) => {
                                     for capture in &captures {
                                         let _ =
-                                            app_handle.emit(CAPTURES_CHANGED_EVENT, capture);
-                                        let _ = app_handle.emit(DOCK_PULSE_EVENT, ());
+                                            app_handle.emit(CAPTURES_CHANGED, capture);
+                                        let _ = app_handle.emit(DOCK_PULSE, ());
                                     }
                                 }
                                 Err(e) => {
@@ -540,7 +532,7 @@ pub fn run() {
                             // Reset the Dock's visual hover state once
                             // the drop has been processed; Tauri does
                             // not synthesize a `Leave` after `Drop`.
-                            let _ = app_handle.emit(DOCK_DRAG_LEAVE_EVENT, ());
+                            let _ = app_handle.emit(DOCK_DRAG_LEAVE, ());
                         });
                     }
                     DragDropEvent::Over { .. } => {}
