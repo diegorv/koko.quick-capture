@@ -10,14 +10,14 @@ use std::str::FromStr;
 use tauri::{
     menu::MenuBuilder,
     tray::TrayIconBuilder,
-    Emitter, Manager,
+    Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{
     Builder as ShortcutBuilder, Shortcut, ShortcutState,
 };
 
 use crate::clipboard::SystemClipboard;
-use crate::commands::capture_clipboard_now_with;
+use crate::commands::{capture_clipboard_now_with, CAPTURES_CHANGED_EVENT};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
 use crate::store::Store;
 use crate::tray::{default_menu, TrayMenuItem};
@@ -31,13 +31,8 @@ pub fn run() {
     // against the one we registered. We cannot key on string form: the
     // `HotKey` Display impl normalizes (`control+alt+super+space`) but
     // our registry uses the user-facing `Ctrl+Opt+Cmd+Space` spelling.
-    //
-    // `OpenInbox` lives in the registry so slice 02 doesn't churn the
-    // tests, but its OS binding is wired in slice 02 (the Inbox window
-    // doesn't exist yet). Filter it out here.
     let parsed: Vec<(Shortcut, ShortcutBinding)> = registry
         .iter()
-        .filter(|b| b.id != ShortcutId::OpenInbox)
         .map(|b| {
             let s = Shortcut::from_str(b.accelerator)
                 .expect("invalid accelerator string in default_registry");
@@ -75,6 +70,11 @@ pub fn run() {
                         // Emit the full batch so future UI surfaces can
                         // count N rows (e.g. for a multi-file copy).
                         let _ = app.emit(binding.event, &captures);
+                        // Emit one captures.changed per row so the Inbox
+                        // can prepend each new Capture live.
+                        for capture in &captures {
+                            let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+                        }
                     }
                     Err(e) => {
                         eprintln!("capture_clipboard_now failed: {e}");
@@ -82,10 +82,17 @@ pub fn run() {
                 }
             }
             ShortcutId::OpenInbox => {
-                // Slice 02 owns this. The binding is filtered out of
-                // OS-level registration above, so this arm is never
-                // reached in v1.0 slice 01; it exists to keep the
-                // match exhaustive.
+                // Mirror the OpenComposer path: show + focus must run
+                // on the main thread on macOS to actually grab focus.
+                let app_handle = app.clone();
+                let event = binding.event;
+                let _ = app.run_on_main_thread(move || {
+                    if let Some(window) = app_handle.get_webview_window("inbox") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                    let _ = app_handle.emit(event, ());
+                });
             }
         }
     });
@@ -101,6 +108,34 @@ pub fn run() {
             let store = Store::open_default()
                 .expect("failed to open capture store at the default path");
             app.manage(store);
+
+            // Inbox window: separate Tauri window pointed at `/inbox`,
+            // hidden by default. Created at startup so the shortcut /
+            // tray handlers only need to show + focus it.
+            WebviewWindowBuilder::new(
+                app,
+                "inbox",
+                WebviewUrl::App("/inbox".into()),
+            )
+            .visible(false)
+            .title("quick-capture inbox")
+            .inner_size(900.0, 600.0)
+            .center()
+            .build()?;
+
+            // Tray "Open Inbox" emits `tray.open_inbox` (see
+            // `tray::default_menu`). Show + focus the Inbox window on
+            // the main thread, mirroring the shortcut path.
+            let inbox_app = app.handle().clone();
+            app.listen("tray.open_inbox", move |_evt| {
+                let app_handle = inbox_app.clone();
+                let _ = inbox_app.run_on_main_thread(move || {
+                    if let Some(window) = app_handle.get_webview_window("inbox") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                });
+            });
 
             // Tray menu: build from the testable registry so the
             // visible order and event names match `default_menu()`.
@@ -140,8 +175,9 @@ pub fn run() {
                             });
                         }
                         TrayMenuItem::OpenInbox => {
-                            // Inbox window arrives in slice 02; for
-                            // now just announce intent on the bus.
+                            // The Inbox window subscribes to
+                            // `tray.open_inbox` via `app.listen` in
+                            // `setup`; emitting on the bus is enough.
                             let _ = app.emit(binding.event, ());
                         }
                         TrayMenuItem::Quit => {
@@ -155,7 +191,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::save_note,
-            commands::capture_clipboard_now
+            commands::capture_clipboard_now,
+            commands::list_captures
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

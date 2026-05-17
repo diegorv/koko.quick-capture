@@ -181,6 +181,90 @@ fn save_file_records_source_path_and_original_name() {
 }
 
 #[test]
+fn list_before_pages_through_cursor_in_descending_order() {
+    let (_dir, store) = temp_store();
+
+    // Seed 60 Notes. The ULID crate (v1) does not guarantee monotonic
+    // ids within the same millisecond, so we sleep 2ms between saves
+    // to force strictly increasing timestamps and a deterministic
+    // descending order at read time.
+    let mut ids = Vec::with_capacity(60);
+    for i in 0..60 {
+        let saved = store
+            .save(CaptureInput::Note {
+                text: format!("note {i}"),
+            })
+            .expect("save note");
+        ids.push(saved.id);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    ids.reverse(); // now ids[0] is the newest
+
+    // First page: cursor=None, limit=50 -> 50 newest in descending order.
+    let first = store.list_before(None, 50).expect("first page");
+    assert_eq!(first.len(), 50);
+    for (i, row) in first.iter().enumerate() {
+        assert_eq!(row.id, ids[i], "first page must be newest-first");
+    }
+
+    // Default ordering matches `list`.
+    let default_list = store.list(50).expect("list");
+    let first_ids: Vec<&String> = first.iter().map(|c| &c.id).collect();
+    let default_ids: Vec<&String> = default_list.iter().map(|c| &c.id).collect();
+    assert_eq!(first_ids, default_ids, "list must mirror list_before(None)");
+
+    // Second page: cursor = last id of first page, limit=50 -> remaining 10.
+    let last_first = Ulid::from_str(&first.last().expect("non-empty first page").id)
+        .expect("parse ulid");
+    let second = store
+        .list_before(Some(last_first), 50)
+        .expect("second page");
+    assert_eq!(second.len(), 10, "second page must hold the remaining 10");
+    for (i, row) in second.iter().enumerate() {
+        assert_eq!(row.id, ids[50 + i], "second page continues descending");
+    }
+
+    // Past the end: cursor = last id of second page returns an empty page.
+    let last_second = Ulid::from_str(&second.last().expect("non-empty second page").id)
+        .expect("parse ulid");
+    let third = store
+        .list_before(Some(last_second), 50)
+        .expect("third page");
+    assert!(third.is_empty(), "no more rows after the second page");
+}
+
+#[test]
+fn list_before_omits_soft_deleted_rows() {
+    let (_dir, store) = temp_store();
+
+    // Sleep 2ms between saves so ids are strictly increasing despite
+    // ULID v1 not guaranteeing intra-millisecond monotonicity.
+    let a = store
+        .save(CaptureInput::Note { text: "a".into() })
+        .expect("save a");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let b = store
+        .save(CaptureInput::Note { text: "b".into() })
+        .expect("save b");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let c = store
+        .save(CaptureInput::Note { text: "c".into() })
+        .expect("save c");
+
+    // Soft-delete the middle row.
+    let b_id = Ulid::from_str(&b.id).expect("parse ulid");
+    store.soft_delete(&b_id).expect("soft delete");
+
+    let listed = store.list_before(None, 50).expect("list");
+    let ids: Vec<&str> = listed.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![c.id.as_str(), a.id.as_str()],
+        "tombstones must not surface in list_before"
+    );
+}
+
+#[test]
 fn soft_delete_hides_from_list_but_keeps_row() {
     let (_dir, store) = temp_store();
     let saved = store

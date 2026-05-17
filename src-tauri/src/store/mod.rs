@@ -290,18 +290,48 @@ impl Store {
 
     /// Return up to `limit` non-deleted captures, newest first.
     pub fn list(&self, limit: u32) -> Result<Vec<Capture>, StoreError> {
+        self.list_before(None, limit)
+    }
+
+    /// Cursor-paginated list. Returns up to `limit` non-deleted captures
+    /// strictly older than `cursor` (when present), ordered newest first.
+    /// `cursor = None` returns the first page. ULIDs are time-sortable, so
+    /// `WHERE id < cursor` is equivalent to "older than".
+    pub fn list_before(
+        &self,
+        cursor: Option<Ulid>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
-             FROM captures
-             WHERE deleted_at IS NULL
-             ORDER BY id DESC
-             LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit], row_to_capture)?;
         let mut out = Vec::new();
-        for row in rows {
-            out.push(row??);
+        match cursor {
+            Some(c) => {
+                let cursor_str = c.to_string();
+                let mut stmt = conn.prepare(
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
+                     FROM captures
+                     WHERE deleted_at IS NULL AND id < ?1
+                     ORDER BY id DESC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![&cursor_str, limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
+                     FROM captures
+                     WHERE deleted_at IS NULL
+                     ORDER BY id DESC
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
         }
         Ok(out)
     }

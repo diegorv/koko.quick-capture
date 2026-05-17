@@ -2,8 +2,8 @@
 //! `save_note_with_store` directly (the function the command delegates
 //! to) so we do not need to spin up a Tauri runtime.
 
-use quick_capture_lib::commands::save_note_with_store;
-use quick_capture_lib::store::{CaptureKind, Store};
+use quick_capture_lib::commands::{list_captures_with_store, save_note_with_store};
+use quick_capture_lib::store::{CaptureInput, CaptureKind, Store};
 use tempfile::TempDir;
 
 fn temp_store() -> (TempDir, Store) {
@@ -27,6 +27,48 @@ fn save_note_persists_a_row() {
     let listed = store.list(10).expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, saved.id);
+}
+
+#[test]
+fn list_captures_pages_through_cursor() {
+    let (_dir, store) = temp_store();
+
+    // Seed 3 rows with 2ms gaps so ULID timestamps strictly increase
+    // (the v1 ulid crate does not guarantee intra-millisecond
+    // monotonicity, so equal-timestamp ids would sort by random bits).
+    let a = store
+        .save(CaptureInput::Note { text: "a".into() })
+        .expect("save a");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let b = store
+        .save(CaptureInput::Note { text: "b".into() })
+        .expect("save b");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let c = store
+        .save(CaptureInput::Note { text: "c".into() })
+        .expect("save c");
+
+    // First page (cursor=None): newest first.
+    let first = list_captures_with_store(&store, None, 2).expect("first page");
+    assert_eq!(first.len(), 2);
+    assert_eq!(first[0].id, c.id);
+    assert_eq!(first[1].id, b.id);
+
+    // Second page (cursor=b.id) returns the remaining 1.
+    let second = list_captures_with_store(&store, Some(&b.id), 2).expect("second page");
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].id, a.id);
+}
+
+#[test]
+fn list_captures_rejects_invalid_cursor_string() {
+    let (_dir, store) = temp_store();
+    let err = list_captures_with_store(&store, Some("not-a-ulid"), 10)
+        .expect_err("invalid cursor must error");
+    assert!(
+        err.to_lowercase().contains("cursor"),
+        "expected error to mention cursor, got: {err}"
+    );
 }
 
 #[test]
