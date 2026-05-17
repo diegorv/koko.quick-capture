@@ -2,9 +2,13 @@
 //! `save_note_with_store` directly (the function the command delegates
 //! to) so we do not need to spin up a Tauri runtime.
 
-use quick_capture_lib::commands::{list_captures_with_store, save_note_with_store};
+use quick_capture_lib::commands::{
+    delete_capture_with_store, list_captures_with_store, save_note_with_store,
+    star_capture_with_store,
+};
 use quick_capture_lib::store::{CaptureInput, CaptureKind, Store};
 use tempfile::TempDir;
+use ulid::Ulid;
 
 fn temp_store() -> (TempDir, Store) {
     let dir = tempfile::tempdir().expect("create tempdir");
@@ -68,6 +72,73 @@ fn list_captures_rejects_invalid_cursor_string() {
     assert!(
         err.to_lowercase().contains("cursor"),
         "expected error to mention cursor, got: {err}"
+    );
+}
+
+#[test]
+fn star_capture_toggles_flag() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "to star").expect("save");
+
+    star_capture_with_store(&store, &saved.id, true).expect("star");
+    let after_star = store.list(10).expect("list");
+    assert_eq!(after_star.len(), 1);
+    assert!(after_star[0].starred, "expected starred=true after star");
+
+    star_capture_with_store(&store, &saved.id, false).expect("unstar");
+    let after_unstar = store.list(10).expect("list");
+    assert_eq!(after_unstar.len(), 1);
+    assert!(
+        !after_unstar[0].starred,
+        "expected starred=false after unstar"
+    );
+}
+
+#[test]
+fn star_capture_rejects_invalid_ulid() {
+    let (_dir, store) = temp_store();
+    let err = star_capture_with_store(&store, "not-a-ulid", true)
+        .expect_err("invalid id must error");
+    assert!(
+        err.to_lowercase().contains("invalid id"),
+        "expected error to mention invalid id, got: {err}"
+    );
+}
+
+#[test]
+fn delete_capture_hides_from_list() {
+    let (_dir, store) = temp_store();
+    let keep = save_note_with_store(&store, "keep me").expect("save keep");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let drop = save_note_with_store(&store, "drop me").expect("save drop");
+
+    delete_capture_with_store(&store, &drop.id).expect("delete");
+
+    // Soft-deleted row no longer surfaces in list_captures.
+    let listed = list_captures_with_store(&store, None, 10).expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, keep.id);
+
+    // But the tombstone is still in the table.
+    let drop_id = Ulid::from_string(&drop.id).expect("parse id");
+    let row = store
+        .find_with_deleted(&drop_id)
+        .expect("find_with_deleted")
+        .expect("tombstone row exists");
+    assert!(
+        row.deleted_at.is_some(),
+        "expected deleted_at to be stamped on the tombstone"
+    );
+}
+
+#[test]
+fn delete_capture_rejects_invalid_ulid() {
+    let (_dir, store) = temp_store();
+    let err = delete_capture_with_store(&store, "not-a-ulid")
+        .expect_err("invalid id must error");
+    assert!(
+        err.to_lowercase().contains("invalid id"),
+        "expected error to mention invalid id, got: {err}"
     );
 }
 

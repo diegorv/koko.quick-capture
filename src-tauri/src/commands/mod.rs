@@ -17,9 +17,25 @@ use crate::dock::default_context_menu;
 use crate::kind_detect::decide;
 use crate::store::{Capture, CaptureInput, Store};
 
-/// Event emitted on every successful Capture save. Inbox / Dock JS
-/// subscribe to this to render new rows live.
+/// Event emitted on every successful Capture mutation (save, star,
+/// soft-delete). Inbox / Dock JS subscribe to this to keep their list
+/// in sync.
+///
+/// Payload shape (option A from the v1.0 issue 03):
+/// - On `save`: the full new `Capture` (slice 02 contract, unchanged).
+/// - On `star_capture` / `delete_capture`: a thin `MutationNotice`
+///   with `{ id, kind: "starred" | "deleted" }` so subscribers can
+///   decide whether to refetch (mutation) or prepend (new row).
 pub const CAPTURES_CHANGED_EVENT: &str = "captures.changed";
+
+/// Thin payload emitted with `captures.changed` on star / soft-delete.
+/// Slice 02 emits a full `Capture` on save; slice 03 emits this shape
+/// on mutations so the Inbox can tell "refetch page" from "prepend".
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MutationNotice<'a> {
+    pub id: &'a str,
+    pub kind: &'static str,
+}
 
 /// Save a free-text Note. Empty / whitespace-only input is rejected.
 pub fn save_note_with_store(store: &Store, text: &str) -> Result<Capture, String> {
@@ -104,6 +120,61 @@ pub fn list_captures(
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
     list_captures_with_store(&store, cursor.as_deref(), limit)
+}
+
+/// Toggle the `starred` flag on a capture. Parses `id` as a ULID and
+/// delegates to `Store::set_star`. The Tauri command wrapper emits
+/// `captures.changed` so subscribers refetch.
+pub fn star_capture_with_store(
+    store: &Store,
+    id: &str,
+    starred: bool,
+) -> Result<(), String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    store.set_star(&parsed, starred).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn star_capture(
+    id: String,
+    starred: bool,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    star_capture_with_store(&store, &id, starred)?;
+    let _ = app.emit(
+        CAPTURES_CHANGED_EVENT,
+        MutationNotice {
+            id: &id,
+            kind: "starred",
+        },
+    );
+    Ok(())
+}
+
+/// Soft-delete a capture. Parses `id` as a ULID and delegates to
+/// `Store::soft_delete`. The Tauri command wrapper emits
+/// `captures.changed` so subscribers refetch.
+pub fn delete_capture_with_store(store: &Store, id: &str) -> Result<(), String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    store.soft_delete(&parsed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_capture(
+    id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    delete_capture_with_store(&store, &id)?;
+    let _ = app.emit(
+        CAPTURES_CHANGED_EVENT,
+        MutationNotice {
+            id: &id,
+            kind: "deleted",
+        },
+    );
+    Ok(())
 }
 
 /// Show + focus the Composer (main) window. The Dock JS calls this on

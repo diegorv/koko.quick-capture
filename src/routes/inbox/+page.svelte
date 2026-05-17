@@ -1,17 +1,27 @@
 <script lang="ts">
   // Inbox window root. Owns list state and the live-update subscription;
   // delegates row rendering to InboxList. The Tauri adapters (`invoke`,
-  // `listen`) are injected as props so the page can be mounted in a
-  // test without a Tauri runtime.
+  // `listen`, `hideWindow`) are injected as props so the page can be
+  // mounted in a test without a Tauri runtime.
+  //
+  // Slice 03 wires star + delete to the Rust commands and reacts to
+  // mutation events on `captures.changed` by refetching the first page.
+  // The event payload is either a full `Capture` (slice 02 on save) or
+  // a `MutationNotice` `{id, kind: "starred" | "deleted"}` (slice 03
+  // mutations).
   import { onMount, onDestroy } from "svelte";
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { Capture } from "$lib/captures/types";
   import InboxList from "$lib/inbox/InboxList.svelte";
 
   const PAGE_SIZE = 50;
   const SCROLL_THRESHOLD_PX = 100;
+
+  type MutationNotice = { id: string; kind: "starred" | "deleted" };
+  type ChangedPayload = Capture | MutationNotice;
 
   type ListFn = (
     cursor: string | null,
@@ -19,21 +29,34 @@
   ) => Promise<Capture[]>;
   type ListenFn = (
     event: string,
-    handler: (payload: Capture) => void,
+    handler: (payload: ChangedPayload) => void,
   ) => Promise<UnlistenFn>;
+  type InvokeFn = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
+  type HideFn = () => Promise<void>;
 
   interface Props {
     listFn?: ListFn;
     listenFn?: ListenFn;
+    invokeFn?: InvokeFn;
+    hideFn?: HideFn;
   }
 
   const defaultList: ListFn = (cursor, limit) =>
     tauriInvoke<Capture[]>("list_captures", { cursor, limit });
 
   const defaultListen: ListenFn = (event, handler) =>
-    tauriListen<Capture>(event, (e) => handler(e.payload));
+    tauriListen<ChangedPayload>(event, (e) => handler(e.payload));
 
-  const { listFn = defaultList, listenFn = defaultListen }: Props = $props();
+  const defaultInvoke: InvokeFn = (cmd, args) => tauriInvoke(cmd, args);
+
+  const defaultHide: HideFn = () => getCurrentWindow().hide();
+
+  const {
+    listFn = defaultList,
+    listenFn = defaultListen,
+    invokeFn = defaultInvoke,
+    hideFn = defaultHide,
+  }: Props = $props();
 
   let captures = $state<Capture[]>([]);
   let selectedId = $state<string | null>(null);
@@ -62,6 +85,28 @@
     }
   }
 
+  async function refetchFirstPage() {
+    try {
+      const page = await listFn(null, PAGE_SIZE);
+      captures = page;
+      exhausted = page.length < PAGE_SIZE;
+      if (selectedId !== null && !page.some((c) => c.id === selectedId)) {
+        selectedId = null;
+      }
+    } catch (err) {
+      console.error("refetch first page failed", err);
+    }
+  }
+
+  function isMutation(payload: ChangedPayload): payload is MutationNotice {
+    return (
+      typeof payload === "object" &&
+      payload !== null &&
+      "kind" in payload &&
+      (payload.kind === "starred" || payload.kind === "deleted")
+    );
+  }
+
   function onScroll(event: Event) {
     const el = event.currentTarget as HTMLElement;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD_PX) {
@@ -69,27 +114,59 @@
     }
   }
 
-  function prepend(c: Capture) {
-    if (captures.some((existing) => existing.id === c.id)) return;
-    captures = [c, ...captures];
+  function onChanged(payload: ChangedPayload) {
+    if (isMutation(payload)) {
+      // Star / delete: refetch the first page to reconcile the row.
+      refetchFirstPage();
+      return;
+    }
+    // New row from `save_note` / clipboard capture: prepend with dedup.
+    if (captures.some((existing) => existing.id === payload.id)) return;
+    captures = [payload, ...captures];
   }
 
   function onSelect(id: string) {
     selectedId = id;
   }
 
-  function onStarToggle(_id: string, _next: boolean) {
-    // Slice 03 wires this to `star_capture`.
+  async function onStarToggle(id: string, next: boolean) {
+    try {
+      await invokeFn("star_capture", { id, starred: next });
+    } catch (err) {
+      console.error("star_capture failed", err);
+    }
   }
 
-  function onDelete(_id: string) {
-    // Slice 03 wires this to `delete_capture`.
+  async function onDelete(id: string) {
+    // Optimistic: remove the row locally before the round-trip. The
+    // captures.changed event will refetch the first page as a backstop.
+    captures = captures.filter((c) => c.id !== id);
+    if (selectedId === id) {
+      selectedId = null;
+    }
+    try {
+      await invokeFn("delete_capture", { id });
+    } catch (err) {
+      console.error("delete_capture failed", err);
+    }
+  }
+
+  function onOpen(_capture: Capture) {
+    // Slice 04 wires kind-specific Open actions; no-op for slice 03.
+  }
+
+  async function onClose() {
+    try {
+      await hideFn();
+    } catch (err) {
+      console.error("hide window failed", err);
+    }
   }
 
   onMount(async () => {
     await loadNext();
     try {
-      unlisten = await listenFn("captures.changed", prepend);
+      unlisten = await listenFn("captures.changed", onChanged);
     } catch (err) {
       console.error("listen captures.changed failed", err);
     }
@@ -108,6 +185,8 @@
       {onSelect}
       {onStarToggle}
       {onDelete}
+      {onOpen}
+      {onClose}
     />
     {#if loading}
       <div class="spinner" aria-live="polite">Loading…</div>

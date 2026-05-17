@@ -148,4 +148,162 @@ describe("InboxList", () => {
     expect(onStarToggle).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  describe("keyboard navigation", () => {
+    const ids = [
+      "01H000000000000000000000A1",
+      "01H000000000000000000000B2",
+      "01H000000000000000000000C3",
+    ];
+
+    function twoNotes(): Capture[] {
+      return [note(ids[0], "first"), note(ids[1], "second")];
+    }
+
+    it("ArrowDown moves selection from row 0 to row 1", async () => {
+      const onSelect = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect,
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+        },
+      });
+
+      const listbox = getByRole("listbox");
+      await fireEvent.keyDown(listbox, { key: "ArrowDown" });
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(onSelect).toHaveBeenCalledWith(ids[1]);
+    });
+
+    it("ArrowDown clamps at the last row", async () => {
+      const onSelect = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[1],
+          onSelect,
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "ArrowDown" });
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(onSelect).toHaveBeenCalledWith(ids[1]);
+    });
+
+    it("ArrowUp clamps at the first row", async () => {
+      const onSelect = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect,
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "ArrowUp" });
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(onSelect).toHaveBeenCalledWith(ids[0]);
+    });
+
+    it("Enter on selection calls onOpen with the selected Capture", async () => {
+      const onOpen = vi.fn();
+      const captures = twoNotes();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures,
+          selectedId: ids[1],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onOpen,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "Enter" });
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      expect(onOpen).toHaveBeenCalledWith(captures[1]);
+    });
+
+    it("S toggles star on the selected row", async () => {
+      const onStarToggle = vi.fn();
+      const captures = twoNotes();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures,
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle,
+          onDelete: vi.fn(),
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "s" });
+      expect(onStarToggle).toHaveBeenCalledTimes(1);
+      expect(onStarToggle).toHaveBeenCalledWith(ids[0], true);
+    });
+
+    it("Cmd+Backspace calls onDelete on the selected row", async () => {
+      const onDelete = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[1],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), {
+        key: "Backspace",
+        metaKey: true,
+      });
+      expect(onDelete).toHaveBeenCalledTimes(1);
+      expect(onDelete).toHaveBeenCalledWith(ids[1]);
+    });
+
+    it("Escape calls onClose", async () => {
+      const onClose = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onClose,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cmd+W calls onClose", async () => {
+      const onClose = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onClose,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), {
+        key: "w",
+        metaKey: true,
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });

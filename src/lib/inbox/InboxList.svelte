@@ -2,8 +2,10 @@
   // Inbox list pane: one row per Capture. Pure presentational —
   // mutations (star toggle, delete) call back into the parent through
   // injected handlers so the component stays testable in isolation.
-  // Slice 02 ships the rendering; slice 03 wires the icon click paths
-  // through to actual Rust commands.
+  // Slice 03 adds full keyboard navigation: arrow keys move selection,
+  // Enter opens, S toggles star, Cmd+Delete soft-deletes, ESC / Cmd+W
+  // close. The component owns no row state; selection is driven by the
+  // `selectedId` prop and the `onSelect` callback.
   import type { Capture } from "$lib/captures/types";
 
   interface Props {
@@ -12,10 +14,19 @@
     onSelect: (id: string) => void;
     onStarToggle: (id: string, next: boolean) => void;
     onDelete: (id: string) => void;
+    onOpen?: (capture: Capture) => void;
+    onClose?: () => void;
   }
 
-  let { captures, selectedId, onSelect, onStarToggle, onDelete }: Props =
-    $props();
+  let {
+    captures,
+    selectedId,
+    onSelect,
+    onStarToggle,
+    onDelete,
+    onOpen,
+    onClose,
+  }: Props = $props();
 
   function kindIcon(kind: Capture["kind"]): string {
     switch (kind) {
@@ -87,9 +98,79 @@
     const day = Math.floor(hr / 24);
     return `${day}d ago`;
   }
+
+  function selectedIndex(): number {
+    if (selectedId === null) return -1;
+    return captures.findIndex((c) => c.id === selectedId);
+  }
+
+  function selectAt(index: number) {
+    if (captures.length === 0) return;
+    const clamped = Math.max(0, Math.min(captures.length - 1, index));
+    onSelect(captures[clamped].id);
+  }
+
+  function handleListKeydown(event: KeyboardEvent) {
+    // Cmd+W and Escape close, regardless of selection.
+    if (event.key === "Escape" || (event.metaKey && event.key === "w")) {
+      event.preventDefault();
+      onClose?.();
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const idx = selectedIndex();
+      // No selection yet: pick the first row. Otherwise clamp at end.
+      selectAt(idx === -1 ? 0 : idx + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const idx = selectedIndex();
+      selectAt(idx === -1 ? 0 : idx - 1);
+      return;
+    }
+
+    // Remaining keys act on the selected row, if any.
+    const idx = selectedIndex();
+    if (idx === -1) return;
+    const current = captures[idx];
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onOpen?.(current);
+      return;
+    }
+    // `Cmd+Delete` on macOS sends `Backspace` with `metaKey`. We treat
+    // both `Backspace` and `Delete` the same for parity with the issue.
+    if (event.metaKey && (event.key === "Backspace" || event.key === "Delete")) {
+      event.preventDefault();
+      onDelete(current.id);
+      return;
+    }
+    // Bare `S` (no modifier) toggles star on the selected row. Capital
+    // `S` (shift) is intentionally accepted too — keep parity with the
+    // PRD's plain-letter shortcut intent.
+    if (
+      (event.key === "s" || event.key === "S") &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      onStarToggle(current.id, !current.starred);
+    }
+  }
 </script>
 
-<ul class="inbox-list" role="listbox" aria-label="Captures">
+<ul
+  class="inbox-list"
+  role="listbox"
+  aria-label="Captures"
+  tabindex="0"
+  onkeydown={handleListKeydown}
+>
   {#each captures as capture (capture.id)}
     <li
       class="row"
@@ -144,6 +225,7 @@
     padding: 0;
     overflow-y: auto;
     height: 100%;
+    outline: none;
   }
 
   .row {

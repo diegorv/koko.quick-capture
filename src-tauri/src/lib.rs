@@ -284,6 +284,8 @@ pub fn run() {
             commands::save_note,
             commands::capture_clipboard_now,
             commands::list_captures,
+            commands::star_capture,
+            commands::delete_capture,
             commands::open_composer_window,
             commands::open_dock_context_menu
         ])
