@@ -3,7 +3,7 @@
 //! to) so we do not need to spin up a Tauri runtime.
 
 use quick_capture_lib::commands::{
-    delete_capture_with_store, list_captures_with_store, mark_read_with_store,
+    delete_capture_with_store, is_clipboard_duplicate, list_captures_with_store, mark_read_with_store,
     save_note_with_store, star_capture_with_store, total_count_with_store,
     unread_count_with_store,
 };
@@ -247,6 +247,64 @@ fn mark_read_with_store_rejects_invalid_ulid() {
         err.to_lowercase().contains("invalid id"),
         "expected invalid-id message, got: {err}"
     );
+}
+
+#[test]
+fn is_clipboard_duplicate_matches_same_clip_text() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Clip {
+            text: "hello".into(),
+        })
+        .expect("save");
+
+    assert!(is_clipboard_duplicate(
+        &saved,
+        &CaptureInput::Clip {
+            text: "hello".into()
+        }
+    ));
+    assert!(!is_clipboard_duplicate(
+        &saved,
+        &CaptureInput::Clip {
+            text: "different".into()
+        }
+    ));
+}
+
+#[test]
+fn is_clipboard_duplicate_is_kind_aware() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Clip { text: "x".into() })
+        .expect("save");
+
+    // Same text on a different kind is NOT a duplicate.
+    assert!(!is_clipboard_duplicate(
+        &saved,
+        &CaptureInput::Note { text: "x".into() }
+    ));
+}
+
+#[test]
+fn is_clipboard_duplicate_matches_same_link_url() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Link {
+            url: "https://example.com".into(),
+            raw_text: "https://example.com".into(),
+            title: None,
+        })
+        .expect("save");
+
+    assert!(is_clipboard_duplicate(
+        &saved,
+        &CaptureInput::Link {
+            url: "https://example.com".into(),
+            raw_text: "(any)".into(),
+            title: Some("title".into()),
+        }
+    ));
 }
 
 #[test]

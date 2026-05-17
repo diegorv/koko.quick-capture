@@ -76,11 +76,64 @@ pub fn capture_clipboard_now_with(
 ) -> Result<Vec<Capture>, String> {
     let snapshot = clipboard.read().map_err(|e| e.to_string())?;
     let inputs = decide(snapshot).map_err(|e| e.to_string())?;
+    // Track "latest stored" as we go so a multi-paste with two
+    // identical items in a row still dedupes the second one.
+    let mut latest: Option<Capture> = store
+        .list_before(None, 1)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next();
     let mut out = Vec::with_capacity(inputs.len());
     for input in inputs {
-        out.push(store.save(input).map_err(|e| e.to_string())?);
+        if latest
+            .as_ref()
+            .map(|prev| is_clipboard_duplicate(prev, &input))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let saved = store.save(input).map_err(|e| e.to_string())?;
+        latest = Some(saved.clone());
+        out.push(saved);
     }
     Ok(out)
+}
+
+/// True when `new` carries the same payload as the most-recent
+/// stored capture `prev`. Used to suppress re-saving when the user
+/// triggers the clipboard shortcut with the same content twice.
+///
+/// Comparison is per-kind and string-based; binary `Shot { Bytes }`
+/// is never deduped because we have no cheap way to compare the new
+/// bytes against the stored blob without re-reading the file.
+pub fn is_clipboard_duplicate(prev: &Capture, new: &CaptureInput) -> bool {
+    use crate::store::ShotSource;
+    match (prev.kind, new) {
+        (CaptureKind::Clip, CaptureInput::Clip { text }) => {
+            prev.payload.get("text").and_then(|v| v.as_str()) == Some(text.as_str())
+        }
+        (CaptureKind::Note, CaptureInput::Note { text }) => {
+            prev.payload.get("text").and_then(|v| v.as_str()) == Some(text.as_str())
+        }
+        (CaptureKind::Link, CaptureInput::Link { url, .. }) => {
+            prev.payload.get("url").and_then(|v| v.as_str()) == Some(url.as_str())
+        }
+        (CaptureKind::File, CaptureInput::File { source_path, .. }) => {
+            prev.payload.get("source_path").and_then(|v| v.as_str())
+                == Some(source_path.to_string_lossy().as_ref())
+        }
+        (
+            CaptureKind::Shot,
+            CaptureInput::Shot {
+                source: ShotSource::Path { source_path, .. },
+                ..
+            },
+        ) => {
+            prev.payload.get("source_path").and_then(|v| v.as_str())
+                == Some(source_path.to_string_lossy().as_ref())
+        }
+        _ => false,
+    }
 }
 
 #[tauri::command]
