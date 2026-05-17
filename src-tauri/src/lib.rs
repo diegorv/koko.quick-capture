@@ -235,6 +235,8 @@ pub fn run() {
             .inner_size(80.0, 80.0)
             .resizable(false)
             .decorations(false)
+            .transparent(true)
+            .shadow(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .focused(false)
