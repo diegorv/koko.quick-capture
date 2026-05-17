@@ -6,6 +6,9 @@
   // Enter opens, S toggles star, Cmd+Delete soft-deletes, ESC / Cmd+W
   // close. The component owns no row state; selection is driven by the
   // `selectedId` prop and the `onSelect` callback.
+  // Tab order: only the listbox itself is tab-stoppable (roving
+  // tabindex pattern for `role="listbox"`). Individual rows are not
+  // focusable — selection is owned by the listbox via `aria-activedescendant`.
   import type { Capture } from "$lib/captures/types";
   import {
     Link,
@@ -170,23 +173,19 @@
   role="listbox"
   aria-label="Captures"
   tabindex="0"
+  aria-activedescendant={selectedId ? `capture-row-${selectedId}` : undefined}
   onkeydown={handleListKeydown}
 >
   {#each captures as capture (capture.id)}
     {@const KindIcon = KIND_ICONS[capture.kind]}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <li
+      id={`capture-row-${capture.id}`}
       class="row"
       class:selected={capture.id === selectedId}
       role="option"
       aria-selected={capture.id === selectedId}
-      tabindex="0"
       onclick={() => onSelect(capture.id)}
-      onkeydown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect(capture.id);
-        }
-      }}
     >
       <span class="kind" aria-label={`kind ${capture.kind}`}>
         <KindIcon size={16} strokeWidth={1.75} />
@@ -238,7 +237,6 @@
     padding: 0.65rem 1rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     cursor: pointer;
-    outline: none;
     transition: background 80ms ease;
   }
 
@@ -250,8 +248,9 @@
     background: rgba(79, 70, 229, 0.1);
   }
 
-  .row:focus-visible {
-    background: rgba(79, 70, 229, 0.15);
+  .inbox-list:focus-visible .row.selected {
+    background: rgba(79, 70, 229, 0.18);
+    box-shadow: inset 2px 0 0 rgba(79, 70, 229, 0.9);
   }
 
   .kind {
@@ -303,8 +302,9 @@
     .row.selected {
       background: rgba(99, 102, 241, 0.18);
     }
-    .row:focus-visible {
-      background: rgba(99, 102, 241, 0.25);
+    .inbox-list:focus-visible .row.selected {
+      background: rgba(99, 102, 241, 0.28);
+      box-shadow: inset 2px 0 0 rgba(129, 140, 248, 0.95);
     }
     .icon:hover {
       background: rgba(255, 255, 255, 0.1);
