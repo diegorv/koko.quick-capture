@@ -285,6 +285,9 @@ pub fn mark_read(app: AppHandle, store: State<'_, Store>, id: String) -> Result<
 pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     let app_handle = app.clone();
     app.run_on_main_thread(move || {
+        // Record the prior frontmost app BEFORE we steal activation,
+        // so dismiss_composer can hand focus back to it.
+        record_prev_frontmost();
         if let Some(window) = app_handle.get_webview_window("composer") {
             let _ = window.show();
             let _ = window.set_focus();
@@ -294,64 +297,107 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Track the macOS PID that was frontmost just before quick-capture
+/// summoned the Composer, so `dismiss_composer` can hand focus back
+/// to that exact app. -1 means "no prior app recorded" (e.g. cold
+/// start, or the Composer is being dismissed without a prior open).
+#[cfg(target_os = "macos")]
+static PREV_FRONTMOST_PID: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(-1);
+
+/// Snapshot the macOS frontmost app PID via NSWorkspace. Called from
+/// every Composer-summon path (shortcut, tray menu item, Dock click
+/// invoke) BEFORE we show the Composer, while the user's real prior
+/// app is still frontmost. Our own PID is filtered out so a
+/// re-summon while the Composer is already up does not record us as
+/// the "prior" app.
+#[cfg(target_os = "macos")]
+pub fn record_prev_frontmost() {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use std::sync::atomic::Ordering;
+    unsafe {
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return;
+        }
+        let frontmost: *mut AnyObject = msg_send![workspace, frontmostApplication];
+        if frontmost.is_null() {
+            return;
+        }
+        let pid: i32 = msg_send![frontmost, processIdentifier];
+        let our_pid = std::process::id() as i32;
+        if pid > 0 && pid != our_pid {
+            PREV_FRONTMOST_PID.store(pid, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn record_prev_frontmost() {}
+
+/// Activate the app whose PID was last recorded by
+/// `record_prev_frontmost`. Resets the slot to -1 on read so a
+/// subsequent unrelated dismiss does not re-trigger.
+#[cfg(target_os = "macos")]
+fn activate_prev_app() {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use std::sync::atomic::Ordering;
+    let pid = PREV_FRONTMOST_PID.swap(-1, Ordering::SeqCst);
+    if pid <= 0 {
+        return;
+    }
+    unsafe {
+        let cls: *mut AnyObject =
+            msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+        if cls.is_null() {
+            return;
+        }
+        // 0 = no special options; macOS still brings the target app
+        // to the foreground. The deprecated activateWithOptions: path
+        // is fine here — it has been the supported call since 10.6
+        // and the modern `activate` is only available on macOS 14+.
+        let _: bool = msg_send![cls, activateWithOptions: 0u64];
+    }
+}
+
 /// Hide the Composer popover and return keyboard focus to whichever
 /// app held it before the Composer opened.
 ///
-/// macOS background: `window.hide()` alone removes the window from
-/// screen but the app stays "active" — the OS does not hand key
-/// status to anybody else automatically. This is tauri-apps/tauri
-/// issue #7540. The reliable fix is `[NSApp hide:nil]`, which mirrors
-/// Cmd+H: hides every window the app owns AND activates the next app
-/// in macOS's activation queue (i.e. whichever app the user was in
-/// before us). When the Inbox is on screen we deliberately do NOT
-/// take that path because it would also hide the Inbox; instead we
-/// hand focus to the Inbox so the user stays inside the app.
+/// History / rationale: `window.hide()` alone leaves the app "active"
+/// on macOS — focus does not return to the prior app
+/// (tauri-apps/tauri#7540). A prior attempt used `[NSApp hide:nil]`,
+/// which mirrors Cmd+H. That worked for focus return but put the app
+/// into a fully-hidden state, so the next `window.show()` (e.g.
+/// Inbox shortcut) implicitly unhid the app and macOS restored every
+/// previously-visible window — the Composer would pop back on screen
+/// alongside the Inbox. Current implementation: hide the Composer
+/// window normally and, when no other quick-capture window is on
+/// screen, explicitly reactivate the PID NSWorkspace reported as
+/// frontmost at the moment the Composer was summoned. Avoids any
+/// app-level hide state.
 #[tauri::command]
 pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
     let app_handle = app.clone();
     app.run_on_main_thread(move || {
+        if let Some(composer) = app_handle.get_webview_window("composer") {
+            let _ = composer.hide();
+        }
         let inbox_visible = app_handle
             .get_webview_window("inbox")
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false);
-
         if inbox_visible {
-            if let Some(composer) = app_handle.get_webview_window("composer") {
-                let _ = composer.hide();
-            }
             if let Some(inbox) = app_handle.get_webview_window("inbox") {
                 let _ = inbox.set_focus();
             }
         } else {
-            // `[NSApp hide:nil]` handles the Composer hide for us and
-            // also relinquishes activation so macOS hands focus back
-            // to the previously frontmost app.
             #[cfg(target_os = "macos")]
-            hide_nsapp();
-            #[cfg(not(target_os = "macos"))]
-            if let Some(composer) = app_handle.get_webview_window("composer") {
-                let _ = composer.hide();
-            }
+            activate_prev_app();
         }
     })
     .map_err(|e| e.to_string())
-}
-
-/// Send `[NSApp hide:nil]` to hide every window the app owns and
-/// hand activation to the next app in macOS's queue. Mirrors the
-/// Cmd+H menu item. See tauri#7540 for why this is the right call
-/// rather than `window.hide()` plus deactivate.
-#[cfg(target_os = "macos")]
-fn hide_nsapp() {
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-    unsafe {
-        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-        if !app.is_null() {
-            let nil: *mut AnyObject = std::ptr::null_mut();
-            let _: () = msg_send![app, hide: nil];
-        }
-    }
 }
 
 /// Open the Dock's right-click context menu at the given Dock-window

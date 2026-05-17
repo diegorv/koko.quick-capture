@@ -226,9 +226,12 @@ pub fn run() {
                 // macOS: show()/set_focus() must run on the main thread to
                 // actually activate the app and grab keyboard focus. The
                 // global-hotkey plugin invokes this handler on a worker.
+                // Record the prior frontmost app PID FIRST so that the
+                // Composer's dismiss path can hand focus back to it.
                 let app_handle = app.clone();
                 let event = binding.event;
                 let _ = app.run_on_main_thread(move || {
+                    commands::record_prev_frontmost();
                     if let Some(window) = app_handle.get_webview_window("composer") {
                         let _ = window.show();
                         let _ = window.set_focus();
@@ -427,10 +430,13 @@ pub fn run() {
                     match binding.item {
                         TrayMenuItem::OpenComposer => {
                             // Same main-thread show/focus path the
-                            // OpenComposer shortcut handler uses.
+                            // OpenComposer shortcut handler uses, plus
+                            // the same prev-frontmost snapshot so
+                            // dismiss_composer can return focus.
                             let app_handle = app.clone();
                             let event_name = binding.event;
                             let _ = app.run_on_main_thread(move || {
+                                commands::record_prev_frontmost();
                                 if let Some(window) = app_handle.get_webview_window("composer") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
@@ -478,22 +484,6 @@ pub fn run() {
             .accept_first_mouse(true)
             .visible(true)
             .build()?;
-
-            // Mark the Dock window as non-hideable so `[NSApp hide:nil]`
-            // (used by `dismiss_composer` to return focus to the prior
-            // app) does not also hide the Dock. macOS keeps any window
-            // with `canHide == NO` on screen across an app-level hide.
-            #[cfg(target_os = "macos")]
-            {
-                use objc2::msg_send;
-                use objc2::runtime::AnyObject;
-                if let Ok(ns_window_ptr) = dock_window.ns_window() {
-                    unsafe {
-                        let ns_window: *mut AnyObject = ns_window_ptr as *mut AnyObject;
-                        let _: () = msg_send![ns_window, setCanHide: false];
-                    }
-                }
-            }
 
             // Position at bottom-left of the primary monitor with a
             // 16px margin from both edges. `primary_monitor()` returns
