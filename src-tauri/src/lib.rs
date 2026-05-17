@@ -159,6 +159,28 @@ fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::image::Image<
     rasterise_svg(&svg, 32)
 }
 
+/// Flip the macOS activation policy between `.Regular` (Cmd+Tab and
+/// system Dock icon visible) and `.Accessory` (neither). Used to
+/// surface the app in Cmd+Tab only while the Inbox window is on
+/// screen; closing the Inbox reverts the app to Accessory mode so the
+/// system Dock icon does not stick around (see ADR-0009 for the
+/// rationale behind the Accessory default).
+///
+/// Must run on the main thread on macOS — every caller already hops
+/// via `run_on_main_thread` for the surrounding window operations.
+#[cfg(target_os = "macos")]
+fn set_inbox_activation_policy(app: &tauri::AppHandle, inbox_visible: bool) {
+    let policy = if inbox_visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    let _ = app.set_activation_policy(policy);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_inbox_activation_policy(_app: &tauri::AppHandle, _inbox_visible: bool) {}
+
 /// Tray menu items show their keyboard shortcut on the right side of
 /// the menu, matching the rest of the macOS app convention. For Open
 /// Composer / Open Inbox these mirror the global shortcuts registered
@@ -237,15 +259,14 @@ pub fn run() {
             ShortcutId::OpenInbox => {
                 // Mirror the OpenComposer path: show + focus must run
                 // on the main thread on macOS to actually grab focus.
-                // The unread cursor is NOT advanced here — the user
-                // has only opened the window, they have not yet
-                // triaged anything. The Inbox JS calls
-                // `mark_inbox_opened` on the first row interaction
-                // (click or arrow nav), which advances the cursor and
-                // emits `dock:badge:cleared`.
+                // Per-item read state is owned by the Inbox JS — the
+                // shortcut only opens the window and flips the macOS
+                // activation policy to Regular so Cmd+Tab surfaces
+                // the app while the Inbox is on screen.
                 let app_handle = app.clone();
                 let event = binding.event;
                 let _ = app.run_on_main_thread(move || {
+                    set_inbox_activation_policy(&app_handle, true);
                     if let Some(window) = app_handle.get_webview_window("inbox") {
                         let _ = window.show();
                         let _ = window.set_focus();
@@ -301,10 +322,15 @@ pub fn run() {
             // return None.
             if let Some(inbox_window) = app.get_webview_window("inbox") {
                 let inbox_clone = inbox_window.clone();
+                let close_app = app.handle().clone();
                 inbox_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = inbox_clone.hide();
+                        // Revert to Accessory so the system Dock icon
+                        // and Cmd+Tab entry disappear once the Inbox
+                        // is no longer on screen.
+                        set_inbox_activation_policy(&close_app, false);
                     }
                 });
             }
@@ -349,6 +375,7 @@ pub fn run() {
             app.listen("tray:open_inbox", move |_evt| {
                 let app_handle = inbox_app.clone();
                 let _ = inbox_app.run_on_main_thread(move || {
+                    set_inbox_activation_policy(&app_handle, true);
                     if let Some(window) = app_handle.get_webview_window("inbox") {
                         let _ = window.show();
                         let _ = window.set_focus();
