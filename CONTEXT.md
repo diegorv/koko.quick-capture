@@ -52,6 +52,17 @@ The Composer is not a browser, manager, or inspector — it never lists past cap
 
 A standalone window listing recent Captures in reverse chronological order. Opened by a global shortcut or from the tray menu. Read-mostly: the user can star a Capture or delete it, but cannot edit its payload. The Inbox is the only place where past Captures are surfaced inside the app.
 
+The Inbox uses a **split layout**:
+
+- **List pane** (left): one row per Capture with a kind icon, single-line payload preview, relative timestamp, star toggle, and delete action. Selecting a row updates the detail pane.
+- **Detail pane** (right): full payload of the selected Capture, with a kind-appropriate "Open" action — `Link` opens in the default browser, `File` / path-flavor `Shot` reveals in Finder, bytes-flavor `Shot` opens the blob, `Clip` and `Note` are read-only scrollable text.
+
+The list is the navigational surface; the detail pane never lets the user mutate payload.
+
+### Tray
+
+The macOS menubar item the app installs at startup. Holds the same actions as the [Dock](#dock)'s right-click menu — Open Composer, Open Inbox, Quit — and serves as the small "the app is running" indicator visible at all times. The Tray is not a content surface; it never lists Captures.
+
 ## Capture lifecycle
 
 Captures are append-only:
