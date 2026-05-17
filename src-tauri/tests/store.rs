@@ -322,3 +322,74 @@ fn soft_delete_hides_from_list_but_keeps_row() {
         "expected deleted_at to be stamped on tombstone"
     );
 }
+
+#[test]
+fn save_writes_dump_json_next_to_db() {
+    let (dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note {
+            text: "dump me".into(),
+        })
+        .expect("save");
+
+    let dump_path = dir.path().join("dumps").join(format!("{}.json", saved.id));
+    assert!(dump_path.exists(), "dump file must exist at {dump_path:?}");
+    let json = std::fs::read_to_string(&dump_path).expect("read dump");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("parse dump");
+    assert_eq!(value.get("id").and_then(|v| v.as_str()), Some(saved.id.as_str()));
+    assert_eq!(value.get("kind").and_then(|v| v.as_str()), Some("Note"));
+    assert!(value.get("deleted_at").map(|v| v.is_null()).unwrap_or(false));
+}
+
+#[test]
+fn soft_delete_keeps_dump_and_stamps_deleted_at() {
+    let (dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "kill".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    store.soft_delete(&id).expect("soft delete");
+
+    let dump_path = dir.path().join("dumps").join(format!("{}.json", saved.id));
+    assert!(dump_path.exists(), "dump must survive a soft-delete");
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&dump_path).expect("read")).expect("parse");
+    assert!(
+        value.get("deleted_at").and_then(|v| v.as_str()).is_some(),
+        "deleted_at must be a timestamp string post-soft-delete, got: {value}"
+    );
+}
+
+#[test]
+fn set_star_refreshes_dump() {
+    let (dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    store.set_star(&id, true).expect("star");
+
+    let dump_path = dir.path().join("dumps").join(format!("{}.json", saved.id));
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&dump_path).expect("read")).expect("parse");
+    assert_eq!(value.get("starred").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[test]
+fn mark_read_refreshes_dump() {
+    let (dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "r".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let flipped = store.mark_read(&id).expect("mark read");
+    assert!(flipped);
+
+    let dump_path = dir.path().join("dumps").join(format!("{}.json", saved.id));
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&dump_path).expect("read")).expect("parse");
+    assert!(
+        value.get("read_at").and_then(|v| v.as_str()).is_some(),
+        "read_at must be stamped, got: {value}"
+    );
+}

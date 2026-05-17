@@ -171,6 +171,14 @@ impl From<serde_json::Error> for StoreError {
 pub struct Store {
     conn: std::sync::Mutex<Connection>,
     blobs_dir: PathBuf,
+    /// Per-capture JSON dump directory. Each save writes
+    /// `dumps/<ulid>.json` with the full serialised `Capture`; every
+    /// mutation (star toggle, soft-delete, mark-read) overwrites the
+    /// same file. Soft-deleted rows are NOT removed from disk — the
+    /// JSON's `deleted_at` field flips to a timestamp instead, so the
+    /// folder doubles as a tombstone-aware trash log for future
+    /// restore tooling.
+    dumps_dir: PathBuf,
 }
 
 impl Store {
@@ -188,9 +196,14 @@ impl Store {
             .parent()
             .map(|p| p.join("blobs"))
             .unwrap_or_else(|| PathBuf::from("blobs"));
+        let dumps_dir = path
+            .parent()
+            .map(|p| p.join("dumps"))
+            .unwrap_or_else(|| PathBuf::from("dumps"));
         Ok(Store {
             conn: std::sync::Mutex::new(conn),
             blobs_dir,
+            dumps_dir,
         })
     }
 
@@ -235,6 +248,50 @@ impl Store {
         Ok(())
     }
 
+    /// Serialise a Capture into `dumps/<ulid>.json`. Best-effort:
+    /// errors are logged but never surfaced to the caller — losing a
+    /// dump must not fail the underlying SQLite write.
+    ///
+    /// The contract is "the JSON on disk reflects the latest known
+    /// state of the row", so star toggles / soft-deletes / read
+    /// flips all re-write the same file. The folder is the source of
+    /// truth for the "trash" / restore tooling that may land later.
+    fn write_dump(&self, capture: &Capture) {
+        if let Err(e) = std::fs::create_dir_all(&self.dumps_dir) {
+            eprintln!("dumps dir create failed: {e}");
+            return;
+        }
+        let path = self.dumps_dir.join(format!("{}.json", capture.id));
+        let json = match serde_json::to_string_pretty(capture) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("dump serialize failed for {}: {e}", capture.id);
+                return;
+            }
+        };
+        if let Err(e) = std::fs::write(&path, json) {
+            eprintln!("dump write failed for {}: {e}", capture.id);
+        }
+    }
+
+    /// Re-read a capture by id (deleted or not) and re-write its
+    /// dump. Used by every mutation that does not already hold the
+    /// post-mutation `Capture` value (set_star, soft_delete,
+    /// mark_read). Failure to find the row after a mutation is a
+    /// bug, but logged-and-skipped here rather than panicking — the
+    /// dump system is best-effort.
+    fn refresh_dump(&self, id: &Ulid) {
+        match self.find_with_deleted(id) {
+            Ok(Some(capture)) => self.write_dump(&capture),
+            Ok(None) => {
+                eprintln!("refresh_dump: capture {id} vanished post-mutation");
+            }
+            Err(e) => {
+                eprintln!("refresh_dump: lookup for {id} failed: {e}");
+            }
+        }
+    }
+
     /// Persist a new Capture. The id is a freshly minted ULID and the
     /// `created_at` is now (UTC, RFC3339). For `Shot { source: Bytes }`
     /// the bytes are written to `blobs/<ulid>.<ext>` next to the DB and
@@ -265,7 +322,7 @@ impl Store {
             eprintln!("fts5 insert failed for {id}: {e}");
         }
 
-        Ok(Capture {
+        let capture = Capture {
             id,
             kind,
             created_at,
@@ -274,7 +331,12 @@ impl Store {
             starred: false,
             deleted_at: None,
             read_at: None,
-        })
+        };
+        // Release the conn lock before touching the filesystem so a
+        // slow disk write does not block other DB readers.
+        drop(conn);
+        self.write_dump(&capture);
+        Ok(capture)
     }
 
     /// Build the JSON payload for a capture row, doing any side-effects
@@ -392,6 +454,8 @@ impl Store {
         if n == 0 {
             return Err(StoreError::NotFound(id_str));
         }
+        drop(conn);
+        self.refresh_dump(id);
         Ok(())
     }
 
@@ -416,6 +480,8 @@ impl Store {
         ) {
             eprintln!("fts5 delete failed for {id_str}: {e}");
         }
+        drop(conn);
+        self.refresh_dump(id);
         Ok(())
     }
 
@@ -488,7 +554,12 @@ impl Store {
              WHERE id = ?2 AND read_at IS NULL AND deleted_at IS NULL",
             params![&now, &id_str],
         )?;
-        Ok(n > 0)
+        let flipped = n > 0;
+        drop(conn);
+        if flipped {
+            self.refresh_dump(id);
+        }
+        Ok(flipped)
     }
 
     /// Total count of non-deleted captures. Used by the Inbox status
