@@ -109,6 +109,20 @@ fn tray_menu_item_icon(item: TrayMenuItem) -> tauri::image::Image<'static> {
     rasterise_svg(svg, 32)
 }
 
+/// Tray menu items show their keyboard shortcut on the right side of
+/// the menu, matching the rest of the macOS app convention. For Open
+/// Composer / Open Inbox these mirror the global shortcuts registered
+/// via `tauri-plugin-global-shortcut`; macOS treats the menu
+/// accelerator as a hint so we do not double-dispatch. `Cmd+Q` is the
+/// standard Quit accelerator and only fires while the menu is open.
+fn tray_menu_item_accelerator(item: TrayMenuItem) -> &'static str {
+    match item {
+        TrayMenuItem::OpenComposer => "Ctrl+Alt+Cmd+Space",
+        TrayMenuItem::OpenInbox => "Ctrl+Alt+Cmd+I",
+        TrayMenuItem::Quit => "Cmd+Q",
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let registry = default_registry();
@@ -299,13 +313,31 @@ pub fn run() {
 
             // Tray menu: build from the testable registry so the
             // visible order and event names match `default_menu()`.
+            // Each item gets an icon + an accelerator hint shown on
+            // the right of the menu (the global shortcuts for Open
+            // Composer / Open Inbox are already registered by
+            // tauri-plugin-global-shortcut; the menu accelerator is
+            // display-only on those two — macOS still shows the
+            // shortcut next to the label even if the menu does not
+            // re-dispatch).
             let menu_items = default_menu();
-            let mut menu = MenuBuilder::new(app);
-            for binding in &menu_items {
-                let icon = tray_menu_item_icon(binding.item);
-                menu = menu.icon(binding.menu_id, binding.label, icon);
-            }
-            let menu = menu.build()?;
+            let menu = {
+                let mut menu = MenuBuilder::new(app);
+                for binding in &menu_items {
+                    let icon = tray_menu_item_icon(binding.item);
+                    let accel = tray_menu_item_accelerator(binding.item);
+                    let item = tauri::menu::IconMenuItem::with_id(
+                        app,
+                        binding.menu_id,
+                        binding.label,
+                        true,
+                        Some(icon),
+                        Some(accel),
+                    )?;
+                    menu = menu.item(&item);
+                }
+                menu.build()?
+            };
 
             let dispatch: Vec<crate::tray::TrayMenuBinding> = menu_items.clone();
             let (brain_rgba, brain_w, brain_h) = build_brain_tray_icon_rgba();
