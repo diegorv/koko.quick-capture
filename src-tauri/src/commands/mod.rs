@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use tauri::menu::MenuBuilder;
+use tauri::menu::{IconMenuItem, MenuBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, State};
 use ulid::Ulid;
 
@@ -440,9 +440,23 @@ pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_dock_context_menu(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
     let bindings = default_context_menu();
+    let stroke = crate::current_menu_stroke();
     let mut menu = MenuBuilder::new(&app);
     for b in &bindings {
-        menu = menu.text(b.menu_id, b.tray.label);
+        let icon = crate::tray_menu_item_icon(b.tray.item, stroke);
+        // Dock popup intentionally omits the accelerator hint — only
+        // the Tray menu shows it. Same Lucide glyph per item for
+        // visual parity with the Tray.
+        let item = IconMenuItem::with_id(
+            &app,
+            b.menu_id,
+            b.tray.label,
+            true,
+            Some(icon),
+            None::<&str>,
+        )
+        .map_err(|e| format!("build dock menu item {}: {e}", b.menu_id))?;
+        menu = menu.item(&item);
     }
     let menu = menu
         .build()

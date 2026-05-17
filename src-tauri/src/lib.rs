@@ -65,7 +65,7 @@ const X_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 
 /// running is not handled here (follow-up); the user would need to
 /// reopen the app to pick up a flipped appearance.
 #[cfg(target_os = "macos")]
-fn current_menu_stroke() -> &'static str {
+pub(crate) fn current_menu_stroke() -> &'static str {
     if macos_appearance::is_dark() {
         "white"
     } else {
@@ -74,7 +74,7 @@ fn current_menu_stroke() -> &'static str {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn current_menu_stroke() -> &'static str {
+pub(crate) fn current_menu_stroke() -> &'static str {
     "white"
 }
 
@@ -149,7 +149,7 @@ fn build_brain_tray_icon_rgba() -> (Vec<u8>, u32, u32) {
 /// Tray menu items wear a per-item icon. Picks the right Lucide glyph
 /// for each `TrayMenuItem`, swaps `{STROKE}` with the appearance-aware
 /// stroke colour, and rasterises at 32x32 (16pt @2x).
-fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::image::Image<'static> {
+pub(crate) fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::image::Image<'static> {
     let template = match item {
         TrayMenuItem::OpenComposer => SQUARE_PEN_SVG,
         TrayMenuItem::OpenInbox => INBOX_SVG,
