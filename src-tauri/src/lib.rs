@@ -136,10 +136,28 @@ pub fn run() {
                 .expect("failed to open capture store at the default path");
             app.manage(store);
 
+            // The Composer (main) window is declared in tauri.conf.json
+            // and lives for the life of the app — hidden / shown by the
+            // shortcut. Intercept the red close button so it hides
+            // rather than destroying the window (same reason as Inbox).
+            if let Some(main_window) = app.get_webview_window("main") {
+                let main_clone = main_window.clone();
+                main_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = main_clone.hide();
+                    }
+                });
+            }
+
             // Inbox window: separate Tauri window pointed at `/inbox`,
             // hidden by default. Created at startup so the shortcut /
-            // tray handlers only need to show + focus it.
-            WebviewWindowBuilder::new(
+            // tray handlers only need to show + focus it. Intercept the
+            // close-button click so the window is hidden, not destroyed
+            // — otherwise subsequent `get_webview_window("inbox")`
+            // returns None and the shortcut becomes a no-op until the
+            // app restarts.
+            let inbox_window = WebviewWindowBuilder::new(
                 app,
                 "inbox",
                 WebviewUrl::App("/inbox".into()),
@@ -149,6 +167,15 @@ pub fn run() {
             .inner_size(900.0, 600.0)
             .center()
             .build()?;
+            {
+                let inbox_clone = inbox_window.clone();
+                inbox_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = inbox_clone.hide();
+                    }
+                });
+            }
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
