@@ -47,6 +47,46 @@
     onClose,
   }: Props = $props();
 
+  let listEl: HTMLUListElement | undefined = $state();
+  // First-time autofocus guard: focus the listbox once captures are
+  // available so arrow keys work without requiring a click. Subsequent
+  // updates (new captures, mutations) must NOT refocus or we would
+  // steal focus from other UI the user has moved to.
+  let autofocused = false;
+
+  $effect(() => {
+    if (captures.length > 0 && !autofocused && listEl) {
+      autofocused = true;
+      listEl.focus({ preventScroll: true });
+    }
+  });
+
+  // When the inbox window is hidden + reshown, focus is reset on the
+  // OS side. Re-grab it on every window-level focus so arrow keys
+  // keep working without an extra click. Guarded so we only steal
+  // focus when nothing inside the inbox already holds it (e.g. user
+  // tabbed to the detail-pane star button).
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    const onWindowFocus = () => {
+      if (!listEl) return;
+      const active = document.activeElement;
+      if (active === document.body || active === null) {
+        listEl.focus({ preventScroll: true });
+      }
+    };
+    window.addEventListener("focus", onWindowFocus);
+    return () => window.removeEventListener("focus", onWindowFocus);
+  });
+
+  function selectAndFocus(id: string) {
+    onSelect(id);
+    // Restore focus to the listbox after a row click so the keyboard
+    // shortcuts (arrows, Enter, S, Cmd+Backspace) work immediately
+    // without an extra Tab.
+    listEl?.focus({ preventScroll: true });
+  }
+
   function basename(p: string): string {
     const trimmed = p.replace(/\/+$/, "");
     const slash = trimmed.lastIndexOf("/");
@@ -169,6 +209,7 @@
 </script>
 
 <ul
+  bind:this={listEl}
   class="inbox-list"
   role="listbox"
   aria-label="Captures"
@@ -185,7 +226,7 @@
       class:selected={capture.id === selectedId}
       role="option"
       aria-selected={capture.id === selectedId}
-      onclick={() => onSelect(capture.id)}
+      onclick={() => selectAndFocus(capture.id)}
     >
       <span class="kind" aria-label={`kind ${capture.kind}`}>
         <KindIcon size={16} strokeWidth={1.75} />
