@@ -5,6 +5,7 @@
   // `onContextMenu` to `invoke("open_dock_context_menu", { x, y })`.
 
   import { tick } from "svelte";
+  import { BrainCircuit } from "@lucide/svelte";
 
   interface Props {
     onComposer: () => void;
@@ -83,22 +84,9 @@
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
 >
-  <svg
-    class="glyph"
-    viewBox="0 0 24 24"
-    width="34"
-    height="34"
-    aria-hidden="true"
-  >
-    <path
-      d="M12 3v12m0 0l-5-5m5 5l5-5M5 19h14"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2.2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-  </svg>
+  <span class="glyph" aria-hidden="true">
+    <BrainCircuit size={38} strokeWidth={1.6} />
+  </span>
   {#if unread > 0}
     <span class="badge" data-testid="dock-badge">{badgeLabel}</span>
   {/if}

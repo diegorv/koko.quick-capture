@@ -7,6 +7,22 @@
   // close. The component owns no row state; selection is driven by the
   // `selectedId` prop and the `onSelect` callback.
   import type { Capture } from "$lib/captures/types";
+  import {
+    Link,
+    Clipboard,
+    Image as ImageIcon,
+    File as FileIcon,
+    StickyNote,
+    type Icon as IconType,
+  } from "@lucide/svelte";
+
+  const KIND_ICONS: Record<Capture["kind"], typeof IconType> = {
+    Link,
+    Clip: Clipboard,
+    Shot: ImageIcon,
+    File: FileIcon,
+    Note: StickyNote,
+  };
 
   interface Props {
     captures: Capture[];
@@ -27,21 +43,6 @@
     onOpen,
     onClose,
   }: Props = $props();
-
-  function kindIcon(kind: Capture["kind"]): string {
-    switch (kind) {
-      case "Link":
-        return "🔗";
-      case "Clip":
-        return "📋";
-      case "Shot":
-        return "🖼";
-      case "File":
-        return "📄";
-      case "Note":
-        return "📝";
-    }
-  }
 
   function basename(p: string): string {
     const trimmed = p.replace(/\/+$/, "");
@@ -172,6 +173,7 @@
   onkeydown={handleListKeydown}
 >
   {#each captures as capture (capture.id)}
+    {@const KindIcon = KIND_ICONS[capture.kind]}
     <li
       class="row"
       class:selected={capture.id === selectedId}
@@ -187,7 +189,7 @@
       }}
     >
       <span class="kind" aria-label={`kind ${capture.kind}`}>
-        {kindIcon(capture.kind)}
+        <KindIcon size={16} strokeWidth={1.75} />
       </span>
       <span class="payload">{preview(capture)}</span>
       <span class="time">{relativeTime(capture.created_at)}</span>
@@ -253,9 +255,10 @@
   }
 
   .kind {
-    font-size: 1.05rem;
-    line-height: 1;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
   }
 
   .payload {

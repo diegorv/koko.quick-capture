@@ -10,6 +10,22 @@
   // `Shot` uses the persisted `blob_path`).
   import { convertFileSrc } from "@tauri-apps/api/core";
   import type { Capture } from "$lib/captures/types";
+  import {
+    Link,
+    Clipboard,
+    Image as ImageIcon,
+    File as FileIcon,
+    StickyNote,
+    type Icon as IconType,
+  } from "@lucide/svelte";
+
+  const KIND_ICONS: Record<Capture["kind"], typeof IconType> = {
+    Link,
+    Clip: Clipboard,
+    Shot: ImageIcon,
+    File: FileIcon,
+    Note: StickyNote,
+  };
 
   interface Props {
     capture: Capture | null;
@@ -25,21 +41,6 @@
 
   function kindLabel(kind: Capture["kind"]): string {
     return kind;
-  }
-
-  function kindGlyph(kind: Capture["kind"]): string {
-    switch (kind) {
-      case "Link":
-        return "🔗";
-      case "Clip":
-        return "📋";
-      case "Shot":
-        return "🖼";
-      case "File":
-        return "📄";
-      case "Note":
-        return "📝";
-    }
   }
 
   function formatTimestamp(iso: string): string {
@@ -71,9 +72,12 @@
       <p class="placeholder-text">Select a Capture</p>
     </div>
   {:else}
+    {@const HeaderIcon = KIND_ICONS[capture.kind]}
     <header class="header">
       <div class="title-row">
-        <span class="glyph" aria-hidden="true">{kindGlyph(capture.kind)}</span>
+        <span class="glyph" aria-hidden="true">
+          <HeaderIcon size={22} strokeWidth={1.6} />
+        </span>
         <h2 class="kind">{kindLabel(capture.kind)}</h2>
         {#if capture.starred}
           <span class="star" title="Starred">★</span>
@@ -201,8 +205,10 @@
   }
 
   .glyph {
-    font-size: 1.4rem;
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.75;
   }
 
   .kind {
