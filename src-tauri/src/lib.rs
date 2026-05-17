@@ -330,6 +330,13 @@ pub fn run() {
                 .expect("failed to open capture store at the default path");
             app.manage(store);
 
+            // Slot for the prior frontmost macOS PID. Written by
+            // `commands::record_prev_frontmost` on every Composer
+            // summon and consumed by `dismiss_composer` to hand
+            // focus back. Lives in Tauri-managed state rather than a
+            // process-global static so the seam is inspectable.
+            app.manage(commands::PrevFrontmostPid::new());
+
             // Inbox (main) window is declared in tauri.conf.json with
             // label "inbox" and url "/inbox". It is the app shell;
             // future product screens (Settings, search, etc.) live as

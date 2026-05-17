@@ -350,7 +350,7 @@ pub fn capture_clipboard_and_broadcast(app: &AppHandle) {
 pub fn show_composer(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        record_prev_frontmost();
+        record_prev_frontmost(&handle);
         if let Some(window) = handle.get_webview_window("composer") {
             let _ = window.show();
             let _ = window.set_focus();
@@ -375,25 +375,41 @@ pub fn show_inbox(app: &AppHandle) {
     });
 }
 
-/// Track the macOS PID that was frontmost just before quick-capture
-/// summoned the Composer, so `dismiss_composer` can hand focus back
-/// to that exact app. -1 means "no prior app recorded" (e.g. cold
-/// start, or the Composer is being dismissed without a prior open).
-#[cfg(target_os = "macos")]
-static PREV_FRONTMOST_PID: std::sync::atomic::AtomicI32 =
-    std::sync::atomic::AtomicI32::new(-1);
+/// Tauri-managed slot that holds the macOS PID of whichever app was
+/// frontmost just before quick-capture summoned the Composer.
+/// `dismiss_composer` reads + clears the slot to hand focus back to
+/// that exact app. Lives in `app.manage` (registered in lib::run
+/// setup) rather than a process-global static so the seam is
+/// inspectable in tests and follows ADR-0004's "shared state goes
+/// through Tauri" pattern.
+#[derive(Default)]
+pub struct PrevFrontmostPid(pub std::sync::atomic::AtomicI32);
 
-/// Snapshot the macOS frontmost app PID via NSWorkspace. Called from
-/// every Composer-summon path (shortcut, tray menu item, Dock click
-/// invoke) BEFORE we show the Composer, while the user's real prior
-/// app is still frontmost. Our own PID is filtered out so a
-/// re-summon while the Composer is already up does not record us as
-/// the "prior" app.
+impl PrevFrontmostPid {
+    pub fn new() -> Self {
+        Self(std::sync::atomic::AtomicI32::new(-1))
+    }
+
+    pub fn store(&self, pid: i32) {
+        self.0.store(pid, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Atomically read the stored PID and reset to -1.
+    pub fn take(&self) -> i32 {
+        self.0.swap(-1, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Snapshot the macOS frontmost app PID via NSWorkspace into the
+/// app-managed `PrevFrontmostPid` slot. Called from every
+/// Composer-summon path BEFORE we show the Composer, while the
+/// user's real prior app is still frontmost. Our own PID is
+/// filtered out so a re-summon while the Composer is already up
+/// does not record us as the "prior" app.
 #[cfg(target_os = "macos")]
-pub fn record_prev_frontmost() {
+pub fn record_prev_frontmost(app: &AppHandle) {
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    use std::sync::atomic::Ordering;
     unsafe {
         let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
         if workspace.is_null() {
@@ -406,23 +422,22 @@ pub fn record_prev_frontmost() {
         let pid: i32 = msg_send![frontmost, processIdentifier];
         let our_pid = std::process::id() as i32;
         if pid > 0 && pid != our_pid {
-            PREV_FRONTMOST_PID.store(pid, Ordering::SeqCst);
+            app.state::<PrevFrontmostPid>().store(pid);
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn record_prev_frontmost() {}
+pub fn record_prev_frontmost(_app: &AppHandle) {}
 
 /// Activate the app whose PID was last recorded by
-/// `record_prev_frontmost`. Resets the slot to -1 on read so a
-/// subsequent unrelated dismiss does not re-trigger.
+/// `record_prev_frontmost`. Takes the stored PID (resetting to -1)
+/// so a subsequent unrelated dismiss does not re-trigger.
 #[cfg(target_os = "macos")]
-fn activate_prev_app() {
+fn activate_prev_app(app: &AppHandle) {
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    use std::sync::atomic::Ordering;
-    let pid = PREV_FRONTMOST_PID.swap(-1, Ordering::SeqCst);
+    let pid = app.state::<PrevFrontmostPid>().take();
     if pid <= 0 {
         return;
     }
@@ -472,7 +487,7 @@ pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
             }
         } else {
             #[cfg(target_os = "macos")]
-            activate_prev_app();
+            activate_prev_app(&app_handle);
         }
     })
     .map_err(|e| e.to_string())
