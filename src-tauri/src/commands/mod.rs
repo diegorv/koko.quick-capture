@@ -6,7 +6,7 @@
 //! for `invoke()`. The real logic is in the helper functions below so
 //! tests can drive them without a Tauri runtime.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use tauri::menu::MenuBuilder;
@@ -17,7 +17,8 @@ use crate::clipboard::{Clipboard, SystemClipboard};
 use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
-use crate::store::{Capture, CaptureInput, Store};
+use crate::shell::{Shell, SystemShell};
+use crate::store::{Capture, CaptureInput, CaptureKind, Store};
 
 /// Event emitted on every successful Capture mutation (save, star,
 /// soft-delete). Inbox / Dock JS subscribe to this to keep their list
@@ -259,4 +260,85 @@ pub fn open_dock_context_menu(app: AppHandle, x: f64, y: f64) -> Result<(), Stri
         .ok_or_else(|| "dock window not found".to_string())?;
     dock.popup_menu_at(&menu, LogicalPosition::new(x, y))
         .map_err(|e| format!("popup dock context menu: {e}"))
+}
+
+/// Open a URL in the user's default browser. Pure pass-through to
+/// `Shell::open_in_browser` — the Inbox detail pane calls this with
+/// the `Link` Capture's `url` field directly so we do not pay a store
+/// round-trip for a payload the JS already has in hand.
+pub fn open_link_with(shell: &dyn Shell, url: &str) -> Result<(), String> {
+    shell.open_in_browser(url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn open_link(url: String) -> Result<(), String> {
+    open_link_with(&SystemShell::new(), &url)
+}
+
+/// Route a Capture's id to the right Shell action, picking the right
+/// path field per kind. Used by the Inbox detail pane for `File`,
+/// path-flavor `Shot`, and bytes-flavor `Shot`. `Clip` and `Note` have
+/// no reveal target and are rejected here as a programming bug — the
+/// Inbox JS must not call this for those kinds. `Link` is routed to
+/// `open_in_browser` as a defensive fallback, though the Inbox JS
+/// prefers `open_link` directly so it can pass the URL it already has.
+///
+/// Uses `Store::find_with_deleted` so a soft-deleted Capture the user
+/// still has on screen can still be revealed.
+pub fn reveal_capture_with(
+    shell: &dyn Shell,
+    store: &Store,
+    id: &str,
+) -> Result<(), String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    let capture = store
+        .find_with_deleted(&parsed)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("capture not found: {id}"))?;
+
+    match capture.kind {
+        CaptureKind::Link => {
+            let url = capture
+                .payload
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Link capture missing url".to_string())?;
+            shell.open_in_browser(url).map_err(|e| e.to_string())
+        }
+        CaptureKind::File => {
+            let path = capture
+                .payload
+                .get("source_path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "File capture missing source_path".to_string())?;
+            shell
+                .reveal_in_finder(Path::new(path))
+                .map_err(|e| e.to_string())
+        }
+        CaptureKind::Shot => {
+            // Path-flavor Shot has `source_path`; bytes-flavor has
+            // `blob_path`. Reveal the on-disk file the user dropped
+            // (source_path) but open the persisted blob in the default
+            // image viewer (blob_path) — the user never put the blob
+            // on disk themselves, so "reveal in Finder" is the wrong
+            // intent.
+            if let Some(p) = capture.payload.get("source_path").and_then(|v| v.as_str()) {
+                shell
+                    .reveal_in_finder(Path::new(p))
+                    .map_err(|e| e.to_string())
+            } else if let Some(p) = capture.payload.get("blob_path").and_then(|v| v.as_str()) {
+                shell.open_path(Path::new(p)).map_err(|e| e.to_string())
+            } else {
+                Err("Shot capture missing both source_path and blob_path".to_string())
+            }
+        }
+        CaptureKind::Clip | CaptureKind::Note => {
+            Err(format!("cannot reveal {:?} capture", capture.kind))
+        }
+    }
+}
+
+#[tauri::command]
+pub fn reveal_capture(id: String, store: State<'_, Store>) -> Result<(), String> {
+    reveal_capture_with(&SystemShell::new(), &store, &id)
 }

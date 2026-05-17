@@ -3,6 +3,7 @@ pub mod commands;
 pub mod dock;
 pub mod drag_drop;
 pub mod kind_detect;
+pub mod shell;
 pub mod shortcuts;
 pub mod store;
 pub mod tray;
@@ -353,7 +354,9 @@ pub fn run() {
             commands::star_capture,
             commands::delete_capture,
             commands::open_composer_window,
-            commands::open_dock_context_menu
+            commands::open_dock_context_menu,
+            commands::open_link,
+            commands::reveal_capture
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

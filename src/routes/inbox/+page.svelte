@@ -16,6 +16,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { Capture } from "$lib/captures/types";
   import InboxList from "$lib/inbox/InboxList.svelte";
+  import InboxDetail from "$lib/inbox/InboxDetail.svelte";
 
   const PAGE_SIZE = 50;
   const SCROLL_THRESHOLD_PX = 100;
@@ -151,9 +152,43 @@
     }
   }
 
-  function onOpen(_capture: Capture) {
-    // Slice 04 wires kind-specific Open actions; no-op for slice 03.
+  function onOpenLink(url: string) {
+    invokeFn("open_link", { url }).catch((err) => {
+      console.error("open_link failed", err);
+    });
   }
+
+  function onReveal(id: string) {
+    invokeFn("reveal_capture", { id }).catch((err) => {
+      console.error("reveal_capture failed", err);
+    });
+  }
+
+  // Dispatch the per-kind Open action. Used both by `Enter` on the
+  // list pane and by the detail pane's action button (which calls
+  // `onOpenLink` / `onReveal` directly with its own arguments). Mirrors
+  // the routing in `commands::reveal_capture_with` — Link uses
+  // `open_link` so we do not pay a store round-trip for a URL the JS
+  // already has; everything else routes through `reveal_capture`.
+  function onOpen(capture: Capture) {
+    if (capture.kind === "Link") {
+      const url = typeof capture.payload.url === "string" ? capture.payload.url : "";
+      if (url) onOpenLink(url);
+      return;
+    }
+    if (capture.kind === "Clip" || capture.kind === "Note") {
+      // No reveal target for text-only kinds. The detail pane shows
+      // the full text; pressing Enter is a no-op here.
+      return;
+    }
+    onReveal(capture.id);
+  }
+
+  const selectedCapture = $derived(
+    selectedId === null
+      ? null
+      : (captures.find((c) => c.id === selectedId) ?? null),
+  );
 
   async function onClose() {
     try {
@@ -193,7 +228,7 @@
     {/if}
   </section>
   <section class="detail-pane">
-    <p class="placeholder">Select a Capture</p>
+    <InboxDetail capture={selectedCapture} {onOpenLink} {onReveal} />
   </section>
 </div>
 
@@ -216,14 +251,7 @@
   }
 
   .detail-pane {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .placeholder {
-    opacity: 0.5;
-    margin: 0;
+    overflow: hidden;
   }
 
   .spinner {
