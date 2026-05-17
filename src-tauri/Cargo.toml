@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Frictionless macOS capture inbox"
 authors = ["Diego R. v."]
 edition = "2021"
+default-run = "quick-capture"
 
 [lib]
 name = "quick_capture_lib"
