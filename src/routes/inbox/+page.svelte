@@ -573,7 +573,13 @@
      no overlay anymore. */
   .list-column {
     display: grid;
-    grid-template-rows: auto 1fr;
+    /* Three rows: search bar (auto) + filter bar (auto) + scrolling
+       list pane (1fr). Previously declared as `auto 1fr`, which
+       implicitly created a third row for the list pane and shoved
+       the filter bar into the 1fr cell — filter chips ended up
+       vertically centred inside a tall row with big visible gaps
+       above and below. */
+    grid-template-rows: auto auto 1fr;
     min-height: 0;
     border-right: 1px solid rgba(0, 0, 0, 0.08);
   }
