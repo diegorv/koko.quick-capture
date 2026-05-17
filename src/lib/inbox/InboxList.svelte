@@ -31,15 +31,15 @@
   function kindIcon(kind: Capture["kind"]): string {
     switch (kind) {
       case "Link":
-        return "L";
+        return "🔗";
       case "Clip":
-        return "C";
+        return "📋";
       case "Shot":
-        return "I";
+        return "🖼";
       case "File":
-        return "F";
+        return "📄";
       case "Note":
-        return "N";
+        return "📝";
     }
   }
 

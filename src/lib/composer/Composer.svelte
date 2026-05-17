@@ -69,6 +69,7 @@
     autocomplete="off"
     spellcheck="false"
   ></textarea>
+  <div class="hint">ESC cancels · ⌘↩ saves</div>
 </div>
 
 <style>
@@ -76,8 +77,17 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 1rem;
+    padding: 1.25rem 1.5rem 1rem;
     box-sizing: border-box;
+    background: rgba(248, 248, 248, 0.98);
+    color: #0f0f0f;
+    font-family:
+      Inter,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    border-radius: 12px;
   }
 
   textarea {
@@ -86,9 +96,25 @@
     resize: none;
     border: none;
     outline: none;
-    font-size: 1rem;
+    font-size: 1.05rem;
+    line-height: 1.45;
     font-family: inherit;
     background: transparent;
     color: inherit;
+  }
+
+  .hint {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    opacity: 0.45;
+    user-select: none;
+    text-align: right;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .composer {
+      background: rgba(30, 30, 30, 0.98);
+      color: #f4f4f4;
+    }
   }
 </style>

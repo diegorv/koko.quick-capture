@@ -83,6 +83,22 @@
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
 >
+  <svg
+    class="glyph"
+    viewBox="0 0 24 24"
+    width="34"
+    height="34"
+    aria-hidden="true"
+  >
+    <path
+      d="M12 3v12m0 0l-5-5m5 5l5-5M5 19h14"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
   {#if unread > 0}
     <span class="badge" data-testid="dock-badge">{badgeLabel}</span>
   {/if}
@@ -100,9 +116,19 @@
     height: 80px;
     border-radius: 50%;
     cursor: pointer;
-    background: radial-gradient(circle at 30% 30%, #6ea8fe, #1e3a8a);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    background: linear-gradient(140deg, #4f46e5 0%, #1e1b4b 100%);
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
     position: relative;
+    color: rgba(255, 255, 255, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .glyph {
+    pointer-events: none;
   }
 
   .dock:hover {

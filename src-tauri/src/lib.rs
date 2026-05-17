@@ -39,6 +39,83 @@ pub const DOCK_DRAG_ENTER_EVENT: &str = "dock:drag:enter";
 /// gesture leaves the Dock (cancelled, drop fired, or cursor moved out).
 pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock:drag:leave";
 
+/// Build a procedural template-mode brain icon for the macOS Tray.
+///
+/// Two overlapping stroked circles ("hemispheres") plus a centre line
+/// and a pair of fold strokes per side. Rendered at 44x44 (2x the
+/// standard 22pt menubar slot) so the icon stays crisp on Retina.
+/// All non-zero pixels are pure black with full alpha; macOS treats
+/// the result as a template image and re-tints to match the menubar.
+///
+/// Returns the raw RGBA8 buffer suitable for `tauri::image::Image::new_owned`.
+fn build_brain_tray_icon_rgba() -> (Vec<u8>, u32, u32) {
+    use image::{ImageBuffer, Rgba};
+
+    const SIZE: u32 = 44;
+    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_pixel(SIZE, SIZE, Rgba([0, 0, 0, 0]));
+    let on = Rgba([0, 0, 0, 255]);
+
+    // Two hemisphere outlines. Centres offset left / right of the
+    // canvas centre so they overlap in the middle.
+    let hemis = [(15.0_f32, 22.0_f32), (29.0_f32, 22.0_f32)];
+    let outer = 10.0_f32;
+    let inner = 8.2_f32;
+
+    // Fold arcs: smaller rings near the top + bottom of each hemisphere
+    // suggesting cortical folds without trying to be anatomical.
+    let folds: &[(f32, f32, f32)] = &[
+        (12.5, 18.0, 3.3),
+        (12.5, 26.0, 3.3),
+        (31.5, 18.0, 3.3),
+        (31.5, 26.0, 3.3),
+    ];
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let fx = x as f32 + 0.5;
+            let fy = y as f32 + 0.5;
+
+            // Hemisphere rings.
+            let mut hit = false;
+            for (cx, cy) in &hemis {
+                let r = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+                if r >= inner && r <= outer {
+                    hit = true;
+                    break;
+                }
+            }
+            // Fold arcs.
+            if !hit {
+                for (cx, cy, r0) in folds {
+                    let r = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+                    if (r - r0).abs() <= 0.9 {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+            // Spine: vertical line down the centre, only where it
+            // would sit inside the union of the two hemispheres.
+            if !hit {
+                let dx = (fx - 22.0).abs();
+                let inside_either = hemis.iter().any(|(cx, cy)| {
+                    ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt() <= outer + 0.2
+                });
+                if dx <= 0.8 && inside_either && fy > 13.0 && fy < 31.0 {
+                    hit = true;
+                }
+            }
+
+            if hit {
+                img.put_pixel(x, y, on);
+            }
+        }
+    }
+
+    (img.into_raw(), SIZE, SIZE)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let registry = default_registry();
@@ -173,8 +250,13 @@ pub fn run() {
                 WebviewUrl::App("/composer".into()),
             )
             .visible(false)
-            .title("quick-capture")
-            .inner_size(600.0, 320.0)
+            .title("")
+            .inner_size(600.0, 240.0)
+            .decorations(false)
+            .transparent(true)
+            .resizable(false)
+            .skip_taskbar(true)
+            .shadow(true)
             .center()
             .build()?;
             {
@@ -218,12 +300,10 @@ pub fn run() {
             let menu = menu.build()?;
 
             let dispatch: Vec<crate::tray::TrayMenuBinding> = menu_items.clone();
-            let default_icon = app
-                .default_window_icon()
-                .cloned()
-                .expect("default window icon must be embedded");
+            let (brain_rgba, brain_w, brain_h) = build_brain_tray_icon_rgba();
+            let brain_icon = tauri::image::Image::new_owned(brain_rgba, brain_w, brain_h);
             let _tray = TrayIconBuilder::new()
-                .icon(default_icon)
+                .icon(brain_icon)
                 .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
