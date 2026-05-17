@@ -35,8 +35,9 @@ describe("inbox page", () => {
       },
     );
 
+    const invokeFn = vi.fn(async () => 0);
     const { findByText, queryByText } = render(Page, {
-      props: { listFn, listenFn },
+      props: { listFn, listenFn, invokeFn },
     });
 
     // First page loaded.
@@ -65,8 +66,9 @@ describe("inbox page", () => {
       },
     );
 
+    const invokeFn = vi.fn(async () => 0);
     const { findAllByRole, findByText } = render(Page, {
-      props: { listFn, listenFn },
+      props: { listFn, listenFn, invokeFn },
     });
 
     await findByText("older");

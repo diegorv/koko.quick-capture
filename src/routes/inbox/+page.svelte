@@ -64,6 +64,47 @@
   let loading = $state(false);
   let exhausted = $state(false);
   let unlisten: UnlistenFn | null = null;
+  let totalCount = $state<number | null>(null);
+  let unreadCount = $state<number | null>(null);
+  let now = $state(Date.now());
+  let nowTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function refreshStats() {
+    try {
+      const [total, unread] = await Promise.all([
+        invokeFn("total_count", {}) as Promise<number>,
+        invokeFn("unread_count", {}) as Promise<number>,
+      ]);
+      totalCount = total;
+      unreadCount = unread;
+    } catch (err) {
+      console.error("refresh stats failed", err);
+    }
+  }
+
+  function relativeTime(createdAt: string, ref: number): string {
+    const t = Date.parse(createdAt);
+    if (Number.isNaN(t)) return "";
+    const diff = Math.max(0, ref - t);
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return "just now";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    return `${day}d ago`;
+  }
+
+  const lastCaptureLabel = $derived(
+    captures.length === 0 ? null : relativeTime(captures[0].created_at, now),
+  );
+  const totalLabel = $derived(
+    totalCount === null ? null : `${totalCount} ${totalCount === 1 ? "capture" : "captures"}`,
+  );
+  const unreadLabel = $derived(
+    unreadCount && unreadCount > 0 ? `${unreadCount} new` : null,
+  );
 
   async function loadNext() {
     if (loading || exhausted) return;
@@ -116,6 +157,7 @@
   }
 
   function onChanged(payload: ChangedPayload) {
+    refreshStats();
     if (isMutation(payload)) {
       // Star / delete: refetch the first page to reconcile the row.
       refetchFirstPage();
@@ -200,6 +242,12 @@
 
   onMount(async () => {
     await loadNext();
+    await refreshStats();
+    // Re-render "last Xm ago" once a minute so the status bar does not
+    // get stale while the Inbox sits open.
+    nowTimer = setInterval(() => {
+      now = Date.now();
+    }, 60_000);
     try {
       unlisten = await listenFn("captures:changed", onChanged);
     } catch (err) {
@@ -209,6 +257,10 @@
 
   onDestroy(() => {
     unlisten?.();
+    if (nowTimer !== null) {
+      clearInterval(nowTimer);
+      nowTimer = null;
+    }
   });
 </script>
 
@@ -245,12 +297,25 @@
       <InboxDetail capture={selectedCapture} {onOpenLink} {onReveal} />
     </section>
   </div>
+  <footer class="statusbar" aria-label="Inbox stats">
+    {#if totalLabel}
+      <span class="stat">{totalLabel}</span>
+    {/if}
+    {#if lastCaptureLabel}
+      <span class="sep" aria-hidden="true">·</span>
+      <span class="stat">last {lastCaptureLabel}</span>
+    {/if}
+    {#if unreadLabel}
+      <span class="sep" aria-hidden="true">·</span>
+      <span class="stat new">{unreadLabel}</span>
+    {/if}
+  </footer>
 </div>
 
 <style>
   .inbox {
     display: grid;
-    grid-template-rows: 28px 1fr;
+    grid-template-rows: 28px 1fr 24px;
     height: 100vh;
     width: 100vw;
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -282,6 +347,26 @@
 
   .detail-pane {
     overflow: hidden;
+  }
+
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0 0.85rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    font-size: 0.72rem;
+    color: rgba(0, 0, 0, 0.55);
+    user-select: none;
+  }
+
+  .statusbar .sep {
+    opacity: 0.5;
+  }
+
+  .statusbar .stat.new {
+    color: rgba(79, 70, 229, 0.85);
+    font-weight: 500;
   }
 
   .spinner {
@@ -342,6 +427,13 @@
     .empty-hint kbd {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(255, 255, 255, 0.12);
+    }
+    .statusbar {
+      border-top-color: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .statusbar .stat.new {
+      color: rgba(165, 180, 252, 0.95);
     }
   }
 </style>
