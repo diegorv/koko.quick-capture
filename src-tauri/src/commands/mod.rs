@@ -248,6 +248,16 @@ pub fn unread_count(store: State<'_, Store>) -> Result<u64, String> {
     unread_count_with_store(&store)
 }
 
+/// Total non-deleted captures. Used by the Inbox status bar.
+pub fn total_count_with_store(store: &Store) -> Result<u64, String> {
+    store.count_all().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn total_count(store: State<'_, Store>) -> Result<u64, String> {
+    total_count_with_store(&store)
+}
+
 /// Mark the Inbox as having just been opened: compute the count being
 /// cleared, then advance `last_inbox_open_id` to the id of the newest
 /// existing capture. Empty store is a no-op (returns 0, leaves the

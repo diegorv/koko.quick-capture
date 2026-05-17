@@ -4,7 +4,8 @@
 
 use quick_capture_lib::commands::{
     delete_capture_with_store, list_captures_with_store, mark_inbox_opened_with_store,
-    save_note_with_store, star_capture_with_store, unread_count_with_store,
+    save_note_with_store, star_capture_with_store, total_count_with_store,
+    unread_count_with_store,
 };
 use quick_capture_lib::store::{CaptureInput, CaptureKind, Store, SETTING_LAST_INBOX_OPEN_ID};
 use tempfile::TempDir;
@@ -191,6 +192,33 @@ fn unread_count_with_store_ignores_soft_deleted() {
 
     let after = unread_count_with_store(&store).expect("after");
     assert_eq!(after, 2, "soft-deleted row must not count toward unread");
+}
+
+#[test]
+fn total_count_with_store_returns_zero_when_empty() {
+    let (_dir, store) = temp_store();
+    let n = total_count_with_store(&store).expect("total");
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn total_count_with_store_counts_live_rows_and_ignores_soft_deleted() {
+    let (_dir, store) = temp_store();
+    let mut ids = Vec::with_capacity(3);
+    for i in 0..3 {
+        let saved = save_note_with_store(&store, &format!("t{i}")).expect("save");
+        ids.push(saved.id);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(total_count_with_store(&store).expect("total"), 3);
+
+    let last = Ulid::from_string(&ids[2]).expect("parse");
+    store.soft_delete(&last).expect("soft delete");
+    assert_eq!(
+        total_count_with_store(&store).expect("total after"),
+        2,
+        "soft-deleted row must not count toward total"
+    );
 }
 
 #[test]

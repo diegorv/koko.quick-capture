@@ -397,6 +397,19 @@ impl Store {
         Ok(n as u64)
     }
 
+    /// Total count of non-deleted captures. Used by the Inbox status
+    /// bar; cheap (indexed COUNT(*)) and called only on mount + on
+    /// `captures:changed`.
+    pub fn count_all(&self) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM captures WHERE deleted_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     /// Read a value from the `app_settings` table. Returns `None` when
     /// the key has never been written. Per ADR-0004 this is the only
     /// path the frontend has to persisted app-level scalars.
