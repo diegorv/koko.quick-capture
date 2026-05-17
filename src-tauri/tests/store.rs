@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use quick_capture_lib::store::{CaptureInput, CaptureKind, ShotSource, Store};
+use quick_capture_lib::store::{
+    CaptureInput, CaptureKind, ShotSource, Store, SETTING_LAST_INBOX_OPEN_ID,
+};
 use tempfile::TempDir;
 use ulid::Ulid;
 
@@ -262,6 +264,35 @@ fn list_before_omits_soft_deleted_rows() {
         vec![c.id.as_str(), a.id.as_str()],
         "tombstones must not surface in list_before"
     );
+}
+
+#[test]
+fn settings_get_returns_none_for_missing_key() {
+    let (_dir, store) = temp_store();
+    let value = store.settings_get("never_written").expect("get");
+    assert!(value.is_none(), "missing key must read as None");
+}
+
+#[test]
+fn settings_set_then_get_round_trip() {
+    let (_dir, store) = temp_store();
+    store
+        .settings_set(SETTING_LAST_INBOX_OPEN_ID, "01HQXY1234567890ABCDEFGHJK")
+        .expect("set");
+    let value = store
+        .settings_get(SETTING_LAST_INBOX_OPEN_ID)
+        .expect("get")
+        .expect("value present");
+    assert_eq!(value, "01HQXY1234567890ABCDEFGHJK");
+}
+
+#[test]
+fn settings_set_overwrites_existing_value() {
+    let (_dir, store) = temp_store();
+    store.settings_set("k", "first").expect("first set");
+    store.settings_set("k", "second").expect("second set");
+    let value = store.settings_get("k").expect("get").expect("present");
+    assert_eq!(value, "second", "second set must overwrite first");
 }
 
 #[test]

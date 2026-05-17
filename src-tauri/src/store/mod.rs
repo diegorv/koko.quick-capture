@@ -11,6 +11,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
+/// Settings key for the ULID of the newest Capture at the moment the
+/// user last opened the Inbox. The Dock's unread badge is the count of
+/// non-deleted captures with `id > <this value>`.
+pub const SETTING_LAST_INBOX_OPEN_ID: &str = "last_inbox_open_id";
+
+/// ULID min (26 zero characters). Used as the default `count_after`
+/// cursor when `SETTING_LAST_INBOX_OPEN_ID` has never been written, so
+/// the first-launch badge equals the total non-deleted capture count.
+pub const ULID_MIN: &str = "00000000000000000000000000";
+
 /// Closed set of Capture kinds. See `CONTEXT.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CaptureKind {
@@ -198,7 +208,11 @@ impl Store {
                 deleted_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_captures_created_at
-                ON captures(created_at DESC);",
+                ON captures(created_at DESC);
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );",
         )?;
         Ok(())
     }
@@ -363,6 +377,46 @@ impl Store {
         if n == 0 {
             return Err(StoreError::NotFound(id_str));
         }
+        Ok(())
+    }
+
+    /// Count non-deleted captures whose id is strictly greater than the
+    /// given ULID string. Used by the Dock's unread-since-last-Inbox-open
+    /// badge: the cursor is persisted in `app_settings` so the count
+    /// survives restarts (PRD user story 24). Computed on demand rather
+    /// than cached as a counter so deletes and sibling-process writes
+    /// stay correct without a separate invalidation path.
+    pub fn count_after(&self, cursor: &str) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM captures
+             WHERE id > ?1 AND deleted_at IS NULL",
+            params![cursor],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
+    /// Read a value from the `app_settings` table. Returns `None` when
+    /// the key has never been written. Per ADR-0004 this is the only
+    /// path the frontend has to persisted app-level scalars.
+    pub fn settings_get(&self, key: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
+        let value: Option<String> = stmt
+            .query_row(params![key], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(value)
+    }
+
+    /// Upsert a value into the `app_settings` table.
+    pub fn settings_set(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
         Ok(())
     }
 

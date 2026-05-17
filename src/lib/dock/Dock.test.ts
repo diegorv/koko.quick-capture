@@ -1,4 +1,5 @@
 import { render, fireEvent } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { describe, it, expect, vi } from "vitest";
 import Dock from "./Dock.svelte";
 
@@ -66,5 +67,68 @@ describe("Dock", () => {
 
     const dock = getByLabelText("Open Composer");
     expect(dock.classList.contains("drag-active")).toBe(false);
+  });
+
+  it("renders the unread count when unread > 0", () => {
+    const { getByTestId } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        unread: 5,
+      },
+    });
+
+    const badge = getByTestId("dock-badge");
+    expect(badge.textContent).toBe("5");
+  });
+
+  it("hides the badge when unread is zero", () => {
+    const { queryByTestId } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        unread: 0,
+      },
+    });
+
+    expect(queryByTestId("dock-badge")).toBeNull();
+  });
+
+  it("renders 99+ when unread exceeds 99", () => {
+    const { getByTestId } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        unread: 150,
+      },
+    });
+
+    expect(getByTestId("dock-badge").textContent).toBe("99+");
+  });
+
+  it("applies the pulse class on pulseKey change", async () => {
+    const { getByLabelText, rerender } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        pulseKey: 0,
+      },
+    });
+
+    const dock = getByLabelText("Open Composer");
+    // Initial render must not pulse — the user only sees the
+    // animation when a capture lands, not on mount.
+    expect(dock.classList.contains("pulse")).toBe(false);
+
+    await rerender({
+      onComposer: vi.fn(),
+      onContextMenu: vi.fn(),
+      pulseKey: 1,
+    });
+    // Effect schedules toggle across a microtask; wait two ticks so
+    // the class has settled into its post-bump state.
+    await tick();
+    await tick();
+    expect(dock.classList.contains("pulse")).toBe(true);
   });
 });

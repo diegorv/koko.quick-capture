@@ -22,7 +22,8 @@ use tauri_plugin_global_shortcut::{
 
 use crate::clipboard::SystemClipboard;
 use crate::commands::{
-    capture_clipboard_now_with, save_dropped_files_with_store, CAPTURES_CHANGED_EVENT,
+    capture_clipboard_now_with, mark_inbox_opened_with_store, save_dropped_files_with_store,
+    CAPTURES_CHANGED_EVENT, DOCK_BADGE_CLEARED_EVENT, DOCK_PULSE_EVENT,
 };
 use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
@@ -86,10 +87,12 @@ pub fn run() {
                         // Emit the full batch so future UI surfaces can
                         // count N rows (e.g. for a multi-file copy).
                         let _ = app.emit(binding.event, &captures);
-                        // Emit one captures.changed per row so the Inbox
-                        // can prepend each new Capture live.
+                        // Emit one captures.changed + dock.pulse per row
+                        // so the Inbox can prepend each new Capture live
+                        // and the Dock can pulse per row.
                         for capture in &captures {
                             let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+                            let _ = app.emit(DOCK_PULSE_EVENT, ());
                         }
                     }
                     Err(e) => {
@@ -100,6 +103,9 @@ pub fn run() {
             ShortcutId::OpenInbox => {
                 // Mirror the OpenComposer path: show + focus must run
                 // on the main thread on macOS to actually grab focus.
+                // Also mark the Inbox as opened (advances the unread
+                // cursor) and emit `dock.badge.cleared` so the Dock JS
+                // zeroes its badge immediately.
                 let app_handle = app.clone();
                 let event = binding.event;
                 let _ = app.run_on_main_thread(move || {
@@ -107,6 +113,11 @@ pub fn run() {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
+                    let store = app_handle.state::<Store>();
+                    if let Err(e) = mark_inbox_opened_with_store(&store) {
+                        eprintln!("mark_inbox_opened (shortcut) failed: {e}");
+                    }
+                    let _ = app_handle.emit(DOCK_BADGE_CLEARED_EVENT, ());
                     let _ = app_handle.emit(event, ());
                 });
             }
@@ -141,7 +152,9 @@ pub fn run() {
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
-            // the main thread, mirroring the shortcut path.
+            // the main thread, mirroring the shortcut path. Also mark
+            // the Inbox as opened so the Dock's badge clears and the
+            // new cursor persists across restarts.
             let inbox_app = app.handle().clone();
             app.listen("tray.open_inbox", move |_evt| {
                 let app_handle = inbox_app.clone();
@@ -150,6 +163,11 @@ pub fn run() {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
+                    let store = app_handle.state::<Store>();
+                    if let Err(e) = mark_inbox_opened_with_store(&store) {
+                        eprintln!("mark_inbox_opened (tray) failed: {e}");
+                    }
+                    let _ = app_handle.emit(DOCK_BADGE_CLEARED_EVENT, ());
                 });
             });
 
@@ -284,6 +302,7 @@ pub fn run() {
                                     for capture in &captures {
                                         let _ =
                                             app_handle.emit(CAPTURES_CHANGED_EVENT, capture);
+                                        let _ = app_handle.emit(DOCK_PULSE_EVENT, ());
                                     }
                                 }
                                 Err(e) => {
@@ -353,6 +372,8 @@ pub fn run() {
             commands::list_captures,
             commands::star_capture,
             commands::delete_capture,
+            commands::unread_count,
+            commands::mark_inbox_opened,
             commands::open_composer_window,
             commands::open_dock_context_menu,
             commands::open_link,

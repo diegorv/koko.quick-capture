@@ -18,7 +18,7 @@ use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
-use crate::store::{Capture, CaptureInput, CaptureKind, Store};
+use crate::store::{Capture, CaptureInput, CaptureKind, Store, SETTING_LAST_INBOX_OPEN_ID, ULID_MIN};
 
 /// Event emitted on every successful Capture mutation (save, star,
 /// soft-delete). Inbox / Dock JS subscribe to this to keep their list
@@ -30,6 +30,21 @@ use crate::store::{Capture, CaptureInput, CaptureKind, Store};
 ///   with `{ id, kind: "starred" | "deleted" }` so subscribers can
 ///   decide whether to refetch (mutation) or prepend (new row).
 pub const CAPTURES_CHANGED_EVENT: &str = "captures.changed";
+
+/// Event emitted alongside `captures.changed` on every successful save
+/// (Note, clipboard, dropped files). The Dock subscribes to this to
+/// trigger its one-shot pulse animation. Kept distinct from
+/// `captures.changed` so the badge increment (driven by `captures.changed`)
+/// and the pulse animation (driven by this event) can be reasoned about
+/// independently — e.g. star / soft-delete must NOT pulse but DO emit
+/// `captures.changed`.
+pub const DOCK_PULSE_EVENT: &str = "dock.pulse";
+
+/// Event emitted when the Inbox window is shown (shortcut, tray menu,
+/// Dock context-menu, or any future entry point). The Dock JS sets its
+/// badge state to 0 on receipt. Rust also persists the new
+/// `last_inbox_open_id` so the cleared state survives a restart.
+pub const DOCK_BADGE_CLEARED_EVENT: &str = "dock.badge.cleared";
 
 /// Thin payload emitted with `captures.changed` on star / soft-delete.
 /// Slice 02 emits a full `Capture` on save; slice 03 emits this shape
@@ -61,6 +76,7 @@ pub fn save_note(
 ) -> Result<Capture, String> {
     let capture = save_note_with_store(&store, &text)?;
     let _ = app.emit(CAPTURES_CHANGED_EVENT, &capture);
+    let _ = app.emit(DOCK_PULSE_EVENT, ());
     Ok(capture)
 }
 
@@ -96,6 +112,7 @@ pub fn capture_clipboard_now(
     let captures = capture_clipboard_now_with(&SystemClipboard::new(), &store)?;
     for capture in &captures {
         let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+        let _ = app.emit(DOCK_PULSE_EVENT, ());
     }
     Ok(captures)
 }
@@ -129,6 +146,7 @@ pub fn save_dropped_files(
     let captures = save_dropped_files_with_store(&store, paths)?;
     for capture in &captures {
         let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+        let _ = app.emit(DOCK_PULSE_EVENT, ());
     }
     Ok(captures)
 }
@@ -211,6 +229,44 @@ pub fn delete_capture(
         },
     );
     Ok(())
+}
+
+/// Count of non-deleted captures created since the user last opened the
+/// Inbox. Reads `last_inbox_open_id` from `app_settings` (default: ULID
+/// min when never written) and runs the count against the live store —
+/// per PRD note #133 the badge is computed on demand, never cached.
+pub fn unread_count_with_store(store: &Store) -> Result<u64, String> {
+    let cursor = store
+        .settings_get(SETTING_LAST_INBOX_OPEN_ID)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| ULID_MIN.to_string());
+    store.count_after(&cursor).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn unread_count(store: State<'_, Store>) -> Result<u64, String> {
+    unread_count_with_store(&store)
+}
+
+/// Mark the Inbox as having just been opened: compute the count being
+/// cleared, then advance `last_inbox_open_id` to the id of the newest
+/// existing capture. Empty store is a no-op (returns 0, leaves the
+/// setting unwritten) so re-opening an empty Inbox does not poison the
+/// cursor with a value the next save could not exceed.
+pub fn mark_inbox_opened_with_store(store: &Store) -> Result<u64, String> {
+    let cleared = unread_count_with_store(store)?;
+    let newest = store.list_before(None, 1).map_err(|e| e.to_string())?;
+    if let Some(latest) = newest.first() {
+        store
+            .settings_set(SETTING_LAST_INBOX_OPEN_ID, &latest.id)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(cleared)
+}
+
+#[tauri::command]
+pub fn mark_inbox_opened(store: State<'_, Store>) -> Result<u64, String> {
+    mark_inbox_opened_with_store(&store)
 }
 
 /// Show + focus the Composer (main) window. The Dock JS calls this on
