@@ -11,7 +11,7 @@ fn default_registry_contains_open_composer_binding() {
         .find(|b| b.id == ShortcutId::OpenComposer)
         .expect("OpenComposer binding must be present");
 
-    assert_eq!(open_composer.accelerator, "Ctrl+Opt+Cmd+Space");
+    assert_eq!(open_composer.accelerator, "Ctrl+Alt+Cmd+Space");
     assert_eq!(open_composer.event, "open_composer");
 }
 
@@ -23,6 +23,6 @@ fn default_registry_contains_capture_clipboard_binding() {
         .find(|b| b.id == ShortcutId::CaptureClipboard)
         .expect("CaptureClipboard binding must be present");
 
-    assert_eq!(capture_clipboard.accelerator, "Ctrl+Opt+Cmd+C");
+    assert_eq!(capture_clipboard.accelerator, "Ctrl+Alt+Cmd+C");
     assert_eq!(capture_clipboard.event, "capture_clipboard");
 }

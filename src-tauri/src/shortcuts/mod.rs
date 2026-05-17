@@ -28,12 +28,12 @@ pub fn default_registry() -> Vec<ShortcutBinding> {
     vec![
         ShortcutBinding {
             id: ShortcutId::OpenComposer,
-            accelerator: "Ctrl+Opt+Cmd+Space",
+            accelerator: "Ctrl+Alt+Cmd+Space",
             event: "open_composer",
         },
         ShortcutBinding {
             id: ShortcutId::CaptureClipboard,
-            accelerator: "Ctrl+Opt+Cmd+C",
+            accelerator: "Ctrl+Alt+Cmd+C",
             event: "capture_clipboard",
         },
     ]
