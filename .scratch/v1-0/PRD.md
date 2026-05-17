@@ -31,9 +31,7 @@ After v1.0 the app is usable end-to-end without a terminal.
 11. As a user, I want the Dock to never steal keyboard focus when I click around the screen, so that it never breaks my current app's flow.
 12. As a user, I want clicking the Dock to open the Composer, so that I have a mouse-based path to start a Note Capture.
 13. As a user, I want to drag any file from Finder onto the Dock and have it saved as a Capture (`Shot` for image mimes, `File` otherwise) with the file referenced by its source path, so that I capture without copy + shortcut.
-14. As a user, I want to drag a URL from a browser address bar onto the Dock and have it saved as a `Link` Capture, so that I don't need to copy + paste the URL.
-15. As a user, I want to drag plain selected text from any app onto the Dock and have it saved as a `Clip` Capture (or `Link` if the text is a URL), so that snippets work the same way as clipboard capture.
-16. As a user, I want to drag an image from a browser onto the Dock and have its bytes saved as a `Shot` Capture under `blobs/<ulid>.png`, so that images are preserved even if the source disappears.
+14. As a user, when I drag a URL from a browser address bar, plain selected text, or an image, I currently use the clipboard shortcut (`Cmd+C` then `Ctrl+Alt+Cmd+C`) because the Dock's drop target only accepts Finder files in v1.0 (see ADR-0008 — Tauri's drag-drop API forces a single-channel choice; full multi-source drag is deferred until upstream allows a custom handler).
 17. As a user, I want the Dock to show a pulse animation on each successful capture, so that I have visual confirmation without context-switching to the Inbox.
 18. As a user, I want the Dock to show a small numeric badge whose value is the number of Captures created since I last opened the Inbox, so that I have an at-a-glance unread count. Opening the Inbox resets the badge to zero.
 19. As a user, I want the badge to hide when the unread count is zero, so that the Dock is visually quiet when there is nothing to review.
@@ -85,14 +83,7 @@ Rust emits `captures.changed` (payload: the new Capture) on every successful `sa
 
 ### Drag-and-drop
 
-Two layers (see ADR-0008):
-
-- **Tauri file-drop**: registered on the Dock window via `WebviewWindowBuilder::on_drag_drop_event` (or the equivalent v2 API). Fires for Finder drags. Each dropped path becomes one `Capture`: image mime -> `Shot { source_path }`, else `File { source_path, mime, original_name }`. Reuses `kind_detect::decide` paths from slice 05 of v0.1.
-- **HTML5 `ondrop`**: on the Dock's root element. Reads the `DataTransfer`:
-  - `text/uri-list` or single URL string -> `Link`.
-  - `text/plain` containing a URL -> `Link`; otherwise `Clip`.
-  - `image/*` mime -> read bytes, save as `Shot` (bytes flavor) via a new `save_dragged_image(bytes, mime)` command.
-  Drop events that arrive via both layers (e.g. a Finder file drop that the WebView also surfaces) are de-duplicated by preferring the Tauri layer.
+Tauri-native file drops only in v1.0 (see ADR-0008): the Dock window registers `WebviewWindow::on_drag_drop_event` (or the equivalent v2 API) and consumes the `DragDropEvent::Drop` event. Each dropped path becomes one Capture — image mime -> `Shot { source_path }`, else `File { source_path, mime, original_name }`. No file copies into `blobs/`. URL, plain-text, and image-bytes drag-drops are out of scope until Tauri exposes a custom drag-drop handler that lets HTML5 and native channels coexist; until then the clipboard shortcut covers those payloads.
 
 ### Tray
 
@@ -112,11 +103,11 @@ Same policy as v0.1 (ADR-0005): every Rust module and every Svelte component shi
 - **`store::settings_get`/`settings_set`** — integration test: round-trip a key, overwrite, read.
 - **`commands` additions** — each new command has at least one happy-path test composed against a temp store + (where relevant) a fake shell adapter for `open_in_browser` / `reveal_in_finder` / `open_blob`. Introduce a `Shell` trait + `FakeShell` mirroring the `Clipboard` pattern from slice 04 of v0.1.
 - **`tray` module** — extract a menu intent registry (`TrayMenuItem` enum + handler mapping) and test the registry the same way `shortcuts` is tested. The OS-level menu is verified by manual smoke.
-- **`drag_drop` module** (new) — pure decision function `decide_drop(payload: DropPayload) -> Vec<CaptureInput>` analogous to `kind_detect::decide`. Tests cover file paths, URL strings, plain text URL vs Clip, raw image bytes, and dedup behavior.
+- **`drag_drop` module** (new) — pure decision function `decide_dropped_files(paths: Vec<PathBuf>) -> Result<Vec<CaptureInput>, DropError>` analogous to `kind_detect::decide`. Tests cover image-mime path, non-image-mime path, mixed list, and empty list. URL / text / image-bytes drag types are out of v1.0 scope per ADR-0008.
 - **Svelte components**:
   - `Inbox.svelte` (list pane): mount with a fixed Captures array; assert it renders one row per item; `↑`/`↓` moves visual selection; `Enter` calls injected handler with the selected Capture; `S` calls injected `onStar` handler; `Cmd+Delete` calls injected `onDelete` handler.
   - `InboxDetail.svelte`: mount with each kind in turn; assert the appropriate "Open" affordance is rendered; clicking it calls the injected handler.
-  - `Dock.svelte`: mount; assert clicking dispatches `onComposer`; right-click dispatches `onMenu`; dragover/drop wiring calls injected `onDrop(payload)` with the right shape.
+  - `Dock.svelte`: mount; assert clicking dispatches `onComposer`; right-click dispatches `onMenu`; the `drag-active` class toggles on the `dragActive` prop. (No HTML5 drop assertions — file drops arrive via the Tauri-native channel; see ADR-0008.)
 - **Live update**: a thin integration test on the Svelte side that fires a synthetic `captures.changed` event through the injected event source and asserts the list grows.
 
 Per ADR-0006, each slice runs `cargo check`, `cargo test`, `pnpm check`, `pnpm test` to green before its commit lands.
@@ -124,6 +115,7 @@ Per ADR-0006, each slice runs `cargo check`, `cargo test`, `pnpm check`, `pnpm t
 ## Out of Scope
 
 - Inbox search / filter (defer to v1.1).
+- Dock drag-drop for URL, plain text, and browser image bytes (defer until Tauri exposes a custom drag-drop handler — see ADR-0008). File drops from Finder are in scope.
 - Settings UI: Dock corner config, shortcut rebinding, default open-actions.
 - Auto-launch at login.
 - Drag-export FROM Dock to other apps.

@@ -38,7 +38,7 @@ The two user-facing windows. Always referred to by these names.
 The small, frameless, always-on-top widget pinned to the bottom-left of the screen. Non-activating (never steals focus). Persistent for the life of the app session.
 
 Roles:
-- Visible drop target for files, images, URLs, and text dragged from any app.
+- Visible drop target for files dragged from Finder. v1.0 ships file drops only; URL, text, and image drags from browsers are deferred (see ADR-0008) and reached through the clipboard shortcut instead.
 - Click target that opens the [Composer](#composer).
 - Surface for ambient feedback (e.g. a pulse when a capture lands).
 
