@@ -265,7 +265,7 @@
 </script>
 
 <div class="inbox" data-testid="inbox">
-  <div class="titlebar" aria-hidden="true"></div>
+  <div class="titlebar" data-tauri-drag-region aria-hidden="true"></div>
   <div class="panes">
     <section class="list-pane" onscroll={onScroll}>
       {#if !loading && captures.length === 0}
@@ -331,10 +331,11 @@
 
   /* Thin draggable strip under macOS traffic-light buttons. The window
      uses titleBarStyle="Overlay" so the OS chrome floats above content;
-     this strip reserves vertical room for the buttons and makes the
-     whole top edge draggable. */
+     this strip reserves vertical room for the buttons and is wired
+     to Tauri's native drag via the data-tauri-drag-region attribute
+     on the element (more reliable than the CSS -webkit-app-region
+     rule, which is a no-op in some Tauri 2 webview configurations). */
   .titlebar {
-    -webkit-app-region: drag;
     background-color: transparent;
   }
 

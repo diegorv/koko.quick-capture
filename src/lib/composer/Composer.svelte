@@ -68,7 +68,7 @@
   }
 </script>
 
-<div class="composer" class:saved>
+<div class="composer" class:saved data-tauri-drag-region>
   <textarea
     bind:this={textarea}
     bind:value={text}
