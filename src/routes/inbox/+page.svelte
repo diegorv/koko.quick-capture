@@ -201,9 +201,9 @@
   onMount(async () => {
     await loadNext();
     try {
-      unlisten = await listenFn("captures.changed", onChanged);
+      unlisten = await listenFn("captures:changed", onChanged);
     } catch (err) {
-      console.error("listen captures.changed failed", err);
+      console.error("listen captures:changed failed", err);
     }
   });
 

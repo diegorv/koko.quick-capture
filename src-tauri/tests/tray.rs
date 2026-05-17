@@ -15,9 +15,9 @@ fn default_menu_has_three_items_in_order() {
 
     assert_eq!(menu[1].item, TrayMenuItem::OpenInbox);
     assert_eq!(menu[1].label, "Open Inbox");
-    assert_eq!(menu[1].event, "tray.open_inbox");
+    assert_eq!(menu[1].event, "tray:open_inbox");
 
     assert_eq!(menu[2].item, TrayMenuItem::Quit);
     assert_eq!(menu[2].label, "Quit");
-    assert_eq!(menu[2].event, "tray.quit");
+    assert_eq!(menu[2].event, "tray:quit");
 }

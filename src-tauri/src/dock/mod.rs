@@ -18,10 +18,10 @@
 use crate::tray::{default_menu, TrayMenuBinding};
 
 /// Event name emitted when the frontmost app enters fullscreen.
-pub const EVENT_FULLSCREEN_ENTERED: &str = "dock.fullscreen.entered";
+pub const EVENT_FULLSCREEN_ENTERED: &str = "dock:fullscreen:entered";
 
 /// Event name emitted when the frontmost app exits fullscreen.
-pub const EVENT_FULLSCREEN_EXITED: &str = "dock.fullscreen.exited";
+pub const EVENT_FULLSCREEN_EXITED: &str = "dock:fullscreen:exited";
 
 /// Right-click menu binding for the Dock. Same intent as the Tray, but
 /// with Dock-scoped `menu_id`s so the menu builder can route the popup
@@ -42,15 +42,15 @@ pub fn default_context_menu() -> Vec<DockMenuBinding> {
     vec![
         DockMenuBinding {
             tray: tray[0].clone(),
-            menu_id: "dock.open_composer",
+            menu_id: "dock:open_composer",
         },
         DockMenuBinding {
             tray: tray[1].clone(),
-            menu_id: "dock.open_inbox",
+            menu_id: "dock:open_inbox",
         },
         DockMenuBinding {
             tray: tray[2].clone(),
-            menu_id: "dock.quit",
+            menu_id: "dock:quit",
         },
     ]
 }

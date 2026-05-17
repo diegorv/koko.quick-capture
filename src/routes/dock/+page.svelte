@@ -63,27 +63,27 @@
     })();
 
     const unlisteners: Promise<UnlistenFn>[] = [
-      listen("dock.fullscreen.entered", async () => {
+      listen("dock:fullscreen:entered", async () => {
         try {
           await win.hide();
         } catch (err) {
           console.error("dock hide failed", err);
         }
       }),
-      listen("dock.fullscreen.exited", async () => {
+      listen("dock:fullscreen:exited", async () => {
         try {
           await win.show();
         } catch (err) {
           console.error("dock show failed", err);
         }
       }),
-      listen("dock.drag.enter", () => {
+      listen("dock:drag:enter", () => {
         dragActive = true;
       }),
-      listen("dock.drag.leave", () => {
+      listen("dock:drag:leave", () => {
         dragActive = false;
       }),
-      listen<unknown>("captures.changed", (evt) => {
+      listen<unknown>("captures:changed", (evt) => {
         // `captures.changed` carries a full `Capture` on save (slice 02
         // contract) and a thin `MutationNotice { id, kind }` on star /
         // soft-delete (slice 03). Only saves should bump the unread
@@ -94,10 +94,10 @@
           unread += 1;
         }
       }),
-      listen("dock.pulse", () => {
+      listen("dock:pulse", () => {
         pulseKey += 1;
       }),
-      listen("dock.badge.cleared", () => {
+      listen("dock:badge:cleared", () => {
         unread = 0;
       }),
     ];

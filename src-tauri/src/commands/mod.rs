@@ -29,7 +29,7 @@ use crate::store::{Capture, CaptureInput, CaptureKind, Store, SETTING_LAST_INBOX
 /// - On `star_capture` / `delete_capture`: a thin `MutationNotice`
 ///   with `{ id, kind: "starred" | "deleted" }` so subscribers can
 ///   decide whether to refetch (mutation) or prepend (new row).
-pub const CAPTURES_CHANGED_EVENT: &str = "captures.changed";
+pub const CAPTURES_CHANGED_EVENT: &str = "captures:changed";
 
 /// Event emitted alongside `captures.changed` on every successful save
 /// (Note, clipboard, dropped files). The Dock subscribes to this to
@@ -38,13 +38,13 @@ pub const CAPTURES_CHANGED_EVENT: &str = "captures.changed";
 /// and the pulse animation (driven by this event) can be reasoned about
 /// independently — e.g. star / soft-delete must NOT pulse but DO emit
 /// `captures.changed`.
-pub const DOCK_PULSE_EVENT: &str = "dock.pulse";
+pub const DOCK_PULSE_EVENT: &str = "dock:pulse";
 
 /// Event emitted when the Inbox window is shown (shortcut, tray menu,
 /// Dock context-menu, or any future entry point). The Dock JS sets its
 /// badge state to 0 on receipt. Rust also persists the new
 /// `last_inbox_open_id` so the cleared state survives a restart.
-pub const DOCK_BADGE_CLEARED_EVENT: &str = "dock.badge.cleared";
+pub const DOCK_BADGE_CLEARED_EVENT: &str = "dock:badge:cleared";
 
 /// Thin payload emitted with `captures.changed` on star / soft-delete.
 /// Slice 02 emits a full `Capture` on save; slice 03 emits this shape

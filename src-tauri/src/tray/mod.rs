@@ -35,19 +35,19 @@ pub fn default_menu() -> Vec<TrayMenuBinding> {
             item: TrayMenuItem::OpenComposer,
             label: "Open Composer",
             event: "open_composer",
-            menu_id: "tray.open_composer",
+            menu_id: "tray:open_composer",
         },
         TrayMenuBinding {
             item: TrayMenuItem::OpenInbox,
             label: "Open Inbox",
-            event: "tray.open_inbox",
-            menu_id: "tray.open_inbox",
+            event: "tray:open_inbox",
+            menu_id: "tray:open_inbox",
         },
         TrayMenuBinding {
             item: TrayMenuItem::Quit,
             label: "Quit",
-            event: "tray.quit",
-            menu_id: "tray.quit",
+            event: "tray:quit",
+            menu_id: "tray:quit",
         },
     ]
 }

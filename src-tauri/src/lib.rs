@@ -33,11 +33,11 @@ use crate::tray::{default_menu, TrayMenuItem};
 /// Event emitted by the Dock window's drag-drop handler when a drag
 /// gesture enters the Dock surface. The Dock JS subscribes to it to
 /// toggle the `drag-active` visual class.
-pub const DOCK_DRAG_ENTER_EVENT: &str = "dock.drag.enter";
+pub const DOCK_DRAG_ENTER_EVENT: &str = "dock:drag:enter";
 
 /// Event emitted by the Dock window's drag-drop handler when the drag
 /// gesture leaves the Dock (cancelled, drop fired, or cursor moved out).
-pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock.drag.leave";
+pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock:drag:leave";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -156,7 +156,7 @@ pub fn run() {
             // the Inbox as opened so the Dock's badge clears and the
             // new cursor persists across restarts.
             let inbox_app = app.handle().clone();
-            app.listen("tray.open_inbox", move |_evt| {
+            app.listen("tray:open_inbox", move |_evt| {
                 let app_handle = inbox_app.clone();
                 let _ = inbox_app.run_on_main_thread(move || {
                     if let Some(window) = app_handle.get_webview_window("inbox") {
