@@ -17,6 +17,15 @@
     node.focus();
   }
 
+  function quietTextarea(node: HTMLTextAreaElement) {
+    // WebKit-specific attributes that the Svelte type system does not
+    // know about. Setting them imperatively keeps them out of the
+    // textarea props type while still applying the behavior macOS
+    // WebView honors.
+    node.setAttribute("autocorrect", "off");
+    node.setAttribute("autocapitalize", "off");
+  }
+
   async function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -37,11 +46,10 @@
     bind:value={text}
     onkeydown={handleKeydown}
     use:focusOnMount
+    use:quietTextarea
     placeholder="Capture a note..."
     aria-label="Note text"
     autocomplete="off"
-    autocorrect="off"
-    autocapitalize="off"
     spellcheck="false"
   ></textarea>
 </div>
