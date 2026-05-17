@@ -53,8 +53,10 @@ pub fn run() {
             ShortcutId::CaptureClipboard => {
                 let store = app.state::<Store>();
                 match capture_clipboard_now_with(&SystemClipboard::new(), &store) {
-                    Ok(capture) => {
-                        let _ = app.emit(binding.event, &capture);
+                    Ok(captures) => {
+                        // Emit the full batch so future UI surfaces can
+                        // count N rows (e.g. for a multi-file copy).
+                        let _ = app.emit(binding.event, &captures);
                     }
                     Err(e) => {
                         eprintln!("capture_clipboard_now failed: {e}");

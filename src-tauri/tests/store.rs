@@ -2,9 +2,10 @@
 //! SQLite file inside a tempdir so they cannot collide and never touch
 //! the real `~/Library/Application Support` location.
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
-use quick_capture_lib::store::{CaptureInput, CaptureKind, Store};
+use quick_capture_lib::store::{CaptureInput, CaptureKind, ShotSource, Store};
 use tempfile::TempDir;
 use ulid::Ulid;
 
@@ -63,6 +64,120 @@ fn set_star_toggles_the_flag() {
     store.set_star(&id, false).expect("unstar");
     let listed = store.list(10).expect("list");
     assert!(!listed[0].starred, "expected starred=false after toggle");
+}
+
+#[test]
+fn save_shot_bytes_writes_blob_under_ulid_name() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir.path().join("captures.db");
+    let store = Store::open(&db_path).expect("open store");
+    let bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF, 0xEE];
+
+    let saved = store
+        .save(CaptureInput::Shot {
+            source: ShotSource::Bytes {
+                bytes: bytes.clone(),
+                mime: "image/png".into(),
+            },
+            width: Some(64),
+            height: Some(48),
+        })
+        .expect("save shot");
+
+    assert_eq!(saved.kind, CaptureKind::Shot);
+    assert_eq!(
+        saved.payload.get("mime").and_then(|v| v.as_str()),
+        Some("image/png")
+    );
+    assert_eq!(saved.payload.get("width").and_then(|v| v.as_u64()), Some(64));
+    assert_eq!(
+        saved.payload.get("height").and_then(|v| v.as_u64()),
+        Some(48)
+    );
+    let blob_path = saved
+        .payload
+        .get("blob_path")
+        .and_then(|v| v.as_str())
+        .expect("blob_path must be present");
+    let blob_path = PathBuf::from(blob_path);
+
+    assert!(blob_path.exists(), "expected blob file at {blob_path:?}");
+    assert_eq!(
+        blob_path.parent().expect("blob parent"),
+        dir.path().join("blobs"),
+        "blobs/ must sit next to the db file"
+    );
+    assert_eq!(
+        blob_path.file_name().and_then(|n| n.to_str()),
+        Some(format!("{}.png", saved.id).as_str()),
+        "blob filename stem must be the capture ULID"
+    );
+    let on_disk = std::fs::read(&blob_path).expect("read blob");
+    assert_eq!(on_disk, bytes, "blob bytes must match input bytes");
+}
+
+#[test]
+fn save_shot_path_does_not_copy_file() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir.path().join("captures.db");
+    let store = Store::open(&db_path).expect("open store");
+
+    let saved = store
+        .save(CaptureInput::Shot {
+            source: ShotSource::Path {
+                source_path: PathBuf::from("/Users/me/screenshot.png"),
+                mime: "image/png".into(),
+            },
+            width: None,
+            height: None,
+        })
+        .expect("save shot path");
+
+    assert_eq!(saved.kind, CaptureKind::Shot);
+    assert_eq!(
+        saved.payload.get("source_path").and_then(|v| v.as_str()),
+        Some("/Users/me/screenshot.png")
+    );
+    assert_eq!(
+        saved.payload.get("mime").and_then(|v| v.as_str()),
+        Some("image/png")
+    );
+    assert!(
+        saved.payload.get("blob_path").is_none(),
+        "path-flavor Shot must not record a blob_path"
+    );
+    let blobs_dir = dir.path().join("blobs");
+    assert!(
+        !blobs_dir.exists() || std::fs::read_dir(&blobs_dir).map(|r| r.count()).unwrap_or(0) == 0,
+        "no blob file must be created when source is a path"
+    );
+}
+
+#[test]
+fn save_file_records_source_path_and_original_name() {
+    let (_dir, store) = temp_store();
+
+    let saved = store
+        .save(CaptureInput::File {
+            source_path: PathBuf::from("/Users/me/notes.pdf"),
+            mime: "application/pdf".into(),
+            original_name: Some("notes.pdf".into()),
+        })
+        .expect("save file");
+
+    assert_eq!(saved.kind, CaptureKind::File);
+    assert_eq!(
+        saved.payload.get("source_path").and_then(|v| v.as_str()),
+        Some("/Users/me/notes.pdf")
+    );
+    assert_eq!(
+        saved.payload.get("mime").and_then(|v| v.as_str()),
+        Some("application/pdf")
+    );
+    assert_eq!(
+        saved.payload.get("original_name").and_then(|v| v.as_str()),
+        Some("notes.pdf")
+    );
 }
 
 #[test]

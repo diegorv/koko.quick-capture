@@ -44,8 +44,27 @@ impl CaptureKind {
     }
 }
 
+/// Where the image bytes for a `Shot` Capture come from.
+///
+/// Two sources end up as `Shot`: bytes pulled off the clipboard
+/// (screenshot in `Cmd+Ctrl+Shift+4` style flows), and a file reference
+/// to an existing image on disk (a Finder copy of `.png` etc.). We keep
+/// them on one variant rather than two so the `kind()` mapping stays a
+/// single arm and `kind_detect` returns a flat `CaptureInput::Shot`.
+#[derive(Debug, Clone)]
+pub enum ShotSource {
+    /// Image bytes that need persisting under `blobs/<ulid>.<ext>`.
+    Bytes { bytes: Vec<u8>, mime: String },
+    /// An existing on-disk image; recorded by path, not copied.
+    Path {
+        source_path: PathBuf,
+        mime: String,
+    },
+}
+
 /// What the caller hands to `save`. Slice 02 added `Note`; slice 04
-/// adds `Link` and `Clip` for the clipboard-capture path.
+/// added `Link` and `Clip`; slice 05 adds `Shot` (clipboard image or
+/// image file reference) and `File` (non-image file reference).
 #[derive(Debug, Clone)]
 pub enum CaptureInput {
     Note {
@@ -59,6 +78,16 @@ pub enum CaptureInput {
     Clip {
         text: String,
     },
+    Shot {
+        source: ShotSource,
+        width: Option<u32>,
+        height: Option<u32>,
+    },
+    File {
+        source_path: PathBuf,
+        mime: String,
+        original_name: Option<String>,
+    },
 }
 
 impl CaptureInput {
@@ -67,22 +96,8 @@ impl CaptureInput {
             CaptureInput::Note { .. } => CaptureKind::Note,
             CaptureInput::Link { .. } => CaptureKind::Link,
             CaptureInput::Clip { .. } => CaptureKind::Clip,
-        }
-    }
-
-    fn payload_json(&self) -> serde_json::Value {
-        match self {
-            CaptureInput::Note { text } => serde_json::json!({ "text": text }),
-            CaptureInput::Link {
-                url,
-                raw_text,
-                title,
-            } => serde_json::json!({
-                "url": url,
-                "raw_text": raw_text,
-                "title": title,
-            }),
-            CaptureInput::Clip { text } => serde_json::json!({ "text": text }),
+            CaptureInput::Shot { .. } => CaptureKind::Shot,
+            CaptureInput::File { .. } => CaptureKind::File,
         }
     }
 }
@@ -141,11 +156,13 @@ impl From<serde_json::Error> for StoreError {
 
 pub struct Store {
     conn: std::sync::Mutex<Connection>,
+    blobs_dir: PathBuf,
 }
 
 impl Store {
     /// Open the store at `path`. Creates the parent directory and runs
-    /// the schema migration if needed.
+    /// the schema migration if needed. The `blobs/` directory sits next
+    /// to the database file (created lazily on the first image save).
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StoreError> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -153,8 +170,13 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         Self::migrate(&conn)?;
+        let blobs_dir = path
+            .parent()
+            .map(|p| p.join("blobs"))
+            .unwrap_or_else(|| PathBuf::from("blobs"));
         Ok(Store {
             conn: std::sync::Mutex::new(conn),
+            blobs_dir,
         })
     }
 
@@ -182,12 +204,14 @@ impl Store {
     }
 
     /// Persist a new Capture. The id is a freshly minted ULID and the
-    /// `created_at` is now (UTC, RFC3339).
+    /// `created_at` is now (UTC, RFC3339). For `Shot { source: Bytes }`
+    /// the bytes are written to `blobs/<ulid>.<ext>` next to the DB and
+    /// `payload.blob_path` records the resolved path.
     pub fn save(&self, input: CaptureInput) -> Result<Capture, StoreError> {
         let id = Ulid::new().to_string();
         let kind = input.kind();
         let created_at = now_rfc3339();
-        let payload = input.payload_json();
+        let payload = self.build_payload(&id, &input)?;
         let payload_str = serde_json::to_string(&payload)?;
 
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -205,6 +229,62 @@ impl Store {
             source_app: None,
             starred: false,
             deleted_at: None,
+        })
+    }
+
+    /// Build the JSON payload for a capture row, doing any side-effects
+    /// (blob writes) the variant requires. Kept on `Store` because the
+    /// `Shot { Bytes }` arm needs `blobs_dir`.
+    fn build_payload(
+        &self,
+        id: &str,
+        input: &CaptureInput,
+    ) -> Result<serde_json::Value, StoreError> {
+        Ok(match input {
+            CaptureInput::Note { text } => serde_json::json!({ "text": text }),
+            CaptureInput::Link {
+                url,
+                raw_text,
+                title,
+            } => serde_json::json!({
+                "url": url,
+                "raw_text": raw_text,
+                "title": title,
+            }),
+            CaptureInput::Clip { text } => serde_json::json!({ "text": text }),
+            CaptureInput::Shot {
+                source,
+                width,
+                height,
+            } => match source {
+                ShotSource::Bytes { bytes, mime } => {
+                    let ext = extension_for_mime(mime);
+                    std::fs::create_dir_all(&self.blobs_dir)?;
+                    let blob_path = self.blobs_dir.join(format!("{id}.{ext}"));
+                    std::fs::write(&blob_path, bytes)?;
+                    serde_json::json!({
+                        "blob_path": blob_path.to_string_lossy(),
+                        "mime": mime,
+                        "width": width,
+                        "height": height,
+                    })
+                }
+                ShotSource::Path { source_path, mime } => serde_json::json!({
+                    "source_path": source_path.to_string_lossy(),
+                    "mime": mime,
+                    "width": width,
+                    "height": height,
+                }),
+            },
+            CaptureInput::File {
+                source_path,
+                mime,
+                original_name,
+            } => serde_json::json!({
+                "source_path": source_path.to_string_lossy(),
+                "mime": mime,
+                "original_name": original_name,
+            }),
         })
     }
 
@@ -338,6 +418,22 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = (y + if m <= 2 { 1 } else { 0 }) as i32;
     (year, m as u32, d as u32)
+}
+
+/// Pick a file extension for a blob given its mime. Hand-rolled rather
+/// than reaching for `mime_guess` because we only persist a handful of
+/// mimes today; `mime_guess` is for the reverse direction (path -> mime)
+/// that `kind_detect` already uses.
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/heic" => "heic",
+        "image/tiff" => "tiff",
+        _ => "bin",
+    }
 }
 
 fn default_db_path() -> Result<PathBuf, StoreError> {

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Clipboard image and file kinds
 

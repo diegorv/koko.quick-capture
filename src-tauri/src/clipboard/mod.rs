@@ -6,11 +6,15 @@
 //! composes against `&dyn Clipboard` so tests can feed arbitrary
 //! snapshots without a real keyboard or pasteboard.
 //!
-//! Slice 04 only exercises the `Text` variant. The `Image` and `Files`
-//! variants are declared so slice 05 can fill them in without changing
-//! the public shape; the real backend returns `UnsupportedFormat` for
-//! anything that is not text.
+//! Slice 05 fills in the `Image` and `Files` variants. Read priority is
+//! files -> image -> text: a Finder copy advertises both file URLs and
+//! a thumbnail image on `NSPasteboard`, and we want to keep the file
+//! list because dropping to image would lose paths and original names.
+//! Image bytes returned by `arboard` are raw RGBA + dimensions; we
+//! re-encode to PNG inside this module so callers receive a known mime
+//! and a self-describing byte stream.
 
+use std::io::Cursor;
 use std::path::PathBuf;
 
 /// What `Clipboard::read` returns. A closed set so `kind_detect` can
@@ -26,9 +30,10 @@ pub enum ClipboardSnapshot {
 pub enum ClipboardError {
     /// The clipboard is empty or contains a format we did not request.
     Empty,
-    /// The clipboard holds something we cannot read yet (e.g. image or
-    /// file references in slice 04). Slice 05 will replace this for the
-    /// image and files paths.
+    /// The clipboard holds a format we cannot decode (e.g. an image we
+    /// cannot encode as PNG). Slice 05 only emits this for genuinely
+    /// unrecognisable content; text, files, and clipboard images are
+    /// handled.
     UnsupportedFormat,
     /// The underlying OS-level read failed.
     Backend(String),
@@ -53,8 +58,9 @@ pub trait Clipboard {
     fn read(&self) -> Result<ClipboardSnapshot, ClipboardError>;
 }
 
-/// Real backend, backed by `arboard`. Image and file reads return
-/// `UnsupportedFormat` until slice 05 wires them up.
+/// Real backend, backed by `arboard`. Reads in priority order:
+/// file references -> image -> text. A Finder copy publishes both file
+/// URLs and a preview image to `NSPasteboard`, so files must win.
 pub struct SystemClipboard;
 
 impl SystemClipboard {
@@ -73,17 +79,64 @@ impl Clipboard for SystemClipboard {
     fn read(&self) -> Result<ClipboardSnapshot, ClipboardError> {
         let mut cb = arboard::Clipboard::new()
             .map_err(|e| ClipboardError::Backend(e.to_string()))?;
+
+        // 1. Files first: Finder copies publish file URLs alongside a
+        //    preview image, and we want the paths, not the thumbnail.
+        match cb.get().file_list() {
+            Ok(paths) if !paths.is_empty() => return Ok(ClipboardSnapshot::Files(paths)),
+            Ok(_) | Err(arboard::Error::ContentNotAvailable) => {}
+            Err(arboard::Error::ClipboardNotSupported) => {
+                return Err(ClipboardError::Backend("clipboard not supported".into()));
+            }
+            Err(e) => return Err(ClipboardError::Backend(e.to_string())),
+        }
+
+        // 2. Image bytes: arboard returns raw RGBA + dimensions. Re-
+        //    encode as PNG so downstream code has a known mime.
+        match cb.get_image() {
+            Ok(img) => return image_to_png_snapshot(img),
+            Err(arboard::Error::ContentNotAvailable) => {}
+            Err(arboard::Error::ClipboardNotSupported) => {
+                return Err(ClipboardError::Backend("clipboard not supported".into()));
+            }
+            Err(arboard::Error::ConversionFailure) => {
+                return Err(ClipboardError::UnsupportedFormat);
+            }
+            Err(e) => return Err(ClipboardError::Backend(e.to_string())),
+        }
+
+        // 3. Fall back to text.
         match cb.get_text() {
             Ok(text) => Ok(ClipboardSnapshot::Text(text)),
             Err(arboard::Error::ContentNotAvailable) => Err(ClipboardError::Empty),
             Err(arboard::Error::ClipboardNotSupported) => {
                 Err(ClipboardError::Backend("clipboard not supported".into()))
             }
-            // Anything else (image-only contents, etc.) is "we can't read this
-            // as text". Slice 05 will branch on image/file formats here.
             Err(_) => Err(ClipboardError::UnsupportedFormat),
         }
     }
+}
+
+/// Re-encode arboard's RGBA8 buffer as PNG. Kept private to the
+/// `clipboard` module so the image dependency does not leak out.
+fn image_to_png_snapshot(
+    img: arboard::ImageData<'_>,
+) -> Result<ClipboardSnapshot, ClipboardError> {
+    let width = u32::try_from(img.width)
+        .map_err(|_| ClipboardError::UnsupportedFormat)?;
+    let height = u32::try_from(img.height)
+        .map_err(|_| ClipboardError::UnsupportedFormat)?;
+    let buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+        image::ImageBuffer::from_raw(width, height, img.bytes.into_owned())
+            .ok_or(ClipboardError::UnsupportedFormat)?;
+    let mut bytes = Vec::new();
+    buffer
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| ClipboardError::Backend(format!("png encode: {e}")))?;
+    Ok(ClipboardSnapshot::Image {
+        bytes,
+        mime: "image/png".to_string(),
+    })
 }
 
 /// Test-support fake. Lives at module scope (not `#[cfg(test)]`) so
@@ -122,6 +175,30 @@ mod tests {
         let fake = FakeClipboard::with(Ok(ClipboardSnapshot::Text("hello".into())));
         let got = fake.read().expect("fake should return Ok");
         assert_eq!(got, ClipboardSnapshot::Text("hello".into()));
+    }
+
+    #[test]
+    fn fake_clipboard_surfaces_image_snapshot() {
+        let fake = FakeClipboard::with(Ok(ClipboardSnapshot::Image {
+            bytes: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            mime: "image/png".into(),
+        }));
+        let got = fake.read().expect("fake should return Ok");
+        match got {
+            ClipboardSnapshot::Image { bytes, mime } => {
+                assert_eq!(bytes, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+                assert_eq!(mime, "image/png");
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fake_clipboard_surfaces_files_snapshot() {
+        let paths = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.pdf")];
+        let fake = FakeClipboard::with(Ok(ClipboardSnapshot::Files(paths.clone())));
+        let got = fake.read().expect("fake should return Ok");
+        assert_eq!(got, ClipboardSnapshot::Files(paths));
     }
 
     #[test]

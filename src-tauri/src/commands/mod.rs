@@ -30,9 +30,13 @@ pub fn save_note(text: String, store: State<'_, Store>) -> Result<Capture, Strin
     save_note_with_store(&store, &text)
 }
 
-/// Read the current clipboard, detect kind, persist a Capture. Composes
-/// `clipboard` -> `kind_detect` -> `store`. Empty clipboard or an
-/// unsupported snapshot variant returns an error and writes no row.
+/// Read the current clipboard, detect kind(s), persist one or more
+/// Captures. Composes `clipboard` -> `kind_detect` -> `store`. Empty
+/// clipboard or an empty file list returns an error and writes no row.
+///
+/// Returns a `Vec` because one clipboard read can produce N rows: a
+/// multi-file Finder copy expands to one Capture per file. Single-payload
+/// reads (text, single image) return a one-element vec.
 ///
 /// The clipboard adapter is injected so integration tests can feed
 /// arbitrary snapshots; the Tauri command below uses the real
@@ -40,13 +44,17 @@ pub fn save_note(text: String, store: State<'_, Store>) -> Result<Capture, Strin
 pub fn capture_clipboard_now_with(
     clipboard: &dyn Clipboard,
     store: &Store,
-) -> Result<Capture, String> {
+) -> Result<Vec<Capture>, String> {
     let snapshot = clipboard.read().map_err(|e| e.to_string())?;
-    let input = decide(snapshot).map_err(|e| e.to_string())?;
-    store.save(input).map_err(|e| e.to_string())
+    let inputs = decide(snapshot).map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        out.push(store.save(input).map_err(|e| e.to_string())?);
+    }
+    Ok(out)
 }
 
 #[tauri::command]
-pub fn capture_clipboard_now(store: State<'_, Store>) -> Result<Capture, String> {
+pub fn capture_clipboard_now(store: State<'_, Store>) -> Result<Vec<Capture>, String> {
     capture_clipboard_now_with(&SystemClipboard::new(), &store)
 }
