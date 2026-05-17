@@ -39,81 +39,31 @@ pub const DOCK_DRAG_ENTER_EVENT: &str = "dock:drag:enter";
 /// gesture leaves the Dock (cancelled, drop fired, or cursor moved out).
 pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock:drag:leave";
 
-/// Build a procedural template-mode brain icon for the macOS Tray.
-///
-/// Two overlapping stroked circles ("hemispheres") plus a centre line
-/// and a pair of fold strokes per side. Rendered at 44x44 (2x the
-/// standard 22pt menubar slot) so the icon stays crisp on Retina.
-/// All non-zero pixels are pure black with full alpha; macOS treats
-/// the result as a template image and re-tints to match the menubar.
+/// Lucide `brain-circuit` SVG source, recoloured to pure black for
+/// macOS template-mode treatment. macOS re-tints the icon per menubar
+/// theme; the colour values here only matter for the alpha channel.
+const TRAY_ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M12 13h4"/><path d="M12 18h6a2 2 0 0 1 2 2v1"/><path d="M12 8h8"/><path d="M16 8V5a2 2 0 0 1 2-2"/><circle cx="16" cy="13" r=".5" fill="black"/><circle cx="18" cy="3" r=".5" fill="black"/><circle cx="20" cy="21" r=".5" fill="black"/><circle cx="20" cy="8" r=".5" fill="black"/></svg>"##;
+
+/// Rasterise the Lucide brain-circuit SVG into a 44x44 RGBA template
+/// icon for the macOS Tray. 44px = 22pt @2x so it stays crisp on
+/// Retina menubars. macOS reads the alpha channel and recolours.
 ///
 /// Returns the raw RGBA8 buffer suitable for `tauri::image::Image::new_owned`.
 fn build_brain_tray_icon_rgba() -> (Vec<u8>, u32, u32) {
-    use image::{ImageBuffer, Rgba};
-
     const SIZE: u32 = 44;
-    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_pixel(SIZE, SIZE, Rgba([0, 0, 0, 0]));
-    let on = Rgba([0, 0, 0, 255]);
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_str(TRAY_ICON_SVG, &opt)
+        .expect("parse tray icon SVG");
 
-    // Two hemisphere outlines. Centres offset left / right of the
-    // canvas centre so they overlap in the middle.
-    let hemis = [(15.0_f32, 22.0_f32), (29.0_f32, 22.0_f32)];
-    let outer = 10.0_f32;
-    let inner = 8.2_f32;
+    let mut pixmap = tiny_skia::Pixmap::new(SIZE, SIZE)
+        .expect("alloc tray icon pixmap");
 
-    // Fold arcs: smaller rings near the top + bottom of each hemisphere
-    // suggesting cortical folds without trying to be anatomical.
-    let folds: &[(f32, f32, f32)] = &[
-        (12.5, 18.0, 3.3),
-        (12.5, 26.0, 3.3),
-        (31.5, 18.0, 3.3),
-        (31.5, 26.0, 3.3),
-    ];
+    // SVG viewBox is 24x24; scale up to fill the 44x44 pixmap.
+    let scale = SIZE as f32 / 24.0;
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let fx = x as f32 + 0.5;
-            let fy = y as f32 + 0.5;
-
-            // Hemisphere rings.
-            let mut hit = false;
-            for (cx, cy) in &hemis {
-                let r = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-                if r >= inner && r <= outer {
-                    hit = true;
-                    break;
-                }
-            }
-            // Fold arcs.
-            if !hit {
-                for (cx, cy, r0) in folds {
-                    let r = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-                    if (r - r0).abs() <= 0.9 {
-                        hit = true;
-                        break;
-                    }
-                }
-            }
-            // Spine: vertical line down the centre, only where it
-            // would sit inside the union of the two hemispheres.
-            if !hit {
-                let dx = (fx - 22.0).abs();
-                let inside_either = hemis.iter().any(|(cx, cy)| {
-                    ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt() <= outer + 0.2
-                });
-                if dx <= 0.8 && inside_either && fy > 13.0 && fy < 31.0 {
-                    hit = true;
-                }
-            }
-
-            if hit {
-                img.put_pixel(x, y, on);
-            }
-        }
-    }
-
-    (img.into_raw(), SIZE, SIZE)
+    (pixmap.take(), SIZE, SIZE)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

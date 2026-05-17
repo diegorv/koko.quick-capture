@@ -28,6 +28,14 @@ ulid = "1"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 mime_guess = "2"
+# Tray icon rendering: rasterize an inline Lucide SVG to a template-mode
+# RGBA buffer at startup. `resvg` is the maintained pure-Rust renderer;
+# `usvg` parses the SVG into a tree; `tiny-skia` is the pixmap backend
+# resvg writes into. No text features pulled (default-features off on
+# usvg) so we skip fontdb and its OS font-discovery cost.
+resvg = { version = "0.45", default-features = false }
+usvg = { version = "0.45", default-features = false }
+tiny-skia = "0.11"
 
 # Dock fullscreen observer (slice 05): NSWorkspace subscription via
 # closure-based `addObserverForName:...:usingBlock:`. `objc2` is the
