@@ -53,13 +53,22 @@
       lastPulseKey = current;
       // Re-trigger: toggle off then on so consecutive bumps still
       // restart the keyframes (a class transition with the same name
-      // is otherwise a no-op for the browser animation system).
+      // is otherwise a no-op for the browser animation system). The
+      // `onanimationend` handler below resets `pulsing` back to false
+      // when the previous animation finished, so this flip is the
+      // *first* time the class is being added since the last reset.
       pulsing = false;
       tick().then(() => {
         pulsing = true;
       });
     }
   });
+
+  function handleAnimationEnd() {
+    // Drop the `.pulse` class once the keyframes finish so the next
+    // pulseKey bump can re-add it and see a real DOM transition.
+    pulsing = false;
+  }
 
   function handleClick() {
     onComposer();
@@ -83,6 +92,7 @@
   aria-label="Open Composer"
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
+  onanimationend={handleAnimationEnd}
 >
   <span class="glyph" aria-hidden="true">
     <BrainCircuit size={38} strokeWidth={1.6} />
