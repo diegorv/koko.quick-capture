@@ -213,47 +213,65 @@
 </script>
 
 <div class="inbox" data-testid="inbox">
-  <section class="list-pane" onscroll={onScroll}>
-    {#if !loading && captures.length === 0}
-      <div class="empty">
-        <div class="empty-glyph" aria-hidden="true">📥</div>
-        <h2 class="empty-title">No captures yet</h2>
-        <p class="empty-hint">
-          Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
-          or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
-        </p>
-        <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
-      </div>
-    {:else}
-      <InboxList
-        {captures}
-        {selectedId}
-        {onSelect}
-        {onStarToggle}
-        {onDelete}
-        {onOpen}
-        {onClose}
-      />
-      {#if loading}
-        <div class="spinner" aria-live="polite">Loading…</div>
+  <div class="titlebar" aria-hidden="true"></div>
+  <div class="panes">
+    <section class="list-pane" onscroll={onScroll}>
+      {#if !loading && captures.length === 0}
+        <div class="empty">
+          <div class="empty-glyph" aria-hidden="true">📥</div>
+          <h2 class="empty-title">No captures yet</h2>
+          <p class="empty-hint">
+            Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
+            or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
+          </p>
+          <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
+        </div>
+      {:else}
+        <InboxList
+          {captures}
+          {selectedId}
+          {onSelect}
+          {onStarToggle}
+          {onDelete}
+          {onOpen}
+          {onClose}
+        />
+        {#if loading}
+          <div class="spinner" aria-live="polite">Loading…</div>
+        {/if}
       {/if}
-    {/if}
-  </section>
-  <section class="detail-pane">
-    <InboxDetail capture={selectedCapture} {onOpenLink} {onReveal} />
-  </section>
+    </section>
+    <section class="detail-pane">
+      <InboxDetail capture={selectedCapture} {onOpenLink} {onReveal} />
+    </section>
+  </div>
 </div>
 
 <style>
   .inbox {
     display: grid;
-    grid-template-columns: 40% 60%;
+    grid-template-rows: 28px 1fr;
     height: 100vh;
     width: 100vw;
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
       sans-serif;
     color: #0f0f0f;
     background-color: #f6f6f6;
+  }
+
+  /* Thin draggable strip under macOS traffic-light buttons. The window
+     uses titleBarStyle="Overlay" so the OS chrome floats above content;
+     this strip reserves vertical room for the buttons and makes the
+     whole top edge draggable. */
+  .titlebar {
+    -webkit-app-region: drag;
+    background-color: transparent;
+  }
+
+  .panes {
+    display: grid;
+    grid-template-columns: 40% 60%;
+    min-height: 0;
   }
 
   .list-pane {
