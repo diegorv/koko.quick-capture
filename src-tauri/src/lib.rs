@@ -169,7 +169,7 @@ fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::image::Image<
 /// Must run on the main thread on macOS — every caller already hops
 /// via `run_on_main_thread` for the surrounding window operations.
 #[cfg(target_os = "macos")]
-fn set_inbox_activation_policy(app: &tauri::AppHandle, inbox_visible: bool) {
+pub(crate) fn set_inbox_activation_policy(app: &tauri::AppHandle, inbox_visible: bool) {
     let policy = if inbox_visible {
         tauri::ActivationPolicy::Regular
     } else {
@@ -179,7 +179,29 @@ fn set_inbox_activation_policy(app: &tauri::AppHandle, inbox_visible: bool) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn set_inbox_activation_policy(_app: &tauri::AppHandle, _inbox_visible: bool) {}
+pub(crate) fn set_inbox_activation_policy(_app: &tauri::AppHandle, _inbox_visible: bool) {}
+
+/// Intercept a window's native close gesture (red traffic-light /
+/// Cmd+W with default chrome / system menu Close) so it hides instead
+/// of destroying the window. macOS destruction would invalidate
+/// subsequent `get_webview_window(label)` lookups, so every window in
+/// this app is meant to live for the life of the process. The
+/// `on_hide` closure runs after the hide and lets each surface attach
+/// per-window cleanup (e.g. the Inbox flips the macOS activation
+/// policy back to Accessory).
+fn intercept_close_as_hide<F>(window: &tauri::WebviewWindow, on_hide: F)
+where
+    F: Fn() + Send + Sync + 'static,
+{
+    let target = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = target.hide();
+            on_hide();
+        }
+    });
+}
 
 /// Hide the Inbox window and revert the macOS activation policy to
 /// `.Accessory`. Mirrors the `CloseRequested` handler so the JS
@@ -241,21 +263,7 @@ pub fn run() {
         };
         match binding.id {
             ShortcutId::OpenComposer => {
-                // macOS: show()/set_focus() must run on the main thread to
-                // actually activate the app and grab keyboard focus. The
-                // global-hotkey plugin invokes this handler on a worker.
-                // Record the prior frontmost app PID FIRST so that the
-                // Composer's dismiss path can hand focus back to it.
-                let app_handle = app.clone();
-                let event = binding.event;
-                let _ = app.run_on_main_thread(move || {
-                    commands::record_prev_frontmost();
-                    if let Some(window) = app_handle.get_webview_window("composer") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                    let _ = app_handle.emit(event, ());
-                });
+                commands::show_composer(app);
             }
             ShortcutId::CaptureClipboard => {
                 let store = app.state::<Store>();
@@ -278,22 +286,10 @@ pub fn run() {
                 }
             }
             ShortcutId::OpenInbox => {
-                // Mirror the OpenComposer path: show + focus must run
-                // on the main thread on macOS to actually grab focus.
-                // Per-item read state is owned by the Inbox JS — the
-                // shortcut only opens the window and flips the macOS
-                // activation policy to Regular so Cmd+Tab surfaces
-                // the app while the Inbox is on screen.
-                let app_handle = app.clone();
-                let event = binding.event;
-                let _ = app.run_on_main_thread(move || {
-                    set_inbox_activation_policy(&app_handle, true);
-                    if let Some(window) = app_handle.get_webview_window("inbox") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                    let _ = app_handle.emit(event, ());
-                });
+                // The `binding.event` ("open_inbox") is intentionally
+                // not emitted here — the Inbox window is shown
+                // directly and nothing in JS listens for it.
+                commands::show_inbox(app);
             }
         }
     });
@@ -342,17 +338,12 @@ pub fn run() {
             // would make subsequent `get_webview_window("inbox")`
             // return None.
             if let Some(inbox_window) = app.get_webview_window("inbox") {
-                let inbox_clone = inbox_window.clone();
                 let close_app = app.handle().clone();
-                inbox_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = inbox_clone.hide();
-                        // Revert to Accessory so the system Dock icon
-                        // and Cmd+Tab entry disappear once the Inbox
-                        // is no longer on screen.
-                        set_inbox_activation_policy(&close_app, false);
-                    }
+                intercept_close_as_hide(&inbox_window, move || {
+                    // Revert to Accessory so the system Dock icon and
+                    // Cmd+Tab entry disappear once the Inbox is no
+                    // longer on screen.
+                    set_inbox_activation_policy(&close_app, false);
                 });
             }
 
@@ -375,15 +366,7 @@ pub fn run() {
             .shadow(true)
             .center()
             .build()?;
-            {
-                let composer_clone = composer_window.clone();
-                composer_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = composer_clone.hide();
-                    }
-                });
-            }
+            intercept_close_as_hide(&composer_window, || {});
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
@@ -394,14 +377,7 @@ pub fn run() {
             // open does not silently clear pending captures.
             let inbox_app = app.handle().clone();
             app.listen("tray:open_inbox", move |_evt| {
-                let app_handle = inbox_app.clone();
-                let _ = inbox_app.run_on_main_thread(move || {
-                    set_inbox_activation_policy(&app_handle, true);
-                    if let Some(window) = app_handle.get_webview_window("inbox") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                });
+                commands::show_inbox(&inbox_app);
             });
 
             // Tray menu: build from the testable registry so the
@@ -447,24 +423,11 @@ pub fn run() {
                     };
                     match binding.item {
                         TrayMenuItem::OpenComposer => {
-                            // Same main-thread show/focus path the
-                            // OpenComposer shortcut handler uses, plus
-                            // the same prev-frontmost snapshot so
-                            // dismiss_composer can return focus.
-                            let app_handle = app.clone();
-                            let event_name = binding.event;
-                            let _ = app.run_on_main_thread(move || {
-                                commands::record_prev_frontmost();
-                                if let Some(window) = app_handle.get_webview_window("composer") {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
-                                let _ = app_handle.emit(event_name, ());
-                            });
+                            commands::show_composer(app);
                         }
                         TrayMenuItem::OpenInbox => {
                             // The Inbox window subscribes to
-                            // `tray.open_inbox` via `app.listen` in
+                            // `tray:open_inbox` via `app.listen` in
                             // `setup`; emitting on the bus is enough.
                             let _ = app.emit(binding.event, ());
                         }
@@ -602,15 +565,7 @@ pub fn run() {
                 };
                 match binding.tray.item {
                     TrayMenuItem::OpenComposer => {
-                        let app_handle = app.clone();
-                        let event_name = binding.tray.event;
-                        let _ = app.run_on_main_thread(move || {
-                            if let Some(window) = app_handle.get_webview_window("composer") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                            let _ = app_handle.emit(event_name, ());
-                        });
+                        commands::show_composer(app);
                     }
                     TrayMenuItem::OpenInbox => {
                         let _ = app.emit(binding.tray.event, ());

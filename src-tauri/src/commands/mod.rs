@@ -283,18 +283,46 @@ pub fn mark_read(app: AppHandle, store: State<'_, Store>, id: String) -> Result<
 /// `run_on_main_thread`.
 #[tauri::command]
 pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
-    let app_handle = app.clone();
-    app.run_on_main_thread(move || {
-        // Record the prior frontmost app BEFORE we steal activation,
-        // so dismiss_composer can hand focus back to it.
+    show_composer(&app);
+    Ok(())
+}
+
+/// Event emitted on every Composer-summon so the Composer route can
+/// bump its `focusKey` and re-focus the textarea even though the
+/// component is mounted once for the life of the app.
+pub const OPEN_COMPOSER_EVENT: &str = "open_composer";
+
+/// One place that knows how to bring the Composer to screen. Used by
+/// the global shortcut, the tray menu, the Dock click invoke, and any
+/// future entry point. Records the prior frontmost macOS app FIRST
+/// so `dismiss_composer` can hand focus back, then hops to the main
+/// thread for `show + set_focus` (macOS requires both on main).
+pub fn show_composer(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
         record_prev_frontmost();
-        if let Some(window) = app_handle.get_webview_window("composer") {
+        if let Some(window) = handle.get_webview_window("composer") {
             let _ = window.show();
             let _ = window.set_focus();
         }
-        let _ = app_handle.emit("open_composer", ());
-    })
-    .map_err(|e| e.to_string())
+        let _ = handle.emit(OPEN_COMPOSER_EVENT, ());
+    });
+}
+
+/// One place that knows how to bring the Inbox to screen. Flips the
+/// macOS activation policy to Regular so Cmd+Tab surfaces the app
+/// while the Inbox is on screen, then shows + focuses the window.
+/// The close path (`hide_inbox` command + the window's CloseRequested
+/// handler) reverts the policy.
+pub fn show_inbox(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        crate::set_inbox_activation_policy(&handle, true);
+        if let Some(window) = handle.get_webview_window("inbox") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    });
 }
 
 /// Track the macOS PID that was frontmost just before quick-capture
