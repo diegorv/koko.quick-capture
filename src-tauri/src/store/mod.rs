@@ -123,6 +123,10 @@ pub struct Capture {
     pub source_app: Option<String>,
     pub starred: bool,
     pub deleted_at: Option<String>,
+    /// ISO timestamp the user first interacted with this capture in
+    /// the Inbox. `None` means unread. Newly-saved rows are unread by
+    /// default; the row flips on the first `mark_read` call.
+    pub read_at: Option<String>,
 }
 
 #[derive(Debug)]
@@ -205,7 +209,8 @@ impl Store {
                 payload TEXT NOT NULL,
                 source_app TEXT,
                 starred INTEGER NOT NULL DEFAULT 0,
-                deleted_at TEXT
+                deleted_at TEXT,
+                read_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_captures_created_at
                 ON captures(created_at DESC);
@@ -214,6 +219,26 @@ impl Store {
                 value TEXT NOT NULL
             );",
         )?;
+
+        // v1.0 -> v1.1 migration: add `read_at` to existing DBs that
+        // were created before per-item read tracking. SQLite has no
+        // `ADD COLUMN IF NOT EXISTS`, so we discover the current
+        // schema via PRAGMA and only ALTER when the column is absent.
+        // Existing rows are stamped read at their `created_at` so the
+        // new per-item indicator does not paint every historical
+        // capture as unread on first launch under the new schema.
+        let has_read_at: bool = conn
+            .prepare("PRAGMA table_info(captures)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .any(|c| c == "read_at");
+        if !has_read_at {
+            conn.execute_batch(
+                "ALTER TABLE captures ADD COLUMN read_at TEXT;
+                 UPDATE captures SET read_at = created_at WHERE read_at IS NULL;",
+            )?;
+        }
+
         Ok(())
     }
 
@@ -243,6 +268,7 @@ impl Store {
             source_app: None,
             starred: false,
             deleted_at: None,
+            read_at: None,
         })
     }
 
@@ -322,7 +348,7 @@ impl Store {
             Some(c) => {
                 let cursor_str = c.to_string();
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
                      FROM captures
                      WHERE deleted_at IS NULL AND id < ?1
                      ORDER BY id DESC
@@ -335,7 +361,7 @@ impl Store {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
                      FROM captures
                      WHERE deleted_at IS NULL
                      ORDER BY id DESC
@@ -381,11 +407,10 @@ impl Store {
     }
 
     /// Count non-deleted captures whose id is strictly greater than the
-    /// given ULID string. Used by the Dock's unread-since-last-Inbox-open
-    /// badge: the cursor is persisted in `app_settings` so the count
-    /// survives restarts (PRD user story 24). Computed on demand rather
-    /// than cached as a counter so deletes and sibling-process writes
-    /// stay correct without a separate invalidation path.
+    /// given ULID string. Legacy cursor-based unread count; the
+    /// per-item read tracking introduced in v1.0 replaces this for the
+    /// Dock badge, but the method stays exposed because it is still
+    /// referenced by older fixtures and may be useful for diagnostics.
     pub fn count_after(&self, cursor: &str) -> Result<u64, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n: i64 = conn.query_row(
@@ -395,6 +420,35 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(n as u64)
+    }
+
+    /// Count non-deleted captures the user has not yet interacted with.
+    /// Drives the Dock's unread badge under the per-item read model.
+    pub fn count_unread(&self) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM captures
+             WHERE deleted_at IS NULL AND read_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
+    /// Stamp `read_at` for a single capture. Idempotent: a row that
+    /// already has `read_at` set is left alone (the original first-read
+    /// timestamp is preserved). Returns `true` if this call actually
+    /// flipped the row from unread to read, `false` otherwise.
+    pub fn mark_read(&self, id: &Ulid) -> Result<bool, StoreError> {
+        let id_str = id.to_string();
+        let now = now_rfc3339();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "UPDATE captures SET read_at = ?1
+             WHERE id = ?2 AND read_at IS NULL AND deleted_at IS NULL",
+            params![&now, &id_str],
+        )?;
+        Ok(n > 0)
     }
 
     /// Total count of non-deleted captures. Used by the Inbox status
@@ -441,7 +495,7 @@ impl Store {
         let id_str = id.to_string();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at
+            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
              FROM captures
              WHERE id = ?1",
         )?;
@@ -463,6 +517,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
     let source_app: Option<String> = row.get(4)?;
     let starred: i64 = row.get(5)?;
     let deleted_at: Option<String> = row.get(6)?;
+    let read_at: Option<String> = row.get(7)?;
 
     let result = (|| -> Result<Capture, StoreError> {
         let kind = CaptureKind::parse(&kind_str)?;
@@ -475,6 +530,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
             source_app,
             starred: starred != 0,
             deleted_at,
+            read_at,
         })
     })();
     Ok(result)

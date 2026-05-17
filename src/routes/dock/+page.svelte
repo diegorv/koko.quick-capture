@@ -7,9 +7,10 @@
   //               via the app-level `on_menu_event` registered in
   //               `lib::run` setup; see `commands::open_dock_context_menu`)
   //  - fullscreen-enter / -exit -> hide / show this window.
-  //  - `captures.changed` -> increment the unread badge.
+  //  - `captures.changed` -> increment the unread badge (new save).
   //  - `dock.pulse` -> bump `pulseKey` to re-fire the disc animation.
-  //  - `dock.badge.cleared` -> reset the unread badge to 0.
+  //  - `dock:unread:changed` -> overwrite the badge with the live
+  //                              server-side count (payload: u64).
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -98,8 +99,8 @@
       listen("dock:pulse", () => {
         pulseKey += 1;
       }),
-      listen("dock:badge:cleared", () => {
-        unread = 0;
+      listen<number>("dock:unread:changed", (evt) => {
+        unread = Number(evt.payload) || 0;
       }),
     ];
 

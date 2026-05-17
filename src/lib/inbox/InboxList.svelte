@@ -224,10 +224,12 @@
       id={`capture-row-${capture.id}`}
       class="row"
       class:selected={capture.id === selectedId}
+      class:unread={capture.read_at === null}
       role="option"
       aria-selected={capture.id === selectedId}
       onclick={() => selectAndFocus(capture.id)}
     >
+      <span class="unread-dot" aria-hidden="true"></span>
       <span class="kind" aria-label={`kind ${capture.kind}`}>
         <KindIcon size={16} strokeWidth={1.75} />
       </span>
@@ -273,13 +275,31 @@
 
   .row {
     display: grid;
-    grid-template-columns: 1.5rem 1fr auto auto auto;
-    gap: 0.6rem;
+    grid-template-columns: 0.5rem 1.5rem 1fr auto auto auto;
+    gap: 0.5rem;
     align-items: center;
-    padding: 0.65rem 1rem;
+    padding: 0.65rem 0.75rem 0.65rem 0.5rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     cursor: pointer;
     transition: background 80ms ease;
+  }
+
+  /* Per-item unread dot. Hidden by default; only visible on rows
+     whose `read_at` is still null. Reserves its grid column on every
+     row so payloads never reflow when a row flips read. */
+  .unread-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  .row.unread .unread-dot {
+    background: #4c1d95;
+  }
+
+  .row.unread .payload {
+    font-weight: 600;
   }
 
   .row:hover {
@@ -350,6 +370,9 @@
   @media (prefers-color-scheme: dark) {
     .row {
       border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .row.unread .unread-dot {
+      background: #a78bfa;
     }
     .row:hover {
       background: rgba(255, 255, 255, 0.04);

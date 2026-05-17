@@ -588,7 +588,7 @@ pub fn run() {
             commands::delete_capture,
             commands::unread_count,
             commands::total_count,
-            commands::mark_inbox_opened,
+            commands::mark_read,
             commands::open_composer_window,
             commands::open_dock_context_menu,
             commands::open_link,

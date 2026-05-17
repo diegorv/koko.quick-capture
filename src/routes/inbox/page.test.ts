@@ -13,6 +13,7 @@ function note(id: string, text: string): Capture {
     source_app: null,
     starred: false,
     deleted_at: null,
+    read_at: null,
   };
 }
 

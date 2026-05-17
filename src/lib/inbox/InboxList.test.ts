@@ -12,6 +12,7 @@ function note(id: string, text: string): Capture {
     source_app: null,
     starred: false,
     deleted_at: null,
+    read_at: null,
   };
 }
 
@@ -24,6 +25,7 @@ function link(id: string, url: string): Capture {
     source_app: null,
     starred: false,
     deleted_at: null,
+    read_at: null,
   };
 }
 
@@ -40,6 +42,7 @@ function file(id: string, original_name: string): Capture {
     source_app: null,
     starred: false,
     deleted_at: null,
+    read_at: null,
   };
 }
 

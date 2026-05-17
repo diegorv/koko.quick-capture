@@ -170,19 +170,22 @@
 
   function onSelect(id: string) {
     selectedId = id;
-    // Treat the first row interaction as the "I have seen this"
-    // signal. The Rust command advances the unread cursor and emits
-    // dock:badge:cleared. Idempotent and cheap; safe to fire on every
-    // selection rather than tracking a once-per-open flag.
-    invokeFn("mark_inbox_opened", {})
-      .then(() => {
-        // The Rust command returns the count that was cleared, but
-        // the live unread is now 0 because the cursor has advanced
-        // past the newest row.
-        unreadCount = 0;
+    // Per-item read tracking: stamp `read_at` on the row the user
+    // just interacted with. The Rust command returns the live unread
+    // count so the status bar updates without a follow-up round-trip.
+    // Local optimistic update keeps the unread dot from lingering
+    // while the IPC is in flight.
+    const target = captures.find((c) => c.id === id);
+    if (target && target.read_at === null) {
+      const stamped = { ...target, read_at: new Date().toISOString() };
+      captures = captures.map((c) => (c.id === id ? stamped : c));
+    }
+    invokeFn("mark_read", { id })
+      .then((remaining) => {
+        unreadCount = Number(remaining) || 0;
       })
       .catch((err) => {
-        console.error("mark_inbox_opened failed", err);
+        console.error("mark_read failed", err);
       });
   }
 

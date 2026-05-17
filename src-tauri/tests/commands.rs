@@ -3,11 +3,11 @@
 //! to) so we do not need to spin up a Tauri runtime.
 
 use quick_capture_lib::commands::{
-    delete_capture_with_store, list_captures_with_store, mark_inbox_opened_with_store,
+    delete_capture_with_store, list_captures_with_store, mark_read_with_store,
     save_note_with_store, star_capture_with_store, total_count_with_store,
     unread_count_with_store,
 };
-use quick_capture_lib::store::{CaptureInput, CaptureKind, Store, SETTING_LAST_INBOX_OPEN_ID};
+use quick_capture_lib::store::{CaptureInput, CaptureKind, Store};
 use tempfile::TempDir;
 use ulid::Ulid;
 
@@ -151,28 +151,19 @@ fn unread_count_with_store_returns_zero_when_no_captures() {
 }
 
 #[test]
-fn unread_count_with_store_counts_captures_after_setting() {
+fn unread_count_with_store_counts_rows_with_null_read_at() {
     let (_dir, store) = temp_store();
 
-    // Seed 5 notes with 2ms gaps so ULID ids strictly increase.
-    let mut ids = Vec::with_capacity(5);
+    // Freshly-saved rows are unread by default.
     for i in 0..5 {
-        let saved = save_note_with_store(&store, &format!("note {i}")).expect("save");
-        ids.push(saved.id);
+        save_note_with_store(&store, &format!("note {i}")).expect("save");
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-
-    // Set the cursor to the 3rd id — 2 captures (ids[3], ids[4]) come after.
-    store
-        .settings_set(SETTING_LAST_INBOX_OPEN_ID, &ids[2])
-        .expect("set cursor");
-
-    let n = unread_count_with_store(&store).expect("count");
-    assert_eq!(n, 2, "two captures must be newer than the 3rd id");
+    assert_eq!(unread_count_with_store(&store).expect("count"), 5);
 }
 
 #[test]
-fn unread_count_with_store_ignores_soft_deleted() {
+fn unread_count_with_store_ignores_soft_deleted_and_already_read() {
     let (_dir, store) = temp_store();
 
     let mut ids = Vec::with_capacity(3);
@@ -181,17 +172,16 @@ fn unread_count_with_store_ignores_soft_deleted() {
         ids.push(saved.id);
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
+    assert_eq!(unread_count_with_store(&store).expect("before"), 3);
 
-    // Cursor before any of the rows — initial unread = 3.
-    let before = unread_count_with_store(&store).expect("before");
-    assert_eq!(before, 3);
+    // Mark the middle row as read; count drops by one.
+    mark_read_with_store(&store, &ids[1]).expect("mark read");
+    assert_eq!(unread_count_with_store(&store).expect("after read"), 2);
 
-    // Soft-delete one whose id > setting; count must drop by 1.
+    // Soft-delete an unread row; count drops by one more.
     let last = Ulid::from_string(&ids[2]).expect("parse");
     store.soft_delete(&last).expect("soft delete");
-
-    let after = unread_count_with_store(&store).expect("after");
-    assert_eq!(after, 2, "soft-deleted row must not count toward unread");
+    assert_eq!(unread_count_with_store(&store).expect("after delete"), 1);
 }
 
 #[test]
@@ -222,51 +212,40 @@ fn total_count_with_store_counts_live_rows_and_ignores_soft_deleted() {
 }
 
 #[test]
-fn mark_inbox_opened_with_store_writes_newest_id_and_returns_cleared_count() {
+fn mark_read_with_store_flips_one_row_and_returns_remaining_unread() {
     let (_dir, store) = temp_store();
 
-    let mut ids = Vec::with_capacity(4);
-    for i in 0..4 {
+    let mut ids = Vec::with_capacity(3);
+    for i in 0..3 {
         let saved = save_note_with_store(&store, &format!("n{i}")).expect("save");
         ids.push(saved.id);
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
+    assert_eq!(unread_count_with_store(&store).expect("before"), 3);
 
-    // Set the cursor to the 1st id so 3 captures sit after it.
-    store
-        .settings_set(SETTING_LAST_INBOX_OPEN_ID, &ids[0])
-        .expect("seed cursor");
-
-    let cleared = mark_inbox_opened_with_store(&store).expect("mark");
-    assert_eq!(cleared, 3, "must return the count being cleared");
-
-    let saved_cursor = store
-        .settings_get(SETTING_LAST_INBOX_OPEN_ID)
-        .expect("get")
-        .expect("present");
-    assert_eq!(
-        saved_cursor, ids[3],
-        "cursor must advance to the newest id"
-    );
-
-    // A second call clears nothing because the cursor is already current.
-    let cleared_again = mark_inbox_opened_with_store(&store).expect("mark again");
-    assert_eq!(cleared_again, 0);
+    let remaining = mark_read_with_store(&store, &ids[1]).expect("mark");
+    assert_eq!(remaining, 2, "must return the live unread count after the flip");
+    assert_eq!(unread_count_with_store(&store).expect("after"), 2);
 }
 
 #[test]
-fn mark_inbox_opened_with_store_no_op_on_empty_store() {
+fn mark_read_with_store_is_idempotent() {
     let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "only").expect("save");
 
-    let cleared = mark_inbox_opened_with_store(&store).expect("mark");
-    assert_eq!(cleared, 0, "empty store clears nothing");
+    let first = mark_read_with_store(&store, &saved.id).expect("first");
+    assert_eq!(first, 0);
+    let second = mark_read_with_store(&store, &saved.id).expect("second");
+    assert_eq!(second, 0, "second call leaves the row unchanged");
+}
 
-    let cursor = store
-        .settings_get(SETTING_LAST_INBOX_OPEN_ID)
-        .expect("get");
+#[test]
+fn mark_read_with_store_rejects_invalid_ulid() {
+    let (_dir, store) = temp_store();
+    let err = mark_read_with_store(&store, "not-a-ulid").expect_err("must reject");
     assert!(
-        cursor.is_none(),
-        "cursor must remain unwritten when there are no captures"
+        err.to_lowercase().contains("invalid id"),
+        "expected invalid-id message, got: {err}"
     );
 }
 

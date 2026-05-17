@@ -18,7 +18,7 @@ use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
-use crate::store::{Capture, CaptureInput, CaptureKind, Store, SETTING_LAST_INBOX_OPEN_ID, ULID_MIN};
+use crate::store::{Capture, CaptureInput, CaptureKind, Store};
 
 /// Event emitted on every successful Capture mutation (save, star,
 /// soft-delete). Inbox / Dock JS subscribe to this to keep their list
@@ -40,11 +40,12 @@ pub const CAPTURES_CHANGED_EVENT: &str = "captures:changed";
 /// `captures.changed`.
 pub const DOCK_PULSE_EVENT: &str = "dock:pulse";
 
-/// Event emitted when the Inbox window is shown (shortcut, tray menu,
-/// Dock context-menu, or any future entry point). The Dock JS sets its
-/// badge state to 0 on receipt. Rust also persists the new
-/// `last_inbox_open_id` so the cleared state survives a restart.
-pub const DOCK_BADGE_CLEARED_EVENT: &str = "dock:badge:cleared";
+/// Event emitted whenever the unread count changes server-side (a
+/// `mark_read` flip, etc.). The payload is the new u64 unread count;
+/// the Dock JS overwrites its local badge state with the payload so a
+/// missed delta or a race never leaves the badge out of sync with the
+/// store.
+pub const DOCK_UNREAD_CHANGED_EVENT: &str = "dock:unread:changed";
 
 /// Thin payload emitted with `captures.changed` on star / soft-delete.
 /// Slice 02 emits a full `Capture` on save; slice 03 emits this shape
@@ -231,16 +232,11 @@ pub fn delete_capture(
     Ok(())
 }
 
-/// Count of non-deleted captures created since the user last opened the
-/// Inbox. Reads `last_inbox_open_id` from `app_settings` (default: ULID
-/// min when never written) and runs the count against the live store —
-/// per PRD note #133 the badge is computed on demand, never cached.
+/// Count of non-deleted captures the user has not yet interacted with
+/// (i.e. rows with `read_at IS NULL`). Computed on demand against the
+/// live store; never cached.
 pub fn unread_count_with_store(store: &Store) -> Result<u64, String> {
-    let cursor = store
-        .settings_get(SETTING_LAST_INBOX_OPEN_ID)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| ULID_MIN.to_string());
-    store.count_after(&cursor).map_err(|e| e.to_string())
+    store.count_unread().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -258,31 +254,22 @@ pub fn total_count(store: State<'_, Store>) -> Result<u64, String> {
     total_count_with_store(&store)
 }
 
-/// Mark the Inbox as having just been opened: compute the count being
-/// cleared, then advance `last_inbox_open_id` to the id of the newest
-/// existing capture. Empty store is a no-op (returns 0, leaves the
-/// setting unwritten) so re-opening an empty Inbox does not poison the
-/// cursor with a value the next save could not exceed.
-pub fn mark_inbox_opened_with_store(store: &Store) -> Result<u64, String> {
-    let cleared = unread_count_with_store(store)?;
-    let newest = store.list_before(None, 1).map_err(|e| e.to_string())?;
-    if let Some(latest) = newest.first() {
-        store
-            .settings_set(SETTING_LAST_INBOX_OPEN_ID, &latest.id)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(cleared)
+/// Stamp `read_at` on a single capture. Returns the (recomputed) count
+/// of remaining unread rows so the caller can update its UI without a
+/// follow-up `unread_count` round-trip.
+pub fn mark_read_with_store(store: &Store, id: &str) -> Result<u64, String> {
+    let parsed = Ulid::from_string(id).map_err(|e| format!("invalid id: {e}"))?;
+    store.mark_read(&parsed).map_err(|e| e.to_string())?;
+    unread_count_with_store(store)
 }
 
 #[tauri::command]
-pub fn mark_inbox_opened(app: AppHandle, store: State<'_, Store>) -> Result<u64, String> {
-    let cleared = mark_inbox_opened_with_store(&store)?;
-    // Notify the Dock so its badge zeroes immediately — historically
-    // this emit was bolted on at each call site in `lib.rs`, but the
-    // cursor advance now happens from the Inbox JS on first row
-    // interaction, so the emit lives next to the cursor write.
-    let _ = app.emit(DOCK_BADGE_CLEARED_EVENT, ());
-    Ok(cleared)
+pub fn mark_read(app: AppHandle, store: State<'_, Store>, id: String) -> Result<u64, String> {
+    let remaining = mark_read_with_store(&store, &id)?;
+    // Tell the Dock to re-render its badge from the live count rather
+    // than a delta so the two stay in sync even if multiple flips race.
+    let _ = app.emit(DOCK_UNREAD_CHANGED_EVENT, remaining);
+    Ok(remaining)
 }
 
 /// Show + focus the Composer (main) window. The Dock JS calls this on

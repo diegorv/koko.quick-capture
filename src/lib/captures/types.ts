@@ -14,4 +14,8 @@ export interface Capture {
   source_app: string | null;
   starred: boolean;
   deleted_at: string | null;
+  /** ISO timestamp set on first user interaction with the capture in
+   * the Inbox. `null` means unread; the row stays unread until the
+   * user clicks it or selects it via the keyboard. */
+  read_at: string | null;
 }
