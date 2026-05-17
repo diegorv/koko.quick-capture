@@ -5,9 +5,8 @@
 //! the event name the app emits when it fires. The real OS binding is
 //! verified by manual smoke (see slice 02 acceptance criteria).
 
-/// Closed set of shortcut intents. Slice 02 only wires `OpenComposer`;
-/// `CaptureClipboard` lands in slice 04. It lives in the enum here so
-/// the registry shape does not change between slices.
+/// Closed set of shortcut intents. Slice 02 wired `OpenComposer`;
+/// slice 04 adds `CaptureClipboard`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutId {
     OpenComposer,
@@ -23,13 +22,19 @@ pub struct ShortcutBinding {
     pub event: &'static str,
 }
 
-/// Slice 02 registry: only `OpenComposer` is active. `CaptureClipboard`
-/// will be added by slice 04 — leaving it out here keeps the OS-side
-/// registration minimal and aligns with the slice scope.
+/// Slice 04 registry: `OpenComposer` (Composer summon) and
+/// `CaptureClipboard` (clipboard-text capture, no window).
 pub fn default_registry() -> Vec<ShortcutBinding> {
-    vec![ShortcutBinding {
-        id: ShortcutId::OpenComposer,
-        accelerator: "Ctrl+Opt+Cmd+Space",
-        event: "open_composer",
-    }]
+    vec![
+        ShortcutBinding {
+            id: ShortcutId::OpenComposer,
+            accelerator: "Ctrl+Opt+Cmd+Space",
+            event: "open_composer",
+        },
+        ShortcutBinding {
+            id: ShortcutId::CaptureClipboard,
+            accelerator: "Ctrl+Opt+Cmd+C",
+            event: "capture_clipboard",
+        },
+    ]
 }

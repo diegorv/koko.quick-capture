@@ -14,3 +14,15 @@ fn default_registry_contains_open_composer_binding() {
     assert_eq!(open_composer.accelerator, "Ctrl+Opt+Cmd+Space");
     assert_eq!(open_composer.event, "open_composer");
 }
+
+#[test]
+fn default_registry_contains_capture_clipboard_binding() {
+    let bindings = default_registry();
+    let capture_clipboard = bindings
+        .iter()
+        .find(|b| b.id == ShortcutId::CaptureClipboard)
+        .expect("CaptureClipboard binding must be present");
+
+    assert_eq!(capture_clipboard.accelerator, "Ctrl+Opt+Cmd+C");
+    assert_eq!(capture_clipboard.event, "capture_clipboard");
+}

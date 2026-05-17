@@ -44,22 +44,45 @@ impl CaptureKind {
     }
 }
 
-/// What the caller hands to `save`. Slice 02 only constructs `Note`.
+/// What the caller hands to `save`. Slice 02 added `Note`; slice 04
+/// adds `Link` and `Clip` for the clipboard-capture path.
 #[derive(Debug, Clone)]
 pub enum CaptureInput {
-    Note { text: String },
+    Note {
+        text: String,
+    },
+    Link {
+        url: String,
+        raw_text: String,
+        title: Option<String>,
+    },
+    Clip {
+        text: String,
+    },
 }
 
 impl CaptureInput {
     fn kind(&self) -> CaptureKind {
         match self {
             CaptureInput::Note { .. } => CaptureKind::Note,
+            CaptureInput::Link { .. } => CaptureKind::Link,
+            CaptureInput::Clip { .. } => CaptureKind::Clip,
         }
     }
 
     fn payload_json(&self) -> serde_json::Value {
         match self {
             CaptureInput::Note { text } => serde_json::json!({ "text": text }),
+            CaptureInput::Link {
+                url,
+                raw_text,
+                title,
+            } => serde_json::json!({
+                "url": url,
+                "raw_text": raw_text,
+                "title": title,
+            }),
+            CaptureInput::Clip { text } => serde_json::json!({ "text": text }),
         }
     }
 }
