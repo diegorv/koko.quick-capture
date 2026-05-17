@@ -22,8 +22,8 @@ use tauri_plugin_global_shortcut::{
 
 use crate::clipboard::SystemClipboard;
 use crate::commands::{
-    capture_clipboard_now_with, mark_inbox_opened_with_store, save_dropped_files_with_store,
-    CAPTURES_CHANGED_EVENT, DOCK_BADGE_CLEARED_EVENT, DOCK_PULSE_EVENT,
+    capture_clipboard_now_with, save_dropped_files_with_store, CAPTURES_CHANGED_EVENT,
+    DOCK_PULSE_EVENT,
 };
 use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
@@ -237,9 +237,12 @@ pub fn run() {
             ShortcutId::OpenInbox => {
                 // Mirror the OpenComposer path: show + focus must run
                 // on the main thread on macOS to actually grab focus.
-                // Also mark the Inbox as opened (advances the unread
-                // cursor) and emit `dock.badge.cleared` so the Dock JS
-                // zeroes its badge immediately.
+                // The unread cursor is NOT advanced here — the user
+                // has only opened the window, they have not yet
+                // triaged anything. The Inbox JS calls
+                // `mark_inbox_opened` on the first row interaction
+                // (click or arrow nav), which advances the cursor and
+                // emits `dock:badge:cleared`.
                 let app_handle = app.clone();
                 let event = binding.event;
                 let _ = app.run_on_main_thread(move || {
@@ -247,11 +250,6 @@ pub fn run() {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
-                    let store = app_handle.state::<Store>();
-                    if let Err(e) = mark_inbox_opened_with_store(&store) {
-                        eprintln!("mark_inbox_opened (shortcut) failed: {e}");
-                    }
-                    let _ = app_handle.emit(DOCK_BADGE_CLEARED_EVENT, ());
                     let _ = app_handle.emit(event, ());
                 });
             }
@@ -342,9 +340,11 @@ pub fn run() {
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
-            // the main thread, mirroring the shortcut path. Also mark
-            // the Inbox as opened so the Dock's badge clears and the
-            // new cursor persists across restarts.
+            // the main thread, mirroring the shortcut path. As with
+            // the shortcut handler above, the unread cursor is left
+            // alone here — `mark_inbox_opened` runs from the Inbox JS
+            // on the first row interaction so a glance-and-dismiss
+            // open does not silently clear pending captures.
             let inbox_app = app.handle().clone();
             app.listen("tray:open_inbox", move |_evt| {
                 let app_handle = inbox_app.clone();
@@ -353,11 +353,6 @@ pub fn run() {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
-                    let store = app_handle.state::<Store>();
-                    if let Err(e) = mark_inbox_opened_with_store(&store) {
-                        eprintln!("mark_inbox_opened (tray) failed: {e}");
-                    }
-                    let _ = app_handle.emit(DOCK_BADGE_CLEARED_EVENT, ());
                 });
             });
 

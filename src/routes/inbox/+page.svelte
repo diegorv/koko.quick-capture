@@ -170,6 +170,20 @@
 
   function onSelect(id: string) {
     selectedId = id;
+    // Treat the first row interaction as the "I have seen this"
+    // signal. The Rust command advances the unread cursor and emits
+    // dock:badge:cleared. Idempotent and cheap; safe to fire on every
+    // selection rather than tracking a once-per-open flag.
+    invokeFn("mark_inbox_opened", {})
+      .then(() => {
+        // The Rust command returns the count that was cleared, but
+        // the live unread is now 0 because the cursor has advanced
+        // past the newest row.
+        unreadCount = 0;
+      })
+      .catch((err) => {
+        console.error("mark_inbox_opened failed", err);
+      });
   }
 
   async function onStarToggle(id: string, next: boolean) {

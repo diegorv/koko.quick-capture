@@ -275,8 +275,14 @@ pub fn mark_inbox_opened_with_store(store: &Store) -> Result<u64, String> {
 }
 
 #[tauri::command]
-pub fn mark_inbox_opened(store: State<'_, Store>) -> Result<u64, String> {
-    mark_inbox_opened_with_store(&store)
+pub fn mark_inbox_opened(app: AppHandle, store: State<'_, Store>) -> Result<u64, String> {
+    let cleared = mark_inbox_opened_with_store(&store)?;
+    // Notify the Dock so its badge zeroes immediately — historically
+    // this emit was bolted on at each call site in `lib.rs`, but the
+    // cursor advance now happens from the Inbox JS on first row
+    // interaction, so the emit lives next to the cursor write.
+    let _ = app.emit(DOCK_BADGE_CLEARED_EVENT, ());
+    Ok(cleared)
 }
 
 /// Show + focus the Composer (main) window. The Dock JS calls this on
