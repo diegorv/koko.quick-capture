@@ -1,0 +1,178 @@
+name: CI
+
+permissions:
+  contents: read
+
+# Triggers:
+#   - pull_request: gate every PR against main before merge.
+#   - workflow_dispatch: manual revalidation lever.
+#   - workflow_call: invoked by nightly.yml (every push to main),
+#     release.yml (tag push, with force_all:true), and run-all.yml
+#     (manual full sweep).
+#
+# `push: main` is intentionally NOT a trigger here. Every accepted
+# commit to main is already validated through nightly.yml, which calls
+# this workflow via `workflow_call`. A standalone push trigger would
+# duplicate that invocation: both runs would land in the same
+# `ci-refs/heads/main` concurrency group, cancel-in-progress would
+# kill one of them mid-run, and the history would carry a confusing
+# trail of cancelled runs that look like flakes but are just
+# self-collisions. Tag pushes are unaffected because release.yml owns
+# the tag path end-to-end.
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      force_all:
+        description: "Bypass the paths filter and run frontend + rust unconditionally"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      # When `force_all` is true (release.yml on a tag push), short-circuit
+      # the paths-filter step entirely and pretend everything changed.
+      # Otherwise pass through the paths-filter outputs as before.
+      frontend: ${{ inputs.force_all == true && 'true' || steps.filter.outputs.frontend }}
+      rust: ${{ inputs.force_all == true && 'true' || steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pinned by commit SHA, not tag, so a compromised maintainer
+      # account can't move the version tag to malicious code and have
+      # us pick it up silently. Dependabot still updates this entry
+      # (it reads the trailing `# v4.0.1` tag comment).
+      # Skipped on release runs (`force_all: true`) — the outputs are
+      # forced to `true` regardless, so running the filter would just
+      # waste seconds.
+      - if: ${{ inputs.force_all != true }}
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - "src/**"
+              - "static/**"
+              - "pnpm-lock.yaml"
+              - "package.json"
+              - "tsconfig.json"
+              - "svelte.config.*"
+              - "vite.config.*"
+              - "vitest.config.*"
+              # CI infrastructure changes (composite actions, workflow
+              # definitions) can break the frontend pipeline silently —
+              # e.g. a setup-action change that drops pnpm caching, or a
+              # workflow tweak that mis-orders the install step. Re-run
+              # frontend tests when these change so regressions surface
+              # in the same PR rather than in the next product commit.
+              - ".github/actions/**"
+              - ".github/workflows/**"
+            rust:
+              - "src-tauri/**"
+              # Same rationale as frontend: setup-action and workflow
+              # changes can break the Rust toolchain setup. Trigger the
+              # Rust job on CI infra changes so the fix is validated in
+              # the same PR.
+              - ".github/actions/**"
+              - ".github/workflows/**"
+
+  frontend:
+    name: Frontend (typecheck + tests)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup
+        with:
+          rust: "false"
+
+      # `pnpm check` runs `svelte-kit sync` first, so it already produces the
+      # generated files vitest needs — no separate sync step required.
+      - name: Run type check
+        run: pnpm check
+
+      - name: Run unit tests
+        run: pnpm vitest run
+
+      # Verifies the SvelteKit / Vite production bundle actually compiles.
+      # `pnpm check` covers types and `pnpm vitest run` covers logic, but
+      # neither catches runtime-only bundling failures (SSR-incompatible
+      # imports, dynamic import paths that don't resolve, type-only
+      # re-exports that become runtime errors, asset references missing
+      # at build time). Without this step, those regressions only surface
+      # inside `tauri-action` during release — late and expensive.
+      - name: Build frontend bundle
+        run: pnpm build
+
+  rust:
+    name: Rust (cargo test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    # macos-latest, not ubuntu, because the project ships macOS-only
+    # (tray-menu, macOS-specific Tauri config). Running tests on Linux
+    # would silently skip any `#[cfg(target_os = "macos")]` modules and
+    # give a false-green on the platform the binary actually targets.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup
+
+      - name: Run tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # Aggregate gate used as the single required status check for branch
+  # protection. `frontend` and `rust` are skipped when their paths
+  # filter says nothing relevant changed, which makes them unusable as
+  # required checks directly (a "rust-only" PR would have `frontend`
+  # skipped, branch protection would block forever). This sentinel
+  # passes when every dependency either succeeded or was deliberately
+  # skipped, and fails on any real failure or cancellation.
+  ci-success:
+    name: CI success
+    needs: [changes, frontend, rust]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Aggregate gate results
+        run: |
+          set -euo pipefail
+          changes="${{ needs.changes.result }}"
+          frontend="${{ needs.frontend.result }}"
+          rust="${{ needs.rust.result }}"
+          echo "changes=$changes frontend=$frontend rust=$rust"
+          if [ "$changes" != "success" ]; then
+            echo "::error::changes job did not succeed (result=$changes)"
+            exit 1
+          fi
+          for name in frontend rust; do
+            case "$name" in
+              frontend) result="$frontend" ;;
+              rust) result="$rust" ;;
+            esac
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::$name job did not pass (result=$result)"
+              exit 1
+            fi
+          done
+          echo "All gates passed."

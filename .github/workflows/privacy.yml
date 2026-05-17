@@ -1,0 +1,126 @@
+name: Privacy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/src/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/src/**"
+  workflow_dispatch:
+  # Reusable: invoked by `.github/workflows/run-all.yml`.
+  workflow_call:
+
+concurrency:
+  group: privacy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan-external-calls:
+    name: Scan for External Calls
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── TypeScript / Svelte / JS scan ─────────────────────────────────
+      # Native browser APIs, HTTP libraries, hardcoded URLs. Tests
+      # (`*.test.ts` / `*.spec.ts`), node_modules, generated SvelteKit
+      # output, `.d.ts:` annotations, the `// privacy-ok` opt-out
+      # marker, and inline comment lines are all skipped.
+      - uses: ./.github/actions/scan-external-calls
+        with:
+          language-label: TypeScript/Svelte
+          root: src
+          include-globs: "*.ts,*.svelte,*.js"
+          patterns: |
+            # Native APIs
+            fetch\s*\(
+            XMLHttpRequest
+            navigator\.sendBeacon
+            WebSocket\s*\(
+            EventSource\s*\(
+            \.open\s*\(\s*["\x27](?:GET|POST|PUT|DELETE|PATCH)
+            RTCPeerConnection
+            navigator\.geolocation
+            # External resource loading
+            script\.src\s*=
+            iframe\.src\s*=
+            new\s+Image\s*\(.*\.src\s*=
+            new\s+Worker\s*\(
+            new\s+SharedWorker\s*\(
+            ServiceWorker\.register
+            # HTTP libraries (import/require)
+            import.*\b(axios|got|node-fetch|ky|superagent|undici|needle|request)\b
+            require\s*\(\s*["\x27](axios|got|node-fetch|ky|superagent|undici|needle|request)["\x27]\)
+            # Hardcoded URLs
+            https?://
+          skip: |
+            \.test\.ts
+            \.spec\.ts
+            node_modules
+            \.svelte-kit/
+            \.d\.ts:
+            localhost
+            127\.0\.0\.1
+            tauri\.localhost
+            privacy-ok
+            # Comment lines (no network calls)
+            :\s*//
+            :\s*\*
+            :\s*/\*
+            # Non-network inline references
+            w3\.org
+            example\.com
+          known: |
+            # No known external calls yet. Add entries here (one regex
+            # per line, `#` comments allowed) as endpoints are added.
+
+      # ── Rust scan ─────────────────────────────────────────────────────
+      # HTTP clients, raw networking primitives, hardcoded URLs. Test
+      # files / target dir / privacy-ok / localhost references are
+      # skipped.
+      - uses: ./.github/actions/scan-external-calls
+        with:
+          language-label: Rust
+          root: src-tauri/src
+          include-globs: "*.rs"
+          patterns: |
+            # HTTP clients
+            reqwest
+            hyper::client
+            surf::
+            ureq::
+            curl::
+            attohttpc
+            isahc::
+            minreq::
+            awc::
+            # gRPC
+            tonic::transport
+            # Raw networking
+            TcpStream::connect
+            UdpSocket::connect
+            # Hardcoded URLs
+            https?://
+          skip: |
+            _test\.rs
+            tests/
+            target/
+            localhost
+            127\.0\.0\.1
+            privacy-ok
+          known: |
+            # Auto-updater latest.json endpoints (stable + nightly
+            # channels). When the Tauri updater plugin is wired up, the
+            # endpoint constants will live in src-tauri/src/. Pre-allow
+            # the repo's own releases URL here so they don't trip the
+            # scan.
+            github\.com/diegorv/koko\.quick-capture/releases
