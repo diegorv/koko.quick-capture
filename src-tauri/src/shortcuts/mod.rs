@@ -6,11 +6,13 @@
 //! verified by manual smoke (see slice 02 acceptance criteria).
 
 /// Closed set of shortcut intents. Slice 02 wired `OpenComposer`;
-/// slice 04 adds `CaptureClipboard`.
+/// slice 04 adds `CaptureClipboard`. v1.0 slice 01 adds `OpenInbox`
+/// to the registry; v1.0 slice 02 wires the OS-level binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutId {
     OpenComposer,
     CaptureClipboard,
+    OpenInbox,
 }
 
 /// One row in the registry: which accelerator triggers it, and which
@@ -23,7 +25,9 @@ pub struct ShortcutBinding {
 }
 
 /// Slice 04 registry: `OpenComposer` (Composer summon) and
-/// `CaptureClipboard` (clipboard-text capture, no window).
+/// `CaptureClipboard` (clipboard-text capture, no window). v1.0 slice
+/// 01 adds `OpenInbox`; the OS-level shortcut for it is registered in
+/// v1.0 slice 02.
 pub fn default_registry() -> Vec<ShortcutBinding> {
     vec![
         ShortcutBinding {
@@ -35,6 +39,11 @@ pub fn default_registry() -> Vec<ShortcutBinding> {
             id: ShortcutId::CaptureClipboard,
             accelerator: "Ctrl+Alt+Cmd+C",
             event: "capture_clipboard",
+        },
+        ShortcutBinding {
+            id: ShortcutId::OpenInbox,
+            accelerator: "Ctrl+Alt+Cmd+I",
+            event: "open_inbox",
         },
     ]
 }

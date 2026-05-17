@@ -26,3 +26,15 @@ fn default_registry_contains_capture_clipboard_binding() {
     assert_eq!(capture_clipboard.accelerator, "Ctrl+Alt+Cmd+C");
     assert_eq!(capture_clipboard.event, "capture_clipboard");
 }
+
+#[test]
+fn default_registry_contains_open_inbox_binding() {
+    let bindings = default_registry();
+    let open_inbox = bindings
+        .iter()
+        .find(|b| b.id == ShortcutId::OpenInbox)
+        .expect("OpenInbox binding must be present");
+
+    assert_eq!(open_inbox.accelerator, "Ctrl+Alt+Cmd+I");
+    assert_eq!(open_inbox.event, "open_inbox");
+}
