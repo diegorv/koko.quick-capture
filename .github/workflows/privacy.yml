@@ -117,6 +117,14 @@ jobs:
             localhost
             127\.0\.0\.1
             privacy-ok
+            # Comment lines (doc + inline, no network calls)
+            :\s*///
+            :\s*//
+            :\s*\*
+            :\s*/\*
+            # Non-network inline references
+            w3\.org
+            example\.com
           known: |
             # Auto-updater latest.json endpoints (stable + nightly
             # channels). When the Tauri updater plugin is wired up, the
