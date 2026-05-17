@@ -503,7 +503,10 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.75rem;
-    background: inherit;
+    /* Opaque background so rows scrolling underneath don't bleed
+       through. `background: inherit` resolves to transparent because
+       CSS background is not an inherited property. */
+    background: #f6f6f6;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   }
 
@@ -628,6 +631,7 @@
       border-right-color: rgba(255, 255, 255, 0.08);
     }
     .searchbar {
+      background: #1c1c1c;
       border-bottom-color: rgba(255, 255, 255, 0.06);
     }
     .search-input {
