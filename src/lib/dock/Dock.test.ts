@@ -41,4 +41,30 @@ describe("Dock", () => {
     // cancelable event — i.e. the native menu would be suppressed.
     expect(dispatched).toBe(false);
   });
+
+  it("renders the drag-active class when dragActive is true", () => {
+    const { getByLabelText } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        dragActive: true,
+      },
+    });
+
+    const dock = getByLabelText("Open Composer");
+    expect(dock.classList.contains("drag-active")).toBe(true);
+  });
+
+  it("omits the drag-active class when dragActive is false", () => {
+    const { getByLabelText } = render(Dock, {
+      props: {
+        onComposer: vi.fn(),
+        onContextMenu: vi.fn(),
+        dragActive: false,
+      },
+    });
+
+    const dock = getByLabelText("Open Composer");
+    expect(dock.classList.contains("drag-active")).toBe(false);
+  });
 });

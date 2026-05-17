@@ -13,6 +13,11 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Dock from "$lib/dock/Dock.svelte";
 
+  // Visual hover state for Finder drags. Driven by Rust events
+  // emitted from the Dock window's native drag-drop handler (see
+  // ADR-0008). No HTML5 `dragover` / `drop` listeners on this route.
+  let dragActive = $state(false);
+
   async function openComposer() {
     try {
       await invoke("open_composer_window");
@@ -46,6 +51,12 @@
           console.error("dock show failed", err);
         }
       }),
+      listen("dock.drag.enter", () => {
+        dragActive = true;
+      }),
+      listen("dock.drag.leave", () => {
+        dragActive = false;
+      }),
     ];
 
     return () => {
@@ -56,7 +67,11 @@
   });
 </script>
 
-<Dock onComposer={openComposer} onContextMenu={openContextMenu} />
+<Dock
+  onComposer={openComposer}
+  onContextMenu={openContextMenu}
+  {dragActive}
+/>
 
 <style>
   :global(html),

@@ -1,6 +1,7 @@
 pub mod clipboard;
 pub mod commands;
 pub mod dock;
+pub mod drag_drop;
 pub mod kind_detect;
 pub mod shortcuts;
 pub mod store;
@@ -11,19 +12,30 @@ use std::str::FromStr;
 use tauri::{
     menu::MenuBuilder,
     tray::TrayIconBuilder,
-    Emitter, Listener, LogicalPosition, LogicalSize, Manager, PhysicalPosition, WebviewUrl,
-    WebviewWindowBuilder,
+    DragDropEvent, Emitter, Listener, LogicalPosition, LogicalSize, Manager, PhysicalPosition,
+    WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{
     Builder as ShortcutBuilder, Shortcut, ShortcutState,
 };
 
 use crate::clipboard::SystemClipboard;
-use crate::commands::{capture_clipboard_now_with, CAPTURES_CHANGED_EVENT};
+use crate::commands::{
+    capture_clipboard_now_with, save_dropped_files_with_store, CAPTURES_CHANGED_EVENT,
+};
 use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
 use crate::store::Store;
 use crate::tray::{default_menu, TrayMenuItem};
+
+/// Event emitted by the Dock window's drag-drop handler when a drag
+/// gesture enters the Dock surface. The Dock JS subscribes to it to
+/// toggle the `drag-active` visual class.
+pub const DOCK_DRAG_ENTER_EVENT: &str = "dock.drag.enter";
+
+/// Event emitted by the Dock window's drag-drop handler when the drag
+/// gesture leaves the Dock (cancelled, drop fired, or cursor moved out).
+pub const DOCK_DRAG_LEAVE_EVENT: &str = "dock.drag.leave";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -237,6 +249,59 @@ pub fn run() {
             // Ensure the size took (some platforms reset on first show).
             let _ = dock_window.set_size(LogicalSize::new(80.0, 80.0));
 
+            // Dock drag-drop: handle Finder file drops via Tauri's
+            // native drag-drop channel (ADR-0008). Tauri 2.11 routes the
+            // drag-drop callback from wry into the `WindowEvent::DragDrop`
+            // synthesized variant when the webview's `kind` is
+            // `WindowContent`, which is what `WebviewWindowBuilder`
+            // builds without the `unstable` feature. So we listen on
+            // `WebviewWindow::on_window_event` and match on
+            // `WindowEvent::DragDrop(...)` (see
+            // `tauri-runtime-wry/src/lib.rs` around line 4887). The
+            // `Drop` save must run on the main thread to keep the SQLite
+            // write off the Tauri event loop, mirroring the existing
+            // `OpenComposer` / Tray pattern.
+            let drag_drop_app = app.handle().clone();
+            dock_window.on_window_event(move |event| {
+                let WindowEvent::DragDrop(drag) = event else {
+                    return;
+                };
+                match drag {
+                    DragDropEvent::Enter { .. } => {
+                        let _ = drag_drop_app.emit(DOCK_DRAG_ENTER_EVENT, ());
+                    }
+                    DragDropEvent::Leave => {
+                        let _ = drag_drop_app.emit(DOCK_DRAG_LEAVE_EVENT, ());
+                    }
+                    DragDropEvent::Drop { paths, .. } => {
+                        let app_handle = drag_drop_app.clone();
+                        let paths = paths.clone();
+                        let _ = drag_drop_app.run_on_main_thread(move || {
+                            let store = app_handle.state::<Store>();
+                            match save_dropped_files_with_store(&store, paths) {
+                                Ok(captures) => {
+                                    for capture in &captures {
+                                        let _ =
+                                            app_handle.emit(CAPTURES_CHANGED_EVENT, capture);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("save_dropped_files (drag-drop) failed: {e}");
+                                }
+                            }
+                            // Reset the Dock's visual hover state once
+                            // the drop has been processed; Tauri does
+                            // not synthesize a `Leave` after `Drop`.
+                            let _ = app_handle.emit(DOCK_DRAG_LEAVE_EVENT, ());
+                        });
+                    }
+                    DragDropEvent::Over { .. } => {}
+                    // `DragDropEvent` is `#[non_exhaustive]` — any
+                    // future variant is ignored on this surface.
+                    _ => {}
+                }
+            });
+
             // App-level menu event dispatcher for the Dock's
             // right-click popup menu. The popup is built and shown
             // per-invocation in `commands::open_dock_context_menu`,
@@ -283,6 +348,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::save_note,
             commands::capture_clipboard_now,
+            commands::save_dropped_files,
             commands::list_captures,
             commands::star_capture,
             commands::delete_capture,

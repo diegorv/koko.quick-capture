@@ -7,9 +7,14 @@
   interface Props {
     onComposer: () => void;
     onContextMenu: (x: number, y: number) => void;
+    // Driven from the Dock route, which subscribes to the Rust-side
+    // `dock.drag.enter` / `dock.drag.leave` events emitted by the
+    // Tauri-native drag-drop handler (see ADR-0008). No HTML5 drop
+    // listeners on this surface in v1.0.
+    dragActive?: boolean;
   }
 
-  let { onComposer, onContextMenu }: Props = $props();
+  let { onComposer, onContextMenu, dragActive = false }: Props = $props();
 
   function handleClick() {
     onComposer();
@@ -24,6 +29,7 @@
 <button
   type="button"
   class="dock"
+  class:drag-active={dragActive}
   aria-label="Open Composer"
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
@@ -51,5 +57,14 @@
 
   .dock:active {
     transform: scale(0.97);
+  }
+
+  /* Visual "wake" while a Finder drag is hovering. Driven by the
+     `dragActive` prop, which the /dock route toggles from the Rust-side
+     `dock.drag.enter` / `dock.drag.leave` events. */
+  .dock.drag-active {
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.6),
+      0 4px 20px rgba(0, 0, 0, 0.4);
   }
 </style>

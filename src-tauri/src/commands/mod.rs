@@ -6,6 +6,7 @@
 //! for `invoke()`. The real logic is in the helper functions below so
 //! tests can drive them without a Tauri runtime.
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use tauri::menu::MenuBuilder;
@@ -14,6 +15,7 @@ use ulid::Ulid;
 
 use crate::clipboard::{Clipboard, SystemClipboard};
 use crate::dock::default_context_menu;
+use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::store::{Capture, CaptureInput, Store};
 
@@ -91,6 +93,39 @@ pub fn capture_clipboard_now(
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
     let captures = capture_clipboard_now_with(&SystemClipboard::new(), &store)?;
+    for capture in &captures {
+        let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
+    }
+    Ok(captures)
+}
+
+/// Persist one Capture per dropped file. Composes
+/// `drag_drop::decide_dropped_files` + `store::save`. Tests drive this
+/// helper directly; the Tauri command below is the thin wrapper the
+/// Dock's native drag-drop handler calls.
+///
+/// Returns a `Vec` because a single drop gesture can carry N paths
+/// (multi-select in Finder), one Capture per path.
+pub fn save_dropped_files_with_store(
+    store: &Store,
+    paths: Vec<PathBuf>,
+) -> Result<Vec<Capture>, String> {
+    let inputs = decide_dropped_files(paths).map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        out.push(store.save(input).map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn save_dropped_files(
+    paths: Vec<String>,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<Vec<Capture>, String> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let captures = save_dropped_files_with_store(&store, paths)?;
     for capture in &captures {
         let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
     }
