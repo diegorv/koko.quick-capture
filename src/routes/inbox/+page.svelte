@@ -84,7 +84,56 @@
   const SEARCH_DEBOUNCE_MS = 150;
 
   const searching = $derived(searchResults !== null);
-  const visibleCaptures = $derived(searchResults ?? captures);
+  const searchOrPageResults = $derived(searchResults ?? captures);
+
+  // Client-side filters layered on top of whatever list (search
+  // results OR paginated page) is currently active. Kind filter is
+  // single-select; `null` means "any kind". Starred is a boolean
+  // toggle. Both apply post-hoc so swapping search on/off does not
+  // re-trigger them.
+  let kindFilter = $state<Capture["kind"] | null>(null);
+  let starredOnly = $state(false);
+
+  const filtersActive = $derived(kindFilter !== null || starredOnly);
+  const visibleCaptures = $derived(
+    !filtersActive
+      ? searchOrPageResults
+      : searchOrPageResults.filter((c) => {
+          if (kindFilter !== null && c.kind !== kindFilter) return false;
+          if (starredOnly && !c.starred) return false;
+          return true;
+        }),
+  );
+
+  const KIND_OPTIONS: Array<{ value: Capture["kind"] | null; label: string }> = [
+    { value: null, label: "All" },
+    { value: "Note", label: "Notes" },
+    { value: "Link", label: "Links" },
+    { value: "Clip", label: "Clips" },
+    { value: "Shot", label: "Shots" },
+    { value: "File", label: "Files" },
+  ];
+
+  function setKindFilter(value: Capture["kind"] | null) {
+    kindFilter = value;
+    // If current selection was filtered out, clear it.
+    if (
+      selectedId !== null &&
+      !visibleCaptures.some((c) => c.id === selectedId)
+    ) {
+      selectedId = null;
+    }
+  }
+
+  function toggleStarredOnly() {
+    starredOnly = !starredOnly;
+    if (
+      selectedId !== null &&
+      !visibleCaptures.some((c) => c.id === selectedId)
+    ) {
+      selectedId = null;
+    }
+  }
 
   async function refreshStats() {
     try {
@@ -117,11 +166,13 @@
     captures.length === 0 ? null : relativeTime(captures[0].created_at, now),
   );
   const totalLabel = $derived(
-    searching
-      ? `${visibleCaptures.length} ${visibleCaptures.length === 1 ? "result" : "results"}`
-      : totalCount === null
-        ? null
-        : `${totalCount} ${totalCount === 1 ? "capture" : "captures"}`,
+    filtersActive
+      ? `${visibleCaptures.length} of ${searchOrPageResults.length} showing`
+      : searching
+        ? `${visibleCaptures.length} ${visibleCaptures.length === 1 ? "result" : "results"}`
+        : totalCount === null
+          ? null
+          : `${totalCount} ${totalCount === 1 ? "capture" : "captures"}`,
   );
   const unreadLabel = $derived(
     unreadCount && unreadCount > 0 ? `${unreadCount} new` : null,
@@ -406,6 +457,30 @@
           </button>
         {/if}
       </div>
+      <div class="filterbar" role="toolbar" aria-label="Inbox filters">
+        {#each KIND_OPTIONS as option}
+          <button
+            type="button"
+            class="chip"
+            class:active={kindFilter === option.value}
+            aria-pressed={kindFilter === option.value}
+            onclick={() => setKindFilter(option.value)}
+          >
+            {option.label}
+          </button>
+        {/each}
+        <span class="filter-sep" aria-hidden="true"></span>
+        <button
+          type="button"
+          class="chip star"
+          class:active={starredOnly}
+          aria-pressed={starredOnly}
+          onclick={toggleStarredOnly}
+          title="Show only starred captures"
+        >
+          {starredOnly ? "★" : "☆"} Starred
+        </button>
+      </div>
       <section class="list-pane" onscroll={onScroll}>
         {#if searching && visibleCaptures.length === 0}
           <div class="empty">
@@ -515,6 +590,58 @@
     gap: 0.4rem;
     padding: 0.5rem 0.75rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .filterbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    overflow-x: auto;
+  }
+
+  .filterbar .chip {
+    appearance: none;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition:
+      background 80ms ease,
+      opacity 80ms ease,
+      border-color 80ms ease;
+    white-space: nowrap;
+  }
+
+  .filterbar .chip:hover {
+    opacity: 1;
+  }
+
+  .filterbar .chip.active {
+    background: rgba(76, 29, 149, 0.12);
+    border-color: rgba(76, 29, 149, 0.55);
+    color: rgba(76, 29, 149, 1);
+    opacity: 1;
+  }
+
+  .filterbar .chip.star.active {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.65);
+    color: rgba(180, 110, 0, 1);
+  }
+
+  .filter-sep {
+    width: 1px;
+    height: 1rem;
+    background: rgba(0, 0, 0, 0.1);
+    margin: 0 0.3rem;
   }
 
   .search-input {
@@ -639,6 +766,25 @@
     }
     .searchbar {
       border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .filterbar {
+      border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .filterbar .chip {
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+    .filterbar .chip.active {
+      background: rgba(167, 139, 250, 0.18);
+      border-color: rgba(167, 139, 250, 0.6);
+      color: rgba(167, 139, 250, 1);
+    }
+    .filterbar .chip.star.active {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: rgba(245, 158, 11, 0.6);
+      color: rgba(252, 211, 77, 1);
+    }
+    .filter-sep {
+      background: rgba(255, 255, 255, 0.12);
     }
     .search-input {
       border-color: rgba(255, 255, 255, 0.12);
