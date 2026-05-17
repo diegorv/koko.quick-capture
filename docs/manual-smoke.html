@@ -6,31 +6,17 @@
 <title>quick-capture — manual smoke</title>
 <style>
   :root {
-    color-scheme: dark light;
-    --bg: #1c1c1c;
-    --panel: #242427;
-    --panel-2: #2a2a2e;
-    --border: rgba(255,255,255,0.08);
-    --text: #f4f4f4;
-    --muted: rgba(255,255,255,0.55);
-    --accent: #a78bfa;
+    color-scheme: light;
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #fafafa;
+    --border: rgba(0,0,0,0.1);
+    --text: #111;
+    --muted: rgba(0,0,0,0.6);
+    --accent: #6d28d9;
     --accent-strong: #4c1d95;
-    --ok: #34d399;
-    --warn: #f59e0b;
-  }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f6f6f6;
-      --panel: #ffffff;
-      --panel-2: #fafafa;
-      --border: rgba(0,0,0,0.08);
-      --text: #0f0f0f;
-      --muted: rgba(0,0,0,0.55);
-      --accent: #6d28d9;
-      --accent-strong: #4c1d95;
-      --ok: #059669;
-      --warn: #d97706;
-    }
+    --ok: #059669;
+    --warn: #b45309;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -86,7 +72,7 @@
     min-width: 240px;
     height: 10px;
     border-radius: 999px;
-    background: var(--panel);
+    background: #ececef;
     border: 1px solid var(--border);
     overflow: hidden;
   }
@@ -117,11 +103,12 @@
     border-color: var(--accent);
   }
   section.group {
-    margin-top: 1.75rem;
+    margin-top: 1.5rem;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
   }
   .group-head {
     display: flex;
@@ -130,8 +117,9 @@
     gap: 1rem;
     padding: 0.85rem 1.1rem;
     border-bottom: 1px solid var(--border);
-    background: var(--panel-2);
+    background: #f5f3ff;
   }
+  .group-head h2 { color: #4c1d95; }
   .group-head h2 {
     margin: 0;
     font-size: 1.05rem;
@@ -149,20 +137,22 @@
     padding: 0;
   }
   li.item {
-    display: grid;
-    grid-template-columns: 1.5rem 1fr;
-    gap: 0.85rem;
     padding: 0.85rem 1.1rem;
     border-bottom: 1px solid var(--border);
-    align-items: flex-start;
     transition: opacity 100ms ease;
   }
   li.item:last-child { border-bottom: none; }
-  li.item.done { opacity: 0.5; }
+  li.item.done { opacity: 0.55; }
   li.item.done .desc { text-decoration: line-through; }
   li.item label {
     cursor: pointer;
-    display: contents;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  li.item .text {
+    flex: 1;
+    min-width: 0;
   }
   li.item input[type="checkbox"] {
     appearance: none;
@@ -202,22 +192,35 @@
   }
   kbd {
     display: inline-block;
-    padding: 0.05em 0.42em;
+    padding: 0.05em 0.45em;
     margin: 0 1px;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 0.78em;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
+    background: #f1f1f3;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: #222;
+  }
+  code {
+    background: #f1f1f3;
+    padding: 0.05em 0.35em;
     border-radius: 3px;
+    font-size: 0.86em;
   }
   .callout {
     margin-top: 1rem;
-    padding: 0.8rem 1rem;
+    padding: 0.85rem 1rem;
     border-radius: 8px;
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    color: var(--text);
-    font-size: 0.85rem;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    color: #78350f;
+    font-size: 0.88rem;
+  }
+  .callout kbd {
+    background: #fff7d6;
+    border-color: #d4a017;
+    color: #78350f;
   }
   .footnote {
     margin-top: 2.5rem;
@@ -404,10 +407,12 @@
         li.className = "item" + (state[item.id] ? " done" : "");
         const checkboxId = `cb-${item.id}`;
         li.innerHTML = `
-          <input type="checkbox" id="${checkboxId}" ${state[item.id] ? "checked" : ""}/>
           <label for="${checkboxId}">
-            <span class="desc">${item.desc}</span>
-            ${item.hint ? `<span class="hint">${item.hint}</span>` : ""}
+            <input type="checkbox" id="${checkboxId}" ${state[item.id] ? "checked" : ""}/>
+            <span class="text">
+              <span class="desc">${item.desc}</span>
+              ${item.hint ? `<span class="hint">${item.hint}</span>` : ""}
+            </span>
           </label>
         `;
         li.querySelector("input").addEventListener("change", (e) => {
