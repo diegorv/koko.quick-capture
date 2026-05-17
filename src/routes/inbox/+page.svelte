@@ -73,6 +73,19 @@
   let now = $state(Date.now());
   let nowTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Search state. `searchResults === null` means "not searching, show
+  // the paginated `captures` list". Non-null means search is active
+  // and InboxList renders the results array. The debounce timer
+  // collapses bursts of keystrokes into one search call.
+  let searchQuery = $state("");
+  let searchResults = $state<Capture[] | null>(null);
+  let searchInputEl: HTMLInputElement | undefined = $state();
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const SEARCH_DEBOUNCE_MS = 150;
+
+  const searching = $derived(searchResults !== null);
+  const visibleCaptures = $derived(searchResults ?? captures);
+
   async function refreshStats() {
     try {
       const [total, unread] = await Promise.all([
@@ -104,14 +117,18 @@
     captures.length === 0 ? null : relativeTime(captures[0].created_at, now),
   );
   const totalLabel = $derived(
-    totalCount === null ? null : `${totalCount} ${totalCount === 1 ? "capture" : "captures"}`,
+    searching
+      ? `${visibleCaptures.length} ${visibleCaptures.length === 1 ? "result" : "results"}`
+      : totalCount === null
+        ? null
+        : `${totalCount} ${totalCount === 1 ? "capture" : "captures"}`,
   );
   const unreadLabel = $derived(
     unreadCount && unreadCount > 0 ? `${unreadCount} new` : null,
   );
 
   async function loadNext() {
-    if (loading || exhausted) return;
+    if (loading || exhausted || searching) return;
     loading = true;
     try {
       const cursor = captures.length > 0 ? captures[captures.length - 1].id : null;
@@ -157,6 +174,72 @@
     const el = event.currentTarget as HTMLElement;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD_PX) {
       loadNext();
+    }
+  }
+
+  function scheduleSearch() {
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+    }
+    searchDebounceTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
+  }
+
+  async function runSearch() {
+    searchDebounceTimer = null;
+    const q = searchQuery.trim();
+    if (q === "") {
+      searchResults = null;
+      return;
+    }
+    try {
+      const results = (await invokeFn("search_captures", {
+        query: q,
+        limit: PAGE_SIZE,
+      })) as Capture[];
+      searchResults = results;
+      if (
+        selectedId !== null &&
+        !results.some((c) => c.id === selectedId)
+      ) {
+        selectedId = null;
+      }
+    } catch (err) {
+      console.error("search_captures failed", err);
+      searchResults = [];
+    }
+  }
+
+  function onSearchInput(event: Event) {
+    searchQuery = (event.currentTarget as HTMLInputElement).value;
+    scheduleSearch();
+  }
+
+  function clearSearch() {
+    searchQuery = "";
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+    searchResults = null;
+  }
+
+  function onSearchKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      if (searchQuery !== "") {
+        event.preventDefault();
+        clearSearch();
+      }
+    }
+  }
+
+  function onWindowKeydown(event: KeyboardEvent) {
+    // Cmd+F focuses the search input from anywhere in the Inbox
+    // window. The native browser find UI is meaningless inside a
+    // Tauri webview, so co-opting the shortcut is fine.
+    if ((event.metaKey || event.ctrlKey) && event.key === "f") {
+      event.preventDefault();
+      searchInputEl?.focus();
+      searchInputEl?.select();
     }
   }
 
@@ -269,6 +352,9 @@
     nowTimer = setInterval(() => {
       now = Date.now();
     }, 60_000);
+    if (typeof window !== "undefined") {
+      window.addEventListener("keydown", onWindowKeydown);
+    }
     try {
       unlisten = await listenFn(CAPTURES_CHANGED, onChanged);
     } catch (err) {
@@ -282,6 +368,13 @@
       clearInterval(nowTimer);
       nowTimer = null;
     }
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("keydown", onWindowKeydown);
+    }
   });
 </script>
 
@@ -289,7 +382,37 @@
   <div class="titlebar" data-tauri-drag-region aria-hidden="true"></div>
   <div class="panes">
     <section class="list-pane" onscroll={onScroll}>
-      {#if !loading && captures.length === 0}
+      <div class="searchbar">
+        <input
+          bind:this={searchInputEl}
+          type="search"
+          class="search-input"
+          placeholder="Search captures"
+          aria-label="Search captures"
+          value={searchQuery}
+          oninput={onSearchInput}
+          onkeydown={onSearchKeydown}
+          autocomplete="off"
+          spellcheck="false"
+        />
+        {#if searchQuery}
+          <button
+            type="button"
+            class="search-clear"
+            aria-label="Clear search"
+            onclick={clearSearch}
+          >
+            ×
+          </button>
+        {/if}
+      </div>
+      {#if searching && visibleCaptures.length === 0}
+        <div class="empty">
+          <div class="empty-glyph" aria-hidden="true">🔍</div>
+          <h2 class="empty-title">No matches</h2>
+          <p class="empty-hint">Nothing matched “{searchQuery}”.</p>
+        </div>
+      {:else if !loading && !searching && captures.length === 0}
         <div class="empty">
           <div class="empty-glyph" aria-hidden="true">📥</div>
           <h2 class="empty-title">No captures yet</h2>
@@ -301,7 +424,7 @@
         </div>
       {:else}
         <InboxList
-          {captures}
+          captures={visibleCaptures}
           {selectedId}
           {onSelect}
           {onStarToggle}
@@ -370,6 +493,59 @@
     overflow-y: auto;
     border-right: 1px solid rgba(0, 0, 0, 0.08);
     position: relative;
+  }
+
+  .searchbar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    background: inherit;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    padding: 0.35rem 0.6rem;
+    font: inherit;
+    font-size: 0.85rem;
+    background: rgba(0, 0, 0, 0.02);
+    color: inherit;
+    outline: none;
+  }
+
+  .search-input:focus {
+    border-color: rgba(76, 29, 149, 0.55);
+    background: rgba(76, 29, 149, 0.04);
+  }
+
+  .search-input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .search-clear {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.55;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    font-size: 1.1rem;
+    line-height: 1;
+    border-radius: 4px;
+  }
+
+  .search-clear:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.06);
   }
 
   .detail-pane {
@@ -450,6 +626,20 @@
     }
     .list-pane {
       border-right-color: rgba(255, 255, 255, 0.08);
+    }
+    .searchbar {
+      border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .search-input {
+      border-color: rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .search-input:focus {
+      border-color: rgba(167, 139, 250, 0.6);
+      background: rgba(167, 139, 250, 0.08);
+    }
+    .search-clear:hover {
+      background: rgba(255, 255, 255, 0.1);
     }
     .empty-hint kbd {
       background: rgba(255, 255, 255, 0.08);
