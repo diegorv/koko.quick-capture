@@ -31,7 +31,9 @@ Detection rules:
 
 ## Surfaces
 
-The two user-facing windows. Always referred to by these names.
+The user-facing windows. Always referred to by these names.
+
+The Inbox is the application's **main window**: future product screens (Settings, search, etc.) live as routes inside it, not as separate Tauri windows. The Composer and the Dock are the only other Tauri windows, and they exist as separate windows only because their UX requires properties the main window cannot provide (pop over any app; always-on-top widget). See ADR-0009.
 
 ### Dock
 

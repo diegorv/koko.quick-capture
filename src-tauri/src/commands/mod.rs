@@ -282,7 +282,7 @@ pub fn mark_inbox_opened(store: State<'_, Store>) -> Result<u64, String> {
 pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
     let app_handle = app.clone();
     app.run_on_main_thread(move || {
-        if let Some(window) = app_handle.get_webview_window("main") {
+        if let Some(window) = app_handle.get_webview_window("composer") {
             let _ = window.show();
             let _ = window.set_focus();
         }

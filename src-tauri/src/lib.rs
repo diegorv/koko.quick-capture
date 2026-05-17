@@ -73,7 +73,7 @@ pub fn run() {
                 let app_handle = app.clone();
                 let event = binding.event;
                 let _ = app.run_on_main_thread(move || {
-                    if let Some(window) = app_handle.get_webview_window("main") {
+                    if let Some(window) = app_handle.get_webview_window("composer") {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
@@ -132,47 +132,57 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(builder.build())
         .setup(|app| {
+            // Accessory mode: no Dock icon, no system menu bar (see
+            // ADR-0009). The app lives in the Tray and is summoned by
+            // shortcuts.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app
+                    .handle()
+                    .set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             let store = Store::open_default()
                 .expect("failed to open capture store at the default path");
             app.manage(store);
 
-            // The Composer (main) window is declared in tauri.conf.json
-            // and lives for the life of the app — hidden / shown by the
-            // shortcut. Intercept the red close button so it hides
-            // rather than destroying the window (same reason as Inbox).
-            if let Some(main_window) = app.get_webview_window("main") {
-                let main_clone = main_window.clone();
-                main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = main_clone.hide();
-                    }
-                });
-            }
-
-            // Inbox window: separate Tauri window pointed at `/inbox`,
-            // hidden by default. Created at startup so the shortcut /
-            // tray handlers only need to show + focus it. Intercept the
-            // close-button click so the window is hidden, not destroyed
-            // — otherwise subsequent `get_webview_window("inbox")`
-            // returns None and the shortcut becomes a no-op until the
-            // app restarts.
-            let inbox_window = WebviewWindowBuilder::new(
-                app,
-                "inbox",
-                WebviewUrl::App("/inbox".into()),
-            )
-            .visible(false)
-            .title("quick-capture inbox")
-            .inner_size(900.0, 600.0)
-            .center()
-            .build()?;
-            {
+            // Inbox (main) window is declared in tauri.conf.json with
+            // label "inbox" and url "/inbox". It is the app shell;
+            // future product screens (Settings, search, etc.) live as
+            // routes inside it (ADR-0009). Intercept the close-button
+            // so the window hides rather than being destroyed, which
+            // would make subsequent `get_webview_window("inbox")`
+            // return None.
+            if let Some(inbox_window) = app.get_webview_window("inbox") {
                 let inbox_clone = inbox_window.clone();
                 inbox_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = inbox_clone.hide();
+                    }
+                });
+            }
+
+            // Composer popover window: small, hidden at startup,
+            // summoned by the global shortcut for Raycast-style
+            // single-Note capture. Lives as its own Tauri window
+            // because it must pop over any frontmost app.
+            let composer_window = WebviewWindowBuilder::new(
+                app,
+                "composer",
+                WebviewUrl::App("/composer".into()),
+            )
+            .visible(false)
+            .title("quick-capture")
+            .inner_size(600.0, 320.0)
+            .center()
+            .build()?;
+            {
+                let composer_clone = composer_window.clone();
+                composer_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = composer_clone.hide();
                     }
                 });
             }
@@ -228,7 +238,7 @@ pub fn run() {
                             let app_handle = app.clone();
                             let event_name = binding.event;
                             let _ = app.run_on_main_thread(move || {
-                                if let Some(window) = app_handle.get_webview_window("main") {
+                                if let Some(window) = app_handle.get_webview_window("composer") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
@@ -369,7 +379,7 @@ pub fn run() {
                         let app_handle = app.clone();
                         let event_name = binding.tray.event;
                         let _ = app.run_on_main_thread(move || {
-                            if let Some(window) = app_handle.get_webview_window("main") {
+                            if let Some(window) = app_handle.get_webview_window("composer") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
