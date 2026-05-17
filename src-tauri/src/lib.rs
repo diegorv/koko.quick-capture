@@ -46,21 +46,69 @@ const TRAY_ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 
 // Menu-item icons are NOT template-mode treated by macOS (only the
 // tray icon itself gets that auto-recolour). Tauri 2 / muda's
-// `MenuBuilder.icon` renders the bytes as-is, so a black stroke
-// disappears on a dark menubar background. Render in white instead;
-// it reads correctly in macOS dark menus, which is the dominant case
-// for utility apps in Accessory mode. Light-mode users will need
-// either a runtime appearance detection or a system-symbol switch
-// (deferred).
+// `MenuBuilder.icon` renders the bytes as-is. Templates carry a
+// `{STROKE}` placeholder swapped at build time for `white` (dark
+// menubar) or `black` (light menubar); see `current_menu_stroke`.
 
-/// Lucide `square-pen` (compose / new note), white stroke.
-const SQUARE_PEN_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>"##;
+/// Lucide `square-pen` (compose / new note), stroke parameterised.
+const SQUARE_PEN_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>"##;
 
-/// Lucide `inbox`, white stroke.
-const INBOX_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"##;
+/// Lucide `inbox`, stroke parameterised.
+const INBOX_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"##;
 
-/// Lucide `x` (close / quit), white stroke.
-const X_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+/// Lucide `x` (close / quit), stroke parameterised.
+const X_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+
+/// Pick the menu-item stroke colour based on the current macOS
+/// appearance. Dark menubar -> white; light menubar -> black. Detected
+/// once at menu-build time. Live theme switching while the app is
+/// running is not handled here (follow-up); the user would need to
+/// reopen the app to pick up a flipped appearance.
+#[cfg(target_os = "macos")]
+fn current_menu_stroke() -> &'static str {
+    if macos_appearance::is_dark() {
+        "white"
+    } else {
+        "black"
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn current_menu_stroke() -> &'static str {
+    "white"
+}
+
+#[cfg(target_os = "macos")]
+mod macos_appearance {
+    //! Read `[NSApp effectiveAppearance].name` to decide whether the
+    //! menubar is dark. macOS publishes several dark-flavour appearance
+    //! names (DarkAqua, VibrantDark, plus a11y high-contrast variants);
+    //! any name containing "Dark" is treated as dark.
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSString;
+
+    /// True when the current effective appearance is one of the dark
+    /// variants. Defaults to true on any failure path so the icon stays
+    /// visible on the typical dark menubar.
+    pub fn is_dark() -> bool {
+        unsafe {
+            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            if app.is_null() {
+                return true;
+            }
+            let appearance: *mut AnyObject = msg_send![app, effectiveAppearance];
+            if appearance.is_null() {
+                return true;
+            }
+            let name: *mut NSString = msg_send![appearance, name];
+            if name.is_null() {
+                return true;
+            }
+            (*name).to_string().contains("Dark")
+        }
+    }
+}
 
 /// Rasterise a Lucide SVG string into a square RGBA buffer at the
 /// given pixel size. macOS reads only the alpha channel for tray /
@@ -99,14 +147,16 @@ fn build_brain_tray_icon_rgba() -> (Vec<u8>, u32, u32) {
 }
 
 /// Tray menu items wear a per-item icon. Picks the right Lucide glyph
-/// for each `TrayMenuItem` and rasterises at 32x32 (16pt @2x).
-fn tray_menu_item_icon(item: TrayMenuItem) -> tauri::image::Image<'static> {
-    let svg = match item {
+/// for each `TrayMenuItem`, swaps `{STROKE}` with the appearance-aware
+/// stroke colour, and rasterises at 32x32 (16pt @2x).
+fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::image::Image<'static> {
+    let template = match item {
         TrayMenuItem::OpenComposer => SQUARE_PEN_SVG,
         TrayMenuItem::OpenInbox => INBOX_SVG,
         TrayMenuItem::Quit => X_SVG,
     };
-    rasterise_svg(svg, 32)
+    let svg = template.replace("{STROKE}", stroke);
+    rasterise_svg(&svg, 32)
 }
 
 /// Tray menu items show their keyboard shortcut on the right side of
@@ -322,9 +372,10 @@ pub fn run() {
             // re-dispatch).
             let menu_items = default_menu();
             let menu = {
+                let stroke = current_menu_stroke();
                 let mut menu = MenuBuilder::new(app);
                 for binding in &menu_items {
-                    let icon = tray_menu_item_icon(binding.item);
+                    let icon = tray_menu_item_icon(binding.item, stroke);
                     let accel = tray_menu_item_accelerator(binding.item);
                     let item = tauri::menu::IconMenuItem::with_id(
                         app,
