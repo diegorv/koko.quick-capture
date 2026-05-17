@@ -209,11 +209,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(builder.build())
         // Window-state plugin persists each window's size + position
-        // across launches. Only the Inbox benefits in practice (the
-        // Composer is a fixed-size popover and the Dock is anchored
-        // bottom-left programmatically), but enabling the plugin
-        // globally is simpler than per-window opt-in.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // across launches. Restrict the saved flags to SIZE + POSITION
+        // only: restoring `VISIBLE` would force the Inbox and Composer
+        // to appear on every relaunch (they live as hidden-until-
+        // summoned windows), and restoring `DECORATIONS` would
+        // overwrite the Composer's intentional `decorations(false)`.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION,
+                )
+                .build(),
+        )
         .setup(|app| {
             // Accessory mode: no Dock icon, no system menu bar (see
             // ADR-0009). The app lives in the Tray and is summoned by
