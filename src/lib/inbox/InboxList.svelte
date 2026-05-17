@@ -299,6 +299,10 @@
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     cursor: pointer;
     transition: background 80ms ease;
+    /* Push scrollIntoView's resting top below the sticky search bar
+       in the parent route (~48px tall). Without this, the first row
+       slides under the search bar on arrow-key nav and Tab. */
+    scroll-margin-top: 50px;
   }
 
   /* Per-item unread dot. Hidden by default; only visible on rows
