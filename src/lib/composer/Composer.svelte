@@ -24,6 +24,11 @@
   // Flipped true for a beat after a successful save so the composer
   // can flash a brief green confirmation before the window hides.
   let saved = $state(false);
+  // Re-entry guard. Holding Cmd+Enter (or hitting it twice quickly)
+  // used to fire the save handler twice before the window hid,
+  // double-persisting the note. We refuse new saves while the
+  // current one is in flight.
+  let saving = false;
   const SAVE_FLASH_MS = 180;
 
   function focusOnMount(node: HTMLTextAreaElement) {
@@ -33,10 +38,12 @@
   $effect(() => {
     // Re-run on every `focusKey` change. Reset text so each open
     // starts from an empty draft, and re-focus the textarea. Also
-    // clear any leftover `saved` flash from a previous capture.
+    // clear any leftover `saved` flash and the in-flight guard from
+    // a previous capture.
     focusKey;
     text = "";
     saved = false;
+    saving = false;
     textarea?.focus();
   });
 
@@ -57,12 +64,18 @@
     }
     if (event.key === "Enter" && event.metaKey) {
       event.preventDefault();
-      await save(text);
-      saved = true;
-      // Hold the green confirmation flash briefly so the user sees a
-      // visual ack before the window is hidden by the parent.
-      await new Promise<void>((resolve) => setTimeout(resolve, SAVE_FLASH_MS));
-      saved = false;
+      if (saving) return;
+      saving = true;
+      try {
+        await save(text);
+        saved = true;
+        // Hold the green confirmation flash briefly so the user sees a
+        // visual ack before the window is hidden by the parent.
+        await new Promise<void>((resolve) => setTimeout(resolve, SAVE_FLASH_MS));
+        saved = false;
+      } finally {
+        saving = false;
+      }
       onclose?.();
     }
   }
