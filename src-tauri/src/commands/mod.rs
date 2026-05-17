@@ -581,6 +581,25 @@ pub fn open_link(url: String) -> Result<(), String> {
     open_link_with(&SystemShell::new(), &url)
 }
 
+/// Resolve the on-disk path of the SQLite captures DB. Used by the
+/// Settings page to show the path and to power "Reveal in Finder".
+#[tauri::command]
+pub fn get_db_path() -> Result<String, String> {
+    crate::store::default_db_path()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+/// Reveal the captures DB in macOS Finder (the parent folder opens
+/// with the file selected). Settings page button.
+#[tauri::command]
+pub fn reveal_db_in_finder() -> Result<(), String> {
+    let path = crate::store::default_db_path().map_err(|e| e.to_string())?;
+    SystemShell::new()
+        .reveal_in_finder(&path)
+        .map_err(|e| e.to_string())
+}
+
 /// Route a Capture's id to the right Shell action, picking the right
 /// path field per kind. Used by the Inbox detail pane for `File`,
 /// path-flavor `Shot`, and bytes-flavor `Shot`. `Clip` and `Note` have

@@ -9,6 +9,7 @@
   let version = $state("…");
   let totalCount = $state<number | null>(null);
   let unreadCount = $state<number | null>(null);
+  let dbPath = $state<string | null>(null);
 
   const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
     {
@@ -35,16 +36,26 @@
       console.error("read version failed", err);
     }
     try {
-      const [total, unread] = await Promise.all([
+      const [total, unread, path] = await Promise.all([
         invoke<number>("total_count"),
         invoke<number>("unread_count"),
+        invoke<string>("get_db_path"),
       ]);
       totalCount = Number(total) || 0;
       unreadCount = Number(unread) || 0;
+      dbPath = path;
     } catch (err) {
-      console.error("counts failed", err);
+      console.error("settings load failed", err);
     }
   });
+
+  async function revealDb() {
+    try {
+      await invoke("reveal_db_in_finder");
+    } catch (err) {
+      console.error("reveal_db_in_finder failed", err);
+    }
+  }
 </script>
 
 <div class="settings">
@@ -76,7 +87,17 @@
       <dt>Unread</dt>
       <dd>{unreadCount ?? "—"}</dd>
       <dt>Database</dt>
-      <dd class="path">~/Library/Application Support/com.koko.quick-capture/captures.db</dd>
+      <dd class="path-row">
+        <span class="path">{dbPath ?? "…"}</span>
+        <button
+          type="button"
+          class="reveal"
+          onclick={revealDb}
+          disabled={dbPath === null}
+        >
+          Reveal in Finder
+        </button>
+      </dd>
     </dl>
   </section>
 
@@ -208,5 +229,46 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.78rem;
     opacity: 0.85;
+    word-break: break-all;
+  }
+
+  .path-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .reveal {
+    flex: 0 0 auto;
+    appearance: none;
+    border: 1px solid rgba(76, 29, 149, 0.5);
+    background: rgba(76, 29, 149, 0.1);
+    color: rgba(76, 29, 149, 1);
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition:
+      background 80ms ease,
+      border-color 80ms ease;
+  }
+  .reveal:hover {
+    background: rgba(76, 29, 149, 0.18);
+  }
+  .reveal:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  @media (prefers-color-scheme: dark) {
+    .reveal {
+      border-color: rgba(167, 139, 250, 0.5);
+      background: rgba(167, 139, 250, 0.12);
+      color: rgba(167, 139, 250, 1);
+    }
+    .reveal:hover {
+      background: rgba(167, 139, 250, 0.22);
+    }
   }
 </style>

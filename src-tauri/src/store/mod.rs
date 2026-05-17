@@ -700,7 +700,7 @@ fn extension_for_mime(mime: &str) -> &'static str {
     }
 }
 
-fn default_db_path() -> Result<PathBuf, StoreError> {
+pub fn default_db_path() -> Result<PathBuf, StoreError> {
     let home = std::env::var("HOME").map_err(|_| {
         StoreError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,

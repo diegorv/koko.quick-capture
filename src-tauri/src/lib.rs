@@ -615,6 +615,8 @@ pub fn run() {
             hide_inbox,
             commands::open_dock_context_menu,
             commands::open_link,
+            commands::get_db_path,
+            commands::reveal_db_in_finder,
             commands::reveal_capture
         ])
         .run(tauri::generate_context!())
