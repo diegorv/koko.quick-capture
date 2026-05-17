@@ -440,7 +440,12 @@ pub fn run() {
                 WebviewUrl::App("/dock".into()),
             )
             .title("")
-            .inner_size(80.0, 80.0)
+            // Window is 96x96, but the visible Dock disc is 80x80 and
+            // centered inside the window. The extra 16px ring around
+            // the disc gives the unread-count badge room to overflow
+            // the top-right corner without being clipped by the
+            // window's own bounds.
+            .inner_size(96.0, 96.0)
             .resizable(false)
             .decorations(false)
             .transparent(true)
@@ -465,9 +470,13 @@ pub fn run() {
                 let monitor_logical_x = m_pos.x as f64 / scale;
                 let monitor_logical_y = m_pos.y as f64 / scale;
                 let monitor_logical_h = m_size.height as f64 / scale;
-                // Window 80x80, margin 16, anchored bottom-left.
+                // Window 96x96 (80x80 disc + 16px breathing room for
+                // the unread badge), margin 16 from monitor edges,
+                // anchored bottom-left. The disc still sits ~16px from
+                // both edges because of the centered offset inside the
+                // window.
                 let x = monitor_logical_x + 16.0;
-                let y = monitor_logical_y + monitor_logical_h - 80.0 - 16.0;
+                let y = monitor_logical_y + monitor_logical_h - 96.0 - 16.0;
                 dock_window.set_position(LogicalPosition::new(x, y))?;
             } else {
                 // Fallback: place at a sane physical default so the
@@ -476,7 +485,7 @@ pub fn run() {
                     .set_position(PhysicalPosition::new(16i32, 16i32));
             }
             // Ensure the size took (some platforms reset on first show).
-            let _ = dock_window.set_size(LogicalSize::new(80.0, 80.0));
+            let _ = dock_window.set_size(LogicalSize::new(96.0, 96.0));
 
             // Dock drag-drop: handle Finder file drops via Tauri's
             // native drag-drop channel (ADR-0008). Tauri 2.11 routes the

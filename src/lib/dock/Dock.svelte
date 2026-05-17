@@ -93,21 +93,22 @@
 </button>
 
 <style>
-  /* The button is the entire 80x80 surface. Reset native chrome so it
-     reads as a pure visual disc, not a system button. */
+  /* Visual disc is 80x80 centered in a 96x96 window so the unread
+     badge can overflow the top-right corner without being clipped.
+     Reset native chrome so the button reads as a pure visual disc. */
   .dock {
     appearance: none;
     border: none;
-    margin: 0;
+    margin: 8px;
     padding: 0;
     width: 80px;
     height: 80px;
     border-radius: 50%;
     cursor: pointer;
-    background: linear-gradient(140deg, #4f46e5 0%, #1e1b4b 100%);
+    background: linear-gradient(140deg, #6d28d9 0%, #2e1065 100%);
     box-shadow:
-      0 4px 16px rgba(0, 0, 0, 0.35),
-      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      0 4px 16px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
     position: relative;
     color: rgba(255, 255, 255, 0.92);
     display: flex;
@@ -132,8 +133,8 @@
      `dock.drag.enter` / `dock.drag.leave` events. */
   .dock.drag-active {
     filter: brightness(1.2);
-    box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.6),
-      0 4px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.65),
+      0 4px 20px rgba(0, 0, 0, 0.45);
   }
 
   /* One-shot pulse triggered on every successful Capture save. The
@@ -146,16 +147,16 @@
   @keyframes dock-pulse {
     0% {
       transform: scale(1);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     }
     40% {
       transform: scale(1.08);
-      box-shadow: 0 0 0 8px rgba(110, 168, 254, 0.45),
-        0 4px 20px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 0 0 8px rgba(167, 139, 250, 0.5),
+        0 4px 20px rgba(0, 0, 0, 0.45);
     }
     100% {
       transform: scale(1);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     }
   }
 

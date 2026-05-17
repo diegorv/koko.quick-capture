@@ -121,9 +121,11 @@
 <style>
   :global(html),
   :global(body) {
-    /* The Dock window is decoration-less and 80x80; the body should
-       be transparent so the rounded button reads as a free-floating
-       widget rather than a square panel. */
+    /* The Dock window is decoration-less and 96x96 (80x80 disc
+       centered with an 8px ring of slack around it for the unread
+       badge to overflow into); the body should be transparent so the
+       rounded button reads as a free-floating widget rather than a
+       square panel. */
     margin: 0;
     padding: 0;
     background: transparent;
