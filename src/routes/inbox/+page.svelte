@@ -381,7 +381,7 @@
 <div class="inbox" data-testid="inbox">
   <div class="titlebar" data-tauri-drag-region aria-hidden="true"></div>
   <div class="panes">
-    <section class="list-pane" onscroll={onScroll}>
+    <div class="list-column">
       <div class="searchbar">
         <input
           bind:this={searchInputEl}
@@ -406,37 +406,39 @@
           </button>
         {/if}
       </div>
-      {#if searching && visibleCaptures.length === 0}
-        <div class="empty">
-          <div class="empty-glyph" aria-hidden="true">🔍</div>
-          <h2 class="empty-title">No matches</h2>
-          <p class="empty-hint">Nothing matched “{searchQuery}”.</p>
-        </div>
-      {:else if !loading && !searching && captures.length === 0}
-        <div class="empty">
-          <div class="empty-glyph" aria-hidden="true">📥</div>
-          <h2 class="empty-title">No captures yet</h2>
-          <p class="empty-hint">
-            Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
-            or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
-          </p>
-          <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
-        </div>
-      {:else}
-        <InboxList
-          captures={visibleCaptures}
-          {selectedId}
-          {onSelect}
-          {onStarToggle}
-          {onDelete}
-          {onOpen}
-          {onClose}
-        />
-        {#if loading}
-          <div class="spinner" aria-live="polite">Loading…</div>
+      <section class="list-pane" onscroll={onScroll}>
+        {#if searching && visibleCaptures.length === 0}
+          <div class="empty">
+            <div class="empty-glyph" aria-hidden="true">🔍</div>
+            <h2 class="empty-title">No matches</h2>
+            <p class="empty-hint">Nothing matched “{searchQuery}”.</p>
+          </div>
+        {:else if !loading && !searching && captures.length === 0}
+          <div class="empty">
+            <div class="empty-glyph" aria-hidden="true">📥</div>
+            <h2 class="empty-title">No captures yet</h2>
+            <p class="empty-hint">
+              Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
+              or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
+            </p>
+            <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
+          </div>
+        {:else}
+          <InboxList
+            captures={visibleCaptures}
+            {selectedId}
+            {onSelect}
+            {onStarToggle}
+            {onDelete}
+            {onOpen}
+            {onClose}
+          />
+          {#if loading}
+            <div class="spinner" aria-live="polite">Loading…</div>
+          {/if}
         {/if}
-      {/if}
-    </section>
+      </section>
+    </div>
     <section class="detail-pane">
       <InboxDetail
         capture={selectedCapture}
@@ -489,24 +491,29 @@
     min-height: 0;
   }
 
+  /* The list column is split into a static search bar on top of a
+     scrolling list pane. Keeping the search bar OUTSIDE the scrolling
+     container means browser-driven scroll (e.g. Tab focus into the
+     listbox) cannot tuck rows underneath a sticky overlay — there is
+     no overlay anymore. */
+  .list-column {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
   .list-pane {
     overflow-y: auto;
-    border-right: 1px solid rgba(0, 0, 0, 0.08);
+    min-height: 0;
     position: relative;
   }
 
   .searchbar {
-    position: sticky;
-    top: 0;
-    z-index: 1;
     display: flex;
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.75rem;
-    /* Opaque background so rows scrolling underneath don't bleed
-       through. `background: inherit` resolves to transparent because
-       CSS background is not an inherited property. */
-    background: #f6f6f6;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   }
 
@@ -627,11 +634,10 @@
       color: #f6f6f6;
       background-color: #1c1c1c;
     }
-    .list-pane {
+    .list-column {
       border-right-color: rgba(255, 255, 255, 0.08);
     }
     .searchbar {
-      background: #1c1c1c;
       border-bottom-color: rgba(255, 255, 255, 0.06);
     }
     .search-input {
