@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>quick-capture — manual smoke</title>
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #1c1c1c;
+    --panel: #242427;
+    --panel-2: #2a2a2e;
+    --border: rgba(255,255,255,0.08);
+    --text: #f4f4f4;
+    --muted: rgba(255,255,255,0.55);
+    --accent: #a78bfa;
+    --accent-strong: #4c1d95;
+    --ok: #34d399;
+    --warn: #f59e0b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f6f6;
+      --panel: #ffffff;
+      --panel-2: #fafafa;
+      --border: rgba(0,0,0,0.08);
+      --text: #0f0f0f;
+      --muted: rgba(0,0,0,0.55);
+      --accent: #6d28d9;
+      --accent-strong: #4c1d95;
+      --ok: #059669;
+      --warn: #d97706;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+  }
+  .logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: linear-gradient(140deg, #4c1d95 0%, #1a0a3a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .logo svg { width: 32px; height: 32px; color: #fff; }
+  h1 {
+    margin: 0;
+    font-size: 1.6rem;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0.15rem 0 0;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.5rem 0 0.75rem;
+    flex-wrap: wrap;
+  }
+  .progress {
+    flex: 1;
+    min-width: 240px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+    width: 0;
+    transition: width 200ms ease;
+  }
+  .counter {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .counter strong { color: var(--text); }
+  button.reset {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  button.reset:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  section.group {
+    margin-top: 1.75rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .group-head h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+  .group-head .group-stats {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .group-head .group-stats.full { color: var(--ok); }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  li.item {
+    display: grid;
+    grid-template-columns: 1.5rem 1fr;
+    gap: 0.85rem;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+    transition: opacity 100ms ease;
+  }
+  li.item:last-child { border-bottom: none; }
+  li.item.done { opacity: 0.5; }
+  li.item.done .desc { text-decoration: line-through; }
+  li.item label {
+    cursor: pointer;
+    display: contents;
+  }
+  li.item input[type="checkbox"] {
+    appearance: none;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 4px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    margin-top: 0.15rem;
+    position: relative;
+    flex-shrink: 0;
+  }
+  li.item input[type="checkbox"]:checked {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  li.item input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: -1px;
+    width: 6px;
+    height: 11px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .desc {
+    font-size: 0.92rem;
+  }
+  .hint {
+    display: block;
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 0.2rem;
+  }
+  kbd {
+    display: inline-block;
+    padding: 0.05em 0.42em;
+    margin: 0 1px;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 0.78em;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .callout {
+    margin-top: 1rem;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .footnote {
+    margin-top: 2.5rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-align: center;
+  }
+  .footnote a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+        <path d="M9 13a4.5 4.5 0 0 0 3-4"/>
+        <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+        <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+        <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+        <path d="M12 13h4"/>
+        <path d="M12 18h6a2 2 0 0 1 2 2v1"/>
+        <path d="M12 8h8"/>
+        <path d="M16 8V5a2 2 0 0 1 2-2"/>
+        <circle cx="16" cy="13" r=".5" fill="currentColor"/>
+        <circle cx="18" cy="3" r=".5" fill="currentColor"/>
+        <circle cx="20" cy="21" r=".5" fill="currentColor"/>
+        <circle cx="20" cy="8" r=".5" fill="currentColor"/>
+      </svg>
+    </div>
+    <div>
+      <h1>quick-capture — manual smoke</h1>
+      <p class="sub">Walk every surface. Tick as you go. Progress persists in your browser.</p>
+    </div>
+  </header>
+
+  <div class="callout">
+    Start the app first: <kbd>pnpm tauri dev</kbd>. The checklist below covers every entry point shipped in v0.2.0. Drag-drop, Cmd+Tab integration, and window persistence are the paths most likely never exercised — they sit near the bottom.
+  </div>
+
+  <div class="toolbar">
+    <div class="progress" aria-label="Overall progress"><span id="overall-bar"></span></div>
+    <div class="counter"><strong id="overall-done">0</strong> / <span id="overall-total">0</span> done</div>
+    <button class="reset" id="reset-all" type="button">Reset all</button>
+  </div>
+
+  <main id="groups"></main>
+
+  <p class="footnote">
+    Persistence key: <code>quick-capture-manual-smoke-v1</code>.
+    Clear via the Reset button or DevTools → Application → Local Storage.
+  </p>
+
+</div>
+
+<script>
+  const GROUPS = [
+    {
+      id: "composer",
+      title: "Composer popover",
+      items: [
+        { id: "composer-open", desc: "<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Cmd</kbd>+<kbd>Space</kbd> opens an empty Composer over the previously frontmost app.", hint: "The window should appear instantly, centered, with focus already on the textarea." },
+        { id: "composer-save", desc: "Type something, press <kbd>Cmd</kbd>+<kbd>Enter</kbd>.", hint: "Indigo ring flashes for ~180ms, window hides, new Note row appears at the top of the Inbox." },
+        { id: "composer-esc", desc: "Reopen Composer, type something, press <kbd>Esc</kbd>.", hint: "Window hides without saving. No new Inbox row." },
+        { id: "composer-reset", desc: "Reopen Composer after a save.", hint: "Textarea is empty (no leftover from prior session)." },
+        { id: "composer-drag", desc: "Drag from the Composer's outer padding (above / beside the textarea) to move the window.", hint: "Clicking inside the textarea must still place the caret normally — only the padding strip drags." }
+      ]
+    },
+    {
+      id: "clipboard",
+      title: "Clipboard capture",
+      items: [
+        { id: "clip-text", desc: "Copy plain text, then <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Cmd</kbd>+<kbd>C</kbd>.", hint: "Inbox shows a <em>Clip</em> row with the text preview." },
+        { id: "clip-url", desc: "Copy a URL (e.g. https://example.com), then the shortcut.", hint: "Row is a <em>Link</em>, not a Clip. Detail pane offers \"Open in Browser\"." },
+        { id: "clip-image", desc: "Copy an image (CleanShot / Cmd+Shift+Ctrl+4), then the shortcut.", hint: "Row is a <em>Shot</em> with an inline preview in the detail pane. Image bytes are written under <code>~/Library/Application Support/com.koko.quick-capture/blobs/</code>." },
+        { id: "clip-file", desc: "Cmd+C a file in Finder, then the shortcut.", hint: "Row is a <em>File</em> (or <em>Shot</em> if the file is an image), referenced by source_path — no copy." }
+      ]
+    },
+    {
+      id: "inbox",
+      title: "Inbox window",
+      items: [
+        { id: "inbox-open", desc: "<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Cmd</kbd>+<kbd>I</kbd> opens the window.", hint: "Arrow keys move the selection immediately, no extra Tab needed." },
+        { id: "inbox-rows", desc: "Each kind (Note / Clip / Link / Shot / File) renders the correct row icon + a sensible payload preview.", hint: "Save one of each first to see them side by side." },
+        { id: "inbox-detail", desc: "Click rows or arrow through them.", hint: "Detail pane updates live; the Open button label matches the kind (Open in Browser / Reveal in Finder / Open Image)." },
+        { id: "inbox-open-link", desc: "Press <kbd>Enter</kbd> on a Link row.", hint: "Default browser launches at the URL." },
+        { id: "inbox-reveal", desc: "Press <kbd>Enter</kbd> on a File or path-Shot row.", hint: "Finder opens with the file highlighted." },
+        { id: "inbox-star", desc: "Press <kbd>S</kbd> on a row, or click the ★ in the detail header.", hint: "Star toggles, list row picks up the amber dot, persists across a window hide/show." },
+        { id: "inbox-delete", desc: "Press <kbd>Cmd</kbd>+<kbd>Delete</kbd> on a row.", hint: "Row vanishes from the list, total count drops by one. (It's soft-deleted — still in the DB.)" },
+        { id: "inbox-pagination", desc: "Scroll past row 50.", hint: "Next page loads transparently. Save 51+ captures first, or seed via <code>cargo run --bin dev_list</code>." },
+        { id: "inbox-live", desc: "With the Inbox open, capture something via Composer or clipboard.", hint: "New row prepends live; status bar total bumps; Dock badge increments." },
+        { id: "inbox-statusbar", desc: "Status bar at the bottom shows totals.", hint: "Format: <code>N captures · last Xm ago · K new</code>. The \"K new\" segment hides at zero." }
+      ]
+    },
+    {
+      id: "dock",
+      title: "Dock widget",
+      items: [
+        { id: "dock-position", desc: "Disc renders at the bottom-left of the primary monitor with a 16px margin from both edges.", hint: "Multi-monitor: it should pin to the primary, not whichever has the cursor." },
+        { id: "dock-click", desc: "Click the disc.", hint: "Composer opens. The Dock does NOT steal keyboard focus from whatever app you were in." },
+        { id: "dock-rclick", desc: "Right-click the disc.", hint: "Popup menu shows Open Composer, Open Inbox, Quit." },
+        { id: "dock-pulse", desc: "Save any capture (Composer, clipboard, or drag).", hint: "Disc plays a one-shot pulse animation (~450ms violet ring expand)." },
+        { id: "dock-badge", desc: "Save a capture, then check the Dock badge.", hint: "Red dot with the live count, capped at \"99+\"." },
+        { id: "dock-badge-clear", desc: "Open the Inbox, interact with the unread row.", hint: "Badge count drops by one per interaction. Hides at zero." },
+        { id: "dock-fullscreen", desc: "Enter fullscreen in another app (e.g. Safari with Cmd+Ctrl+F).", hint: "Dock disappears. Exiting fullscreen restores it." }
+      ]
+    },
+    {
+      id: "dock-drag",
+      title: "Drag-drop onto the Dock (untested path)",
+      items: [
+        { id: "drag-pdf", desc: "Drag a PDF from Finder onto the Dock disc.", hint: "Disc shows a violet ring while hovering. Drop creates a <em>File</em> capture with the original filename." },
+        { id: "drag-png", desc: "Drag a PNG from Finder onto the disc.", hint: "Creates a <em>Shot { source_path }</em>; detail pane shows the image inline." },
+        { id: "drag-multi", desc: "Drag multiple files at once.", hint: "One capture per file, all prepended in order. Dock pulses once per file." },
+        { id: "drag-cancel", desc: "Start a drag, then drop outside the disc.", hint: "Violet ring clears. No row saved." }
+      ]
+    },
+    {
+      id: "tray",
+      title: "Tray (menubar)",
+      items: [
+        { id: "tray-icon", desc: "Brain-circuit icon visible in the menubar.", hint: "Recolours with the menubar theme (dark menubar → white; light menubar → black). Stroke colour is detected once at app launch." },
+        { id: "tray-menu", desc: "Click the icon to open the menu.", hint: "Three items: Open Composer, Open Inbox, Quit. Each has its Lucide glyph + accelerator hint on the right." },
+        { id: "tray-actions", desc: "Click each item.", hint: "Open Composer / Open Inbox behave exactly like their global shortcuts. Quit exits the app cleanly." }
+      ]
+    },
+    {
+      id: "policy",
+      title: "macOS activation policy (Cmd+Tab)",
+      items: [
+        { id: "policy-idle", desc: "App at idle (Inbox hidden).", hint: "Not in <kbd>Cmd</kbd>+<kbd>Tab</kbd>. No system Dock icon." },
+        { id: "policy-open", desc: "Open the Inbox.", hint: "App appears in <kbd>Cmd</kbd>+<kbd>Tab</kbd>. System Dock icon shows up briefly." },
+        { id: "policy-close", desc: "Close the Inbox (red button / <kbd>Cmd</kbd>+<kbd>W</kbd>).", hint: "Both disappear from <kbd>Cmd</kbd>+<kbd>Tab</kbd> and the system Dock." }
+      ]
+    },
+    {
+      id: "persistence",
+      title: "Window position persistence",
+      items: [
+        { id: "persist-move", desc: "Move + resize the Inbox window, close it, reopen.", hint: "Lands at the same position + size." },
+        { id: "persist-hidden", desc: "Quit the app (Tray → Quit or Cmd+Q) while the Inbox is hidden, then relaunch.", hint: "Inbox does NOT pop on relaunch (only size + position persist, not visibility)." }
+      ]
+    }
+  ];
+
+  const STORAGE_KEY = "quick-capture-manual-smoke-v1";
+
+  function loadState() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  }
+  function saveState(state) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  let state = loadState();
+
+  function render() {
+    const root = document.getElementById("groups");
+    root.innerHTML = "";
+    let totalDone = 0, totalAll = 0;
+
+    for (const group of GROUPS) {
+      const section = document.createElement("section");
+      section.className = "group";
+
+      const head = document.createElement("div");
+      head.className = "group-head";
+      const groupDone = group.items.filter(i => state[i.id]).length;
+      const groupAll = group.items.length;
+      totalDone += groupDone;
+      totalAll += groupAll;
+      const statsClass = groupDone === groupAll ? "group-stats full" : "group-stats";
+      head.innerHTML = `<h2>${group.title}</h2><span class="${statsClass}">${groupDone} / ${groupAll}</span>`;
+      section.appendChild(head);
+
+      const ul = document.createElement("ul");
+      for (const item of group.items) {
+        const li = document.createElement("li");
+        li.className = "item" + (state[item.id] ? " done" : "");
+        const checkboxId = `cb-${item.id}`;
+        li.innerHTML = `
+          <input type="checkbox" id="${checkboxId}" ${state[item.id] ? "checked" : ""}/>
+          <label for="${checkboxId}">
+            <span class="desc">${item.desc}</span>
+            ${item.hint ? `<span class="hint">${item.hint}</span>` : ""}
+          </label>
+        `;
+        li.querySelector("input").addEventListener("change", (e) => {
+          state[item.id] = e.target.checked;
+          saveState(state);
+          render();
+        });
+        ul.appendChild(li);
+      }
+      section.appendChild(ul);
+      root.appendChild(section);
+    }
+
+    document.getElementById("overall-done").textContent = totalDone;
+    document.getElementById("overall-total").textContent = totalAll;
+    const pct = totalAll === 0 ? 0 : Math.round((totalDone / totalAll) * 100);
+    document.getElementById("overall-bar").style.width = pct + "%";
+  }
+
+  document.getElementById("reset-all").addEventListener("click", () => {
+    if (!confirm("Reset every checkbox?")) return;
+    state = {};
+    saveState(state);
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
