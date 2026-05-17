@@ -16,6 +16,7 @@
     Image as ImageIcon,
     File as FileIcon,
     StickyNote,
+    MousePointerClick,
     type Icon as IconType,
   } from "@lucide/svelte";
 
@@ -69,7 +70,14 @@
 <div class="detail" data-testid="inbox-detail">
   {#if capture === null}
     <div class="placeholder">
+      <span class="placeholder-glyph" aria-hidden="true">
+        <MousePointerClick size={36} strokeWidth={1.4} />
+      </span>
       <p class="placeholder-text">Select a Capture</p>
+      <p class="placeholder-hint">
+        Use <kbd>↑</kbd><kbd>↓</kbd> to move,
+        <kbd>↩</kbd> to open, <kbd>S</kbd> to star.
+      </p>
     </div>
   {:else}
     {@const HeaderIcon = KIND_ICONS[capture.kind]}
@@ -185,12 +193,41 @@
   .placeholder {
     margin: auto;
     text-align: center;
-    opacity: 0.45;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    max-width: 28ch;
+    padding: 0 1.5rem;
+  }
+
+  .placeholder-glyph {
+    display: inline-flex;
+    opacity: 0.35;
   }
 
   .placeholder-text {
     font-size: 0.95rem;
     margin: 0;
+    opacity: 0.55;
+  }
+
+  .placeholder-hint {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    opacity: 0.45;
+  }
+
+  .placeholder-hint kbd {
+    display: inline-block;
+    padding: 0.05em 0.4em;
+    margin: 0 1px;
+    font-family: inherit;
+    font-size: 0.82em;
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
   }
 
   .header {
@@ -362,6 +399,10 @@
     }
     .action:hover {
       background: rgba(255, 255, 255, 0.1);
+    }
+    .placeholder-hint kbd {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.12);
     }
   }
 </style>
