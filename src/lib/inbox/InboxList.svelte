@@ -160,6 +160,41 @@
     return `${day}d ago`;
   }
 
+  // Bucket each capture by recency for the sticky date headers
+  // rendered between rows. Resolution: Today / Yesterday / This week
+  // / This month / Older. The cutoffs are coarse on purpose — minute
+  // drift between renders does not change a bucket.
+  function dateBucket(iso: string, ref: number): string {
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "Older";
+    const diff = ref - t;
+    const day = 86_400_000;
+    if (diff < day) return "Today";
+    if (diff < day * 2) return "Yesterday";
+    if (diff < day * 7) return "This week";
+    if (diff < day * 30) return "This month";
+    return "Older";
+  }
+
+  type GroupItem =
+    | { kind: "header"; label: string }
+    | { kind: "row"; capture: Capture };
+
+  const groupedItems = $derived.by<GroupItem[]>(() => {
+    const now = Date.now();
+    const items: GroupItem[] = [];
+    let last: string | null = null;
+    for (const capture of captures) {
+      const bucket = dateBucket(capture.created_at, now);
+      if (bucket !== last) {
+        items.push({ kind: "header", label: bucket });
+        last = bucket;
+      }
+      items.push({ kind: "row", capture });
+    }
+    return items;
+  });
+
   function selectedIndex(): number {
     if (selectedId === null) return -1;
     return captures.findIndex((c) => c.id === selectedId);
@@ -234,18 +269,24 @@
   aria-activedescendant={selectedId ? `capture-row-${selectedId}` : undefined}
   onkeydown={handleListKeydown}
 >
-  {#each captures as capture (capture.id)}
-    {@const KindIcon = KIND_ICONS[capture.kind]}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <li
-      id={`capture-row-${capture.id}`}
-      class="row"
-      class:selected={capture.id === selectedId}
-      class:unread={capture.read_at === null}
-      role="option"
-      aria-selected={capture.id === selectedId}
-      onclick={() => selectAndFocus(capture.id)}
-    >
+  {#each groupedItems as item (item.kind === "row" ? item.capture.id : `h:${item.label}`)}
+    {#if item.kind === "header"}
+      <li class="date-header" role="presentation" aria-hidden="true">
+        {item.label}
+      </li>
+    {:else}
+      {@const capture = item.capture}
+      {@const KindIcon = KIND_ICONS[capture.kind]}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <li
+        id={`capture-row-${capture.id}`}
+        class="row"
+        class:selected={capture.id === selectedId}
+        class:unread={capture.read_at === null}
+        role="option"
+        aria-selected={capture.id === selectedId}
+        onclick={() => selectAndFocus(capture.id)}
+      >
       <span class="unread-dot" aria-hidden="true"></span>
       <span class="kind" aria-label={`kind ${capture.kind}`}>
         <KindIcon size={16} strokeWidth={1.75} />
@@ -276,7 +317,8 @@
       >
         ×
       </button>
-    </li>
+      </li>
+    {/if}
   {/each}
 </ul>
 
@@ -299,6 +341,24 @@
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     cursor: pointer;
     transition: background 80ms ease;
+  }
+
+  /* Date-bucket separators rendered between rows. Sticky so the
+     header for the current group stays pinned to the top of the
+     listbox viewport as the user scrolls within that group. */
+  .date-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.5);
+    background: #f6f6f6;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    user-select: none;
   }
 
   /* Per-item unread dot. Hidden by default; only visible on rows
@@ -390,6 +450,11 @@
     }
     .row.unread .unread-dot {
       background: #a78bfa;
+    }
+    .date-header {
+      background: #1c1c1c;
+      color: rgba(255, 255, 255, 0.5);
+      border-bottom-color: rgba(255, 255, 255, 0.06);
     }
     .row:hover {
       background: rgba(255, 255, 255, 0.04);
