@@ -104,9 +104,9 @@
 
   /* Brief success ring after Cmd+Enter, held for ~180ms in the script
      before the parent hides the window. Inset so the rounded corners
-     stay clean. */
+     stay clean. Indigo matches the Inbox selection accent. */
   .composer.saved {
-    box-shadow: inset 0 0 0 3px rgba(34, 197, 94, 0.55);
+    box-shadow: inset 0 0 0 3px rgba(79, 70, 229, 0.6);
   }
 
   textarea {
