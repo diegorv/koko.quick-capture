@@ -242,6 +242,29 @@ fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
     }
 }
 
+/// Pure dispatch from a `TrayMenuItem` intent to the action that
+/// should run when the user picks it. Both the Tray menu and the
+/// Dock right-click popup share this — their menus carry different
+/// `menu_id`s but the underlying intent (and therefore the action)
+/// is identical, so a single helper avoids the two dispatchers
+/// drifting.
+///
+/// OpenInbox routes through the `TRAY_OPEN_INBOX` bus event rather
+/// than calling `show_inbox` directly so the same `app.listen`
+/// handler registered for the tray path also services the dock
+/// popup with no extra wiring.
+fn dispatch_menu_item(app: &tauri::AppHandle, item: TrayMenuItem) {
+    match item {
+        TrayMenuItem::OpenComposer => commands::show_composer(app),
+        TrayMenuItem::OpenInbox => {
+            let _ = app.emit(TRAY_OPEN_INBOX, ());
+        }
+        TrayMenuItem::Quit => {
+            app.exit(0);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let registry = default_registry();
@@ -398,20 +421,7 @@ pub fn run() {
                     let Some(binding) = dispatch.iter().find(|b| b.menu_id == id) else {
                         return;
                     };
-                    match binding.item {
-                        TrayMenuItem::OpenComposer => {
-                            commands::show_composer(app);
-                        }
-                        TrayMenuItem::OpenInbox => {
-                            // The Inbox window subscribes to
-                            // `tray:open_inbox` via `app.listen` in
-                            // `setup`; emitting on the bus is enough.
-                            let _ = app.emit(binding.event, ());
-                        }
-                        TrayMenuItem::Quit => {
-                            app.exit(0);
-                        }
-                    }
+                    dispatch_menu_item(app, binding.item);
                 })
                 .build(app)?;
 
@@ -533,24 +543,16 @@ pub fn run() {
             // but the click on a menu item lands here. The same item
             // intents are mirrored from the Tray (Open Composer, Open
             // Inbox, Quit) via `dock::default_context_menu()`; only
-            // the `menu_id` prefix differs (`dock.*` vs `tray.*`).
+            // the `menu_id` prefix differs (`dock:*` vs `tray:*`), and
+            // both paths share `dispatch_menu_item` so the action stays
+            // in one place.
             let dock_dispatch = default_context_menu();
             app.on_menu_event(move |app, event| {
                 let id = event.id().as_ref();
                 let Some(binding) = dock_dispatch.iter().find(|b| b.menu_id == id) else {
                     return;
                 };
-                match binding.tray.item {
-                    TrayMenuItem::OpenComposer => {
-                        commands::show_composer(app);
-                    }
-                    TrayMenuItem::OpenInbox => {
-                        let _ = app.emit(binding.tray.event, ());
-                    }
-                    TrayMenuItem::Quit => {
-                        app.exit(0);
-                    }
-                }
+                dispatch_menu_item(app, binding.tray.item);
             });
 
             // Start the macOS fullscreen observer. The handle holds
