@@ -105,7 +105,7 @@
     height: 80px;
     border-radius: 50%;
     cursor: pointer;
-    background: linear-gradient(140deg, #6d28d9 0%, #2e1065 100%);
+    background: linear-gradient(140deg, #4c1d95 0%, #1a0a3a 100%);
     box-shadow:
       0 4px 16px rgba(0, 0, 0, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.12);
