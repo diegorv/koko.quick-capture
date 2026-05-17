@@ -4,7 +4,7 @@
 
 use quick_capture_lib::commands::{
     delete_capture_with_store, is_clipboard_duplicate, list_captures_with_store, mark_read_with_store,
-    save_note_with_store, star_capture_with_store, total_count_with_store,
+    save_note_with_store, search_captures_with_store, star_capture_with_store, total_count_with_store,
     unread_count_with_store,
 };
 use quick_capture_lib::store::{CaptureInput, CaptureKind, Store};
@@ -305,6 +305,72 @@ fn is_clipboard_duplicate_matches_same_link_url() {
             title: Some("title".into()),
         }
     ));
+}
+
+#[test]
+fn search_captures_finds_indexed_note_text() {
+    let (_dir, store) = temp_store();
+    save_note_with_store(&store, "hello world").expect("save");
+    save_note_with_store(&store, "completely unrelated").expect("save");
+
+    let results = search_captures_with_store(&store, "hello", 10).expect("search");
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].payload.get("text").and_then(|v| v.as_str()),
+        Some("hello world")
+    );
+}
+
+#[test]
+fn search_captures_supports_prefix_match() {
+    let (_dir, store) = temp_store();
+    save_note_with_store(&store, "engineering notebook").expect("save");
+
+    let results = search_captures_with_store(&store, "engin", 10).expect("search");
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn search_captures_excludes_soft_deleted_rows() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "secret").expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+
+    assert_eq!(
+        search_captures_with_store(&store, "secret", 10)
+            .expect("search before")
+            .len(),
+        1
+    );
+
+    store.soft_delete(&id).expect("soft delete");
+    assert_eq!(
+        search_captures_with_store(&store, "secret", 10)
+            .expect("search after")
+            .len(),
+        0,
+        "soft-deleted rows must drop out of search results"
+    );
+}
+
+#[test]
+fn search_captures_empty_query_returns_no_rows() {
+    let (_dir, store) = temp_store();
+    save_note_with_store(&store, "hello").expect("save");
+    assert!(search_captures_with_store(&store, "   ", 10)
+        .expect("search")
+        .is_empty());
+}
+
+#[test]
+fn search_captures_sanitises_punctuation_in_query() {
+    let (_dir, store) = temp_store();
+    // FTS5 would reject `https://example.com` raw because of the
+    // special chars; build_fts_match must strip them down to
+    // alphanumeric tokens.
+    save_note_with_store(&store, "see https://example.com for docs").expect("save");
+    let results = search_captures_with_store(&store, "https://example.com", 10).expect("search");
+    assert_eq!(results.len(), 1);
 }
 
 #[test]

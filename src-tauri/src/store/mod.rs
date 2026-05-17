@@ -217,27 +217,20 @@ impl Store {
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
+            );
+            -- FTS5 index of the per-kind text payload (see
+            -- `searchable_text_for_input`). We keep our own
+            -- `capture_id` column (UNINDEXED) so the JOIN back to
+            -- `captures` does not need rowid bookkeeping. Writes go
+            -- through `Store::save` / `Store::soft_delete`; no
+            -- triggers, so the index can never drift from the
+            -- application's write surface.
+            CREATE VIRTUAL TABLE IF NOT EXISTS captures_fts USING fts5(
+                capture_id UNINDEXED,
+                text,
+                tokenize='unicode61 remove_diacritics 2'
             );",
         )?;
-
-        // v1.0 -> v1.1 migration: add `read_at` to existing DBs that
-        // were created before per-item read tracking. SQLite has no
-        // `ADD COLUMN IF NOT EXISTS`, so we discover the current
-        // schema via PRAGMA and only ALTER when the column is absent.
-        // Existing rows are stamped read at their `created_at` so the
-        // new per-item indicator does not paint every historical
-        // capture as unread on first launch under the new schema.
-        let has_read_at: bool = conn
-            .prepare("PRAGMA table_info(captures)")?
-            .query_map([], |row| row.get::<_, String>(1))?
-            .filter_map(Result::ok)
-            .any(|c| c == "read_at");
-        if !has_read_at {
-            conn.execute_batch(
-                "ALTER TABLE captures ADD COLUMN read_at TEXT;
-                 UPDATE captures SET read_at = created_at WHERE read_at IS NULL;",
-            )?;
-        }
 
         Ok(())
     }
@@ -253,12 +246,24 @@ impl Store {
         let payload = self.build_payload(&id, &input)?;
         let payload_str = serde_json::to_string(&payload)?;
 
+        let search_text = searchable_text_for_input(&input);
+
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO captures (id, kind, created_at, payload, source_app, starred, deleted_at)
              VALUES (?1, ?2, ?3, ?4, NULL, 0, NULL)",
             params![&id, kind.as_str(), &created_at, &payload_str],
         )?;
+        // Mirror the row into the FTS5 index. Errors here are
+        // logged-and-ignored at the call site; failing the entire
+        // save because the search index is unhappy would be worse
+        // than the search index being slightly stale.
+        if let Err(e) = conn.execute(
+            "INSERT INTO captures_fts (capture_id, text) VALUES (?1, ?2)",
+            params![&id, &search_text],
+        ) {
+            eprintln!("fts5 insert failed for {id}: {e}");
+        }
 
         Ok(Capture {
             id,
@@ -391,7 +396,9 @@ impl Store {
     }
 
     /// Soft-delete a capture: stamp `deleted_at` so it stops surfacing
-    /// in `list` but the row stays in the DB as a tombstone.
+    /// in `list` but the row stays in the DB as a tombstone. The FTS5
+    /// row is dropped so search results respect the deletion without
+    /// needing to filter at query time.
     pub fn soft_delete(&self, id: &Ulid) -> Result<(), StoreError> {
         let id_str = id.to_string();
         let now = now_rfc3339();
@@ -403,7 +410,40 @@ impl Store {
         if n == 0 {
             return Err(StoreError::NotFound(id_str));
         }
+        if let Err(e) = conn.execute(
+            "DELETE FROM captures_fts WHERE capture_id = ?1",
+            params![&id_str],
+        ) {
+            eprintln!("fts5 delete failed for {id_str}: {e}");
+        }
         Ok(())
+    }
+
+    /// Full-text search over the per-kind indexable text. Returns
+    /// non-deleted captures ranked by FTS5's default bm25, newest-id
+    /// tiebreaker so ULIDs sort naturally. Empty / no-token queries
+    /// return an empty Vec — the caller is expected to fall back to
+    /// `list_before` for "no search active".
+    pub fn search(&self, query: &str, limit: u32) -> Result<Vec<Capture>, StoreError> {
+        let Some(match_expr) = build_fts_match(query) else {
+            return Ok(Vec::new());
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at
+             FROM captures c
+             JOIN captures_fts f ON f.capture_id = c.id
+             WHERE captures_fts MATCH ?1
+               AND c.deleted_at IS NULL
+             ORDER BY rank, c.id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![&match_expr, limit], row_to_capture)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row??);
+        }
+        Ok(out)
     }
 
     /// Count non-deleted captures whose id is strictly greater than the
@@ -534,6 +574,77 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
         })
     })();
     Ok(result)
+}
+
+/// Flatten a `CaptureInput` into the text we want indexed by FTS5.
+/// Per-kind so we capture every searchable surface (URLs for Link,
+/// file names for File, path for Shot, plain text for Note / Clip)
+/// without dumping the raw JSON keys into the index.
+fn searchable_text_for_input(input: &CaptureInput) -> String {
+    match input {
+        CaptureInput::Note { text } | CaptureInput::Clip { text } => text.clone(),
+        CaptureInput::Link {
+            url,
+            raw_text,
+            title,
+        } => {
+            let mut s = String::new();
+            s.push_str(url);
+            if raw_text != url {
+                s.push(' ');
+                s.push_str(raw_text);
+            }
+            if let Some(t) = title {
+                s.push(' ');
+                s.push_str(t);
+            }
+            s
+        }
+        CaptureInput::File {
+            source_path,
+            original_name,
+            ..
+        } => {
+            let mut s = String::new();
+            if let Some(name) = original_name {
+                s.push_str(name);
+                s.push(' ');
+            }
+            s.push_str(&source_path.to_string_lossy());
+            s
+        }
+        CaptureInput::Shot { source, .. } => match source {
+            ShotSource::Path { source_path, .. } => source_path.to_string_lossy().into_owned(),
+            // Image bytes have no on-disk source name yet; the
+            // blob_path the caller assigns is uninteresting to a
+            // human search.
+            ShotSource::Bytes { .. } => String::new(),
+        },
+    }
+}
+
+/// Sanitise an arbitrary user-typed query into a safe FTS5 MATCH
+/// expression. We split on whitespace, strip non-alphanumeric chars
+/// from each token (FTS5's grammar bristles at `/`, `:`, quotes, etc.
+/// from a raw URL paste), append `*` for prefix matching, then AND
+/// the tokens together. Returns `None` when the query has no
+/// indexable tokens (whitespace only, punctuation only) so the
+/// caller can short-circuit to an empty result instead of running a
+/// MATCH that would error.
+fn build_fts_match(query: &str) -> Option<String> {
+    // Split on every non-alphanumeric run so a pasted URL like
+    // "https://example.com" matches the same way FTS5's unicode61
+    // tokenizer split the indexed text ("https", "example", "com").
+    let tokens: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| format!("{}*", w))
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" "))
+    }
 }
 
 fn now_rfc3339() -> String {

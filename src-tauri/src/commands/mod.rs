@@ -199,6 +199,26 @@ pub fn list_captures_with_store(
     store.list_before(parsed, limit).map_err(|e| e.to_string())
 }
 
+/// Full-text search across all non-deleted captures. Thin wrapper
+/// around `Store::search` — the real query sanitisation + index
+/// definition lives in the store module.
+pub fn search_captures_with_store(
+    store: &Store,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<Capture>, String> {
+    store.search(query, limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn search_captures(
+    query: String,
+    limit: u32,
+    store: State<'_, Store>,
+) -> Result<Vec<Capture>, String> {
+    search_captures_with_store(&store, &query, limit)
+}
+
 #[tauri::command]
 pub fn list_captures(
     cursor: Option<String>,

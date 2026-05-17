@@ -576,6 +576,7 @@ pub fn run() {
             commands::capture_clipboard_now,
             commands::save_dropped_files,
             commands::list_captures,
+            commands::search_captures,
             commands::star_capture,
             commands::delete_capture,
             commands::unread_count,
