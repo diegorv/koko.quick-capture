@@ -326,9 +326,9 @@
   .meta-line {
     margin: 0.35rem 0 0;
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
   }
 
   .timestamp {
@@ -339,14 +339,14 @@
   .source-app,
   .source-title,
   .source-url {
-    font-size: 0.7rem;
-    padding: 0.08rem 0.5rem;
+    font-size: 0.72rem;
+    padding: 0.12rem 0.55rem;
     border-radius: 999px;
     background: rgba(76, 29, 149, 0.1);
     color: rgba(76, 29, 149, 0.95);
     border: 1px solid rgba(76, 29, 149, 0.3);
     white-space: nowrap;
-    max-width: 32ch;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
   }
