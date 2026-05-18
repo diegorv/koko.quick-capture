@@ -77,11 +77,70 @@
     pageSize: PAGE_SIZE,
   });
 
+  // Search state. `searchResults === null` means "not searching, show
+  // the paginated list". Non-null = render results array.
+  let searchQuery = $state("");
+  let searchResults = $state<Capture[] | null>(null);
+  let searchInputEl: HTMLInputElement | undefined = $state();
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const SEARCH_DEBOUNCE_MS = 150;
+
+  const searching = $derived(searchResults !== null);
+  const searchOrPaged = $derived(searchResults ?? pager.items);
+
   const visibleCaptures = $derived(
     destinationFilter === null
-      ? pager.items
-      : pager.items.filter((c) => c.destination_id === destinationFilter),
+      ? searchOrPaged
+      : searchOrPaged.filter((c) => c.destination_id === destinationFilter),
   );
+
+  async function runSearch(query: string) {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      searchResults = null;
+      return;
+    }
+    try {
+      const results = (await invokeFn("search_archive", {
+        query: trimmed,
+        destinationId: null,
+        limit: 100,
+      })) as Capture[];
+      searchResults = results;
+    } catch (err) {
+      console.error("search_archive failed", err);
+      searchResults = [];
+    }
+  }
+
+  function scheduleSearch() {
+    if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+    const snapshot = searchQuery;
+    searchDebounceTimer = setTimeout(() => {
+      void runSearch(snapshot);
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  function onSearchInput(event: Event) {
+    searchQuery = (event.currentTarget as HTMLInputElement).value;
+    scheduleSearch();
+  }
+
+  function onSearchKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearSearch();
+    }
+  }
+
+  function clearSearch() {
+    searchQuery = "";
+    searchResults = null;
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+  }
 
   const destinationsById = $derived.by(() => {
     const map = new Map<string, Destination>();
@@ -270,69 +329,101 @@
   <header class="topbar" data-tauri-drag-region>
     <MainNav active="archive" />
   </header>
-
-  <div class="filter-bar" data-testid="archive-filter-bar">
-    <button
-      type="button"
-      class="chip"
-      class:selected={destinationFilter === null}
-      onclick={() => selectFilter(null)}
-      data-testid="filter-all"
-    >
-      All <span class="chip-count">{pager.items.length}</span>
-    </button>
-    {#each destinations as dest (dest.id)}
-      <button
-        type="button"
-        class="chip"
-        class:selected={destinationFilter === dest.id}
-        onclick={() => selectFilter(dest.id)}
-        data-testid="filter-chip"
-      >
-        <DestinationDot color={dest.color} size="0.6rem" />
-        <span class="chip-name">{dest.name}</span>
-        <span class="chip-count">{countsByDestination.get(dest.id) ?? 0}</span>
-      </button>
-    {/each}
-    {#if hasDeletedDestinations}
-      <span class="chip ghost" data-testid="filter-deleted-hint">
-        (Some Captures reference soft-deleted destinations)
-      </span>
-    {/if}
-  </div>
-
   <div class="panes">
-    <section class="list-pane" onscroll={pager.onScroll}>
-      {#if !pager.loading && pager.items.length === 0}
-        <div class="empty">
-          <div class="empty-glyph" aria-hidden="true">📤</div>
-          <h2 class="empty-title">Nothing routed yet</h2>
-          <p class="empty-hint">
-            Press <kbd>R</kbd> in the Inbox to send a Capture here.
-          </p>
-        </div>
-      {:else if visibleCaptures.length === 0}
-        <div class="empty">
-          <h2 class="empty-title">No matches</h2>
-          <p class="empty-hint">No Captures routed to this destination.</p>
-        </div>
-      {:else}
-        <InboxList
-          captures={visibleCaptures}
-          {selectedId}
-          {onSelect}
-          {onStarToggle}
-          {onDelete}
-          {onOpen}
-          {onClose}
-          {onRoute}
-          {onUnroute}
+    <div class="list-column">
+      <div class="searchbar">
+        <input
+          bind:this={searchInputEl}
+          type="search"
+          class="search-input"
+          placeholder="Search archive"
+          aria-label="Search archive"
+          value={searchQuery}
+          oninput={onSearchInput}
+          onkeydown={onSearchKeydown}
+          autocomplete="off"
+          spellcheck="false"
         />
-        {#if pager.loading}
-          <div class="spinner" aria-live="polite">Loading…</div>
+        {#if searchQuery}
+          <button
+            type="button"
+            class="search-clear"
+            aria-label="Clear search"
+            onclick={clearSearch}
+          >
+            ×
+          </button>
         {/if}
-      {/if}
-    </section>
+      </div>
+      <div class="filterbar" role="toolbar" aria-label="Archive filters" data-testid="archive-filter-bar">
+        <button
+          type="button"
+          class="chip"
+          class:active={destinationFilter === null}
+          aria-pressed={destinationFilter === null}
+          onclick={() => selectFilter(null)}
+          data-testid="filter-all"
+        >
+          All <span class="chip-count">{pager.items.length}</span>
+        </button>
+        {#each destinations as dest (dest.id)}
+          <button
+            type="button"
+            class="chip"
+            class:active={destinationFilter === dest.id}
+            aria-pressed={destinationFilter === dest.id}
+            onclick={() => selectFilter(dest.id)}
+            data-testid="filter-chip"
+          >
+            <DestinationDot color={dest.color} size="0.6rem" />
+            <span class="chip-name">{dest.name}</span>
+            <span class="chip-count">{countsByDestination.get(dest.id) ?? 0}</span>
+          </button>
+        {/each}
+        {#if hasDeletedDestinations}
+          <span class="chip ghost" data-testid="filter-deleted-hint">
+            (Some Captures reference soft-deleted destinations)
+          </span>
+        {/if}
+      </div>
+      <section class="list-pane" onscroll={pager.onScroll}>
+        {#if searching && visibleCaptures.length === 0}
+          <div class="empty">
+            <div class="empty-glyph" aria-hidden="true">🔍</div>
+            <h2 class="empty-title">No matches</h2>
+            <p class="empty-hint">Nothing matched “{searchQuery}”.</p>
+          </div>
+        {:else if !pager.loading && !searching && pager.items.length === 0}
+          <div class="empty">
+            <div class="empty-glyph" aria-hidden="true">📤</div>
+            <h2 class="empty-title">Nothing routed yet</h2>
+            <p class="empty-hint">
+              Press <kbd>R</kbd> in the Inbox to send a Capture here.
+            </p>
+          </div>
+        {:else if visibleCaptures.length === 0}
+          <div class="empty">
+            <h2 class="empty-title">No matches</h2>
+            <p class="empty-hint">No Captures routed to this destination.</p>
+          </div>
+        {:else}
+          <InboxList
+            captures={visibleCaptures}
+            {selectedId}
+            {onSelect}
+            {onStarToggle}
+            {onDelete}
+            {onOpen}
+            {onClose}
+            {onRoute}
+            {onUnroute}
+          />
+          {#if pager.loading}
+            <div class="spinner" aria-live="polite">Loading…</div>
+          {/if}
+        {/if}
+      </section>
+    </div>
     <section class="detail-pane">
       <InboxDetail
         capture={selectedCapture}
@@ -344,6 +435,11 @@
       />
     </section>
   </div>
+  <footer class="statusbar" aria-label="Archive stats">
+    {#if pager.items.length > 0}
+      <span class="stat">{pager.items.length} routed</span>
+    {/if}
+  </footer>
 
   <DestinationPicker
     open={pickerOpen}
@@ -374,11 +470,12 @@
 
   .archive {
     display: grid;
-    /* Top row matches the Inbox titlebar so the shared MainNav fits
-     * the OS chrome overlay area cleanly. macOS traffic-lights sit
-     * top-left inside this row; MainNav is centered to clear them. */
-    grid-template-rows: 40px auto 1fr;
+    /* Mirror the Inbox grid exactly: 40px titlebar (MainNav over OS
+     * chrome) + 1fr panes + 24px statusbar so switching between
+     * /inbox and /archive doesn't shift the viewport vertically. */
+    grid-template-rows: 40px 1fr 24px;
     height: 100vh;
+    width: 100vw;
     overflow: hidden;
   }
 
@@ -398,17 +495,74 @@
     -webkit-app-region: no-drag;
   }
 
-  .filter-bar {
+  /* List column mirrors the Inbox layout: searchbar (auto) +
+   * filterbar (auto) + scrolling list-pane (1fr). The grid is
+   * explicit so the filterbar does not get squished by the 1fr cell
+   * when search is empty. */
+  .list-column {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    min-height: 0;
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    .list-column {
+      border-right-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .searchbar {
+    position: relative;
+    padding: 0.55rem 0.75rem 0.4rem;
+  }
+  .search-input {
+    width: 100%;
+    appearance: none;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.7);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.35rem 1.75rem 0.35rem 0.55rem;
+  }
+  .search-input:focus {
+    outline: 2px solid rgba(76, 29, 149, 0.45);
+    outline-offset: 0;
+    border-color: rgba(76, 29, 149, 0.5);
+  }
+  @media (prefers-color-scheme: dark) {
+    .search-input {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+  }
+  .search-clear {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1.2rem;
+    height: 1.2rem;
+    border: none;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 999px;
+    color: inherit;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  @media (prefers-color-scheme: dark) {
+    .search-clear {
+      background: rgba(255, 255, 255, 0.15);
+    }
+  }
+
+  .filterbar {
     display: flex;
     gap: 0.35rem;
     overflow-x: auto;
-    padding: 0.55rem 0.75rem;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  }
-  @media (prefers-color-scheme: dark) {
-    .filter-bar {
-      border-bottom-color: rgba(255, 255, 255, 0.08);
-    }
+    padding: 0 0.75rem 0.55rem;
   }
 
   .chip {
@@ -432,7 +586,7 @@
   .chip:hover {
     background: rgba(76, 29, 149, 0.08);
   }
-  .chip.selected {
+  .chip.active {
     background: rgba(76, 29, 149, 0.15);
     border-color: rgba(76, 29, 149, 0.6);
     color: rgba(76, 29, 149, 1);
@@ -446,7 +600,7 @@
     .chip:hover {
       background: rgba(167, 139, 250, 0.12);
     }
-    .chip.selected {
+    .chip.active {
       background: rgba(167, 139, 250, 0.2);
       border-color: rgba(167, 139, 250, 0.6);
       color: rgba(196, 181, 253, 1);
@@ -479,14 +633,21 @@
   .detail-pane {
     min-height: 0;
     overflow-y: auto;
-    border-right: 1px solid rgba(0, 0, 0, 0.08);
   }
-  .detail-pane {
-    border-right: none;
+
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.75rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    font-size: 0.76rem;
+    color: rgba(0, 0, 0, 0.55);
   }
   @media (prefers-color-scheme: dark) {
-    .list-pane {
-      border-right-color: rgba(255, 255, 255, 0.08);
+    .statusbar {
+      border-top-color: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.55);
     }
   }
 
