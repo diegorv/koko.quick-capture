@@ -267,7 +267,7 @@
 </script>
 
 <div class="archive" data-testid="archive">
-  <header class="topbar">
+  <header class="topbar" data-tauri-drag-region>
     <MainNav active="archive" />
   </header>
 
@@ -374,20 +374,27 @@
 
   .archive {
     display: grid;
-    grid-template-rows: 28px auto 1fr;
+    /* Top row matches the Inbox titlebar so the shared MainNav fits
+     * the OS chrome overlay area cleanly. macOS traffic-lights sit
+     * top-left inside this row; MainNav is centered to clear them. */
+    grid-template-rows: 40px auto 1fr;
     height: 100vh;
     overflow: hidden;
   }
 
+  /* Draggable strip — see the Inbox .titlebar comment for the
+   * dual-mechanism rationale (CSS app-region for OS-level drag,
+   * data-tauri-drag-region attr for the JS fallback). */
   .topbar {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.3rem 0.6rem 0;
+    padding-top: 0.25rem;
     -webkit-app-region: drag;
   }
   .topbar :global(button),
-  .topbar :global(input) {
+  .topbar :global(input),
+  .topbar :global(a) {
     -webkit-app-region: no-drag;
   }
 

@@ -614,21 +614,26 @@
     background-color: #f6f6f6;
   }
 
-  /* Thin draggable strip under macOS traffic-light buttons. The window
-     uses titleBarStyle="Overlay" so the OS chrome floats above content;
-     this strip reserves vertical room for the buttons and is wired
-     to Tauri's native drag via the data-tauri-drag-region attribute
-     on the element (more reliable than the CSS -webkit-app-region
-     rule, which is a no-op in some Tauri 2 webview configurations). */
+  /* Draggable strip under the macOS traffic-light buttons. The window
+     uses titleBarStyle="Overlay", so the OS chrome floats above the
+     webview and the area we render here doubles as the OS-level drag
+     handle. macOS WKWebView honours `-webkit-app-region: drag` (which
+     is what flips the cursor + lets the user move the window); the
+     `data-tauri-drag-region` attribute is kept as belt-and-suspenders
+     for the JS-level startDragging() path that fires on plain clicks
+     inside the webview. Both are needed: the CSS rule for native OS
+     drag-through, the JS rule for the in-webview fallback. */
   .titlebar {
     background-color: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
     padding-top: 0.25rem;
+    -webkit-app-region: drag;
   }
   .titlebar :global(button),
-  .titlebar :global(input) {
+  .titlebar :global(input),
+  .titlebar :global(a) {
     -webkit-app-region: no-drag;
   }
 
