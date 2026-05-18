@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use quick_capture_lib::store::{
-    CaptureInput, CaptureKind, ShotSource, Store, SETTING_LAST_INBOX_OPEN_ID,
+    CaptureInput, CaptureKind, ShotSource, Store, StoreError, SETTING_LAST_INBOX_OPEN_ID,
 };
 use tempfile::TempDir;
 use ulid::Ulid;
@@ -392,4 +392,417 @@ fn mark_read_refreshes_dump() {
         value.get("read_at").and_then(|v| v.as_str()).is_some(),
         "read_at must be stamped, got: {value}"
     );
+}
+
+// ── Destinations + routing (ADR-0010) ─────────────────────────────
+
+#[test]
+fn destination_create_then_list_round_trips_name_and_color() {
+    let (_dir, store) = temp_store();
+
+    let todoist = store
+        .destination_create("Todoist", Some("red"))
+        .expect("create todoist");
+    let readwise = store
+        .destination_create("Readwise", Some("teal"))
+        .expect("create readwise");
+    let reference = store
+        .destination_create("Reference", None)
+        .expect("create reference");
+
+    let listed = store.destinations_list_live().expect("list");
+    let names: Vec<&str> = listed.iter().map(|d| d.name.as_str()).collect();
+    // Alpha-sorted, case-insensitive.
+    assert_eq!(names, vec!["Readwise", "Reference", "Todoist"]);
+
+    let by_id: std::collections::HashMap<_, _> =
+        listed.iter().map(|d| (d.id.clone(), d.clone())).collect();
+    assert_eq!(by_id[&todoist.id].color.as_deref(), Some("red"));
+    assert_eq!(by_id[&readwise.id].color.as_deref(), Some("teal"));
+    assert_eq!(by_id[&reference.id].color, None);
+}
+
+#[test]
+fn destination_create_trims_whitespace_and_rejects_blank_name() {
+    let (_dir, store) = temp_store();
+
+    let created = store
+        .destination_create("  Todoist  ", Some(" red "))
+        .expect("create");
+    assert_eq!(created.name, "Todoist");
+    assert_eq!(created.color.as_deref(), Some("red"));
+
+    let err = store
+        .destination_create("   ", None)
+        .expect_err("blank name should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn destination_create_rejects_duplicate_live_name() {
+    let (_dir, store) = temp_store();
+    store
+        .destination_create("Todoist", None)
+        .expect("first create");
+    let err = store
+        .destination_create("Todoist", None)
+        .expect_err("dup should fail");
+    match err {
+        StoreError::DestinationNameConflict(name) => assert_eq!(name, "Todoist"),
+        other => panic!("expected conflict, got {other:?}"),
+    }
+}
+
+#[test]
+fn destination_update_renames_and_recolors() {
+    let (_dir, store) = temp_store();
+    let created = store
+        .destination_create("Todoist", Some("red"))
+        .expect("create");
+
+    store
+        .destination_update(&created.id, "Todoist Inbox", Some("blue"))
+        .expect("update");
+
+    let after = store
+        .destination_find(&created.id)
+        .expect("find")
+        .expect("present");
+    assert_eq!(after.name, "Todoist Inbox");
+    assert_eq!(after.color.as_deref(), Some("blue"));
+}
+
+#[test]
+fn destination_update_rejects_conflict_with_other_live_name() {
+    let (_dir, store) = temp_store();
+    store
+        .destination_create("Todoist", None)
+        .expect("create todoist");
+    let readwise = store
+        .destination_create("Readwise", None)
+        .expect("create readwise");
+    let err = store
+        .destination_update(&readwise.id, "Todoist", None)
+        .expect_err("conflict expected");
+    assert!(matches!(err, StoreError::DestinationNameConflict(_)));
+}
+
+#[test]
+fn destination_soft_delete_hides_from_live_list_but_keeps_row() {
+    let (_dir, store) = temp_store();
+    let created = store
+        .destination_create("Old Project", None)
+        .expect("create");
+    store
+        .destination_soft_delete(&created.id)
+        .expect("soft delete");
+
+    let live = store.destinations_list_live().expect("live list");
+    assert!(live.is_empty(), "live list must hide soft-deleted");
+
+    let deleted = store
+        .destinations_list_deleted()
+        .expect("deleted list");
+    assert_eq!(deleted.len(), 1);
+    assert!(deleted[0].deleted_at.is_some());
+    assert_eq!(deleted[0].id, created.id);
+}
+
+#[test]
+fn destination_soft_delete_then_create_same_name_succeeds() {
+    let (_dir, store) = temp_store();
+    let first = store
+        .destination_create("Reading", None)
+        .expect("first create");
+    store
+        .destination_soft_delete(&first.id)
+        .expect("soft delete");
+    // Live unique index excludes deleted rows.
+    let second = store
+        .destination_create("Reading", None)
+        .expect("re-create same name");
+    assert_ne!(first.id, second.id);
+}
+
+#[test]
+fn destination_restore_brings_back_when_no_conflict() {
+    let (_dir, store) = temp_store();
+    let created = store
+        .destination_create("Ref", None)
+        .expect("create");
+    store
+        .destination_soft_delete(&created.id)
+        .expect("soft delete");
+    store.destination_restore(&created.id).expect("restore");
+
+    let live = store.destinations_list_live().expect("live");
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].id, created.id);
+    assert!(live[0].deleted_at.is_none());
+}
+
+#[test]
+fn destination_restore_conflicts_when_name_taken_by_live() {
+    let (_dir, store) = temp_store();
+    let old = store
+        .destination_create("Reading", None)
+        .expect("create old");
+    store.destination_soft_delete(&old.id).expect("soft delete");
+    // New live destination grabs the freed name.
+    store
+        .destination_create("Reading", None)
+        .expect("re-create same name");
+    let err = store
+        .destination_restore(&old.id)
+        .expect_err("restore should conflict");
+    assert!(matches!(err, StoreError::DestinationNameConflict(_)));
+}
+
+#[test]
+fn capture_route_moves_capture_from_inbox_to_archive() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note {
+            text: "thought".into(),
+        })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse ulid");
+    let dest = store
+        .destination_create("Todoist", None)
+        .expect("create dest");
+
+    store.capture_route(&id, &dest.id).expect("route");
+
+    let inbox = store.list(10).expect("inbox list");
+    assert!(
+        inbox.is_empty(),
+        "routed capture must leave the Inbox: {inbox:?}"
+    );
+    let archive = store.list_archive(None, 10).expect("archive list");
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive[0].id, saved.id);
+    assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
+    assert!(archive[0].routed_at.is_some());
+    // Routing implies the user interacted with the row.
+    assert!(
+        archive[0].read_at.is_some(),
+        "route must stamp read_at when previously unread"
+    );
+}
+
+#[test]
+fn capture_unroute_returns_capture_to_inbox() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let dest = store
+        .destination_create("Readwise", None)
+        .expect("create dest");
+    store.capture_route(&id, &dest.id).expect("route");
+    store.capture_unroute(&id).expect("unroute");
+
+    let inbox = store.list(10).expect("inbox");
+    assert_eq!(inbox.len(), 1);
+    let archive = store.list_archive(None, 10).expect("archive");
+    assert!(archive.is_empty());
+    let row = &inbox[0];
+    assert!(row.destination_id.is_none());
+    assert!(row.routed_at.is_none());
+    // read_at survives the unroute.
+    assert!(row.read_at.is_some());
+}
+
+#[test]
+fn capture_reroute_updates_destination_and_routed_at() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let first = store
+        .destination_create("Todoist", None)
+        .expect("create first");
+    let second = store
+        .destination_create("Readwise", None)
+        .expect("create second");
+    store.capture_route(&id, &first.id).expect("route first");
+    let after_first = store.list_archive(None, 10).expect("archive")[0]
+        .routed_at
+        .clone()
+        .expect("routed_at");
+    // Sleep so the second routed_at timestamp differs.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    store.capture_route(&id, &second.id).expect("route second");
+
+    let archive = store.list_archive(None, 10).expect("archive");
+    assert_eq!(archive.len(), 1);
+    assert_eq!(
+        archive[0].destination_id.as_deref(),
+        Some(second.id.as_str())
+    );
+    assert!(
+        archive[0].routed_at.as_deref().unwrap() >= after_first.as_str(),
+        "re-route must bump routed_at, got {:?} >= {after_first}",
+        archive[0].routed_at
+    );
+}
+
+#[test]
+fn capture_route_rejects_soft_deleted_destination() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let dest = store
+        .destination_create("Old", None)
+        .expect("create dest");
+    store.destination_soft_delete(&dest.id).expect("soft delete");
+
+    let err = store
+        .capture_route(&id, &dest.id)
+        .expect_err("routing to soft-deleted dest should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn capture_route_rejects_unknown_destination() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let err = store
+        .capture_route(&id, "00000000000000000000000000")
+        .expect_err("unknown dest must fail");
+    assert!(matches!(err, StoreError::NotFound(_)));
+}
+
+#[test]
+fn routed_capture_keeps_destination_reference_after_soft_delete() {
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let dest = store
+        .destination_create("Todoist", None)
+        .expect("create dest");
+    store.capture_route(&id, &dest.id).expect("route");
+    store.destination_soft_delete(&dest.id).expect("soft delete");
+
+    // Orphan still surfaces in the Archive with its original ref.
+    let archive = store.list_archive(None, 10).expect("archive");
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
+}
+
+#[test]
+fn count_inbox_excludes_routed_and_deleted() {
+    let (_dir, store) = temp_store();
+    let kept = store
+        .save(CaptureInput::Note { text: "kept".into() })
+        .expect("save kept");
+    let routed = store
+        .save(CaptureInput::Note { text: "routed".into() })
+        .expect("save routed");
+    let dropped = store
+        .save(CaptureInput::Note {
+            text: "dropped".into(),
+        })
+        .expect("save dropped");
+    let dest = store
+        .destination_create("Todoist", None)
+        .expect("create dest");
+    let routed_id = Ulid::from_string(&routed.id).expect("parse");
+    store.capture_route(&routed_id, &dest.id).expect("route");
+    let dropped_id = Ulid::from_string(&dropped.id).expect("parse");
+    store.soft_delete(&dropped_id).expect("soft delete");
+
+    let _ = kept; // silence unused warning; the inbox count below covers it.
+    assert_eq!(store.count_inbox().expect("count"), 1);
+}
+
+#[test]
+fn search_excludes_routed_captures_from_inbox_results() {
+    let (_dir, store) = temp_store();
+    let kept = store
+        .save(CaptureInput::Note {
+            text: "alpha bravo charlie".into(),
+        })
+        .expect("save kept");
+    let routed = store
+        .save(CaptureInput::Note {
+            text: "alpha bravo delta".into(),
+        })
+        .expect("save routed");
+    let dest = store
+        .destination_create("Todoist", None)
+        .expect("create dest");
+    let routed_id = Ulid::from_string(&routed.id).expect("parse");
+    store.capture_route(&routed_id, &dest.id).expect("route");
+
+    let inbox_hits = store.search("alpha", 10).expect("inbox search");
+    let inbox_ids: Vec<&str> = inbox_hits.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(inbox_ids, vec![kept.id.as_str()]);
+
+    let archive_hits = store
+        .search_archive("alpha", None, 10)
+        .expect("archive search");
+    let archive_ids: Vec<&str> = archive_hits.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(archive_ids, vec![routed.id.as_str()]);
+}
+
+#[test]
+fn list_archive_filters_by_destination() {
+    let (_dir, store) = temp_store();
+    let dest_a = store.destination_create("A", None).expect("a");
+    let dest_b = store.destination_create("B", None).expect("b");
+    let a1 = store
+        .save(CaptureInput::Note { text: "a1".into() })
+        .expect("save a1");
+    let b1 = store
+        .save(CaptureInput::Note { text: "b1".into() })
+        .expect("save b1");
+    store
+        .capture_route(&Ulid::from_string(&a1.id).expect("ulid"), &dest_a.id)
+        .expect("route a1");
+    store
+        .capture_route(&Ulid::from_string(&b1.id).expect("ulid"), &dest_b.id)
+        .expect("route b1");
+
+    let only_a = store
+        .list_archive(Some(&dest_a.id), 10)
+        .expect("filter a");
+    assert_eq!(only_a.len(), 1);
+    assert_eq!(only_a[0].id, a1.id);
+
+    let only_b = store
+        .list_archive(Some(&dest_b.id), 10)
+        .expect("filter b");
+    assert_eq!(only_b.len(), 1);
+    assert_eq!(only_b[0].id, b1.id);
+
+    let all = store.list_archive(None, 10).expect("all archive");
+    assert_eq!(all.len(), 2);
+}
+
+#[test]
+fn destination_id_foreign_key_rejects_unknown_id() {
+    // Catch the schema FK being off (would silently allow orphan
+    // routes).
+    let (_dir, store) = temp_store();
+    let saved = store
+        .save(CaptureInput::Note { text: "x".into() })
+        .expect("save");
+    let id = Ulid::from_string(&saved.id).expect("parse");
+    let err = store
+        .capture_route(&id, "ZZZZZZZZZZZZZZZZZZZZZZZZZZ")
+        .expect_err("must reject");
+    // We mapped this to NotFound at the Rust layer (we look up the
+    // destination first) so the SQLite FK never fires; but if the
+    // lookup is ever removed, the FK is the second line of defence.
+    assert!(matches!(err, StoreError::NotFound(_)));
 }

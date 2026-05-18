@@ -123,19 +123,29 @@ pub struct Capture {
     pub source_app: Option<String>,
     pub starred: bool,
     pub deleted_at: Option<String>,
-    /// ISO timestamp the user first interacted with this capture in
-    /// the Inbox. `None` means unread. Newly-saved rows are unread by
-    /// default; the row flips on the first `mark_read` call.
     pub read_at: Option<String>,
-    /// macOS window title of the source app at capture time. Either
-    /// the active tab's title (browsers) or the window title bar
-    /// text (other apps). `None` when context resolution failed or
-    /// the app does not expose a meaningful title.
     pub source_title: Option<String>,
-    /// Active URL of the source app at capture time. Populated only
-    /// for known browsers (Chrome / Safari / Arc / Edge / Brave);
-    /// `None` for everything else.
     pub source_url: Option<String>,
+    /// ULID of the [Destination] this Capture is Routed to. `None`
+    /// means the Capture is still in the Inbox. Set + reset by
+    /// `capture_route` / `capture_unroute`.
+    pub destination_id: Option<String>,
+    /// ISO timestamp of the most recent routing event. Always paired
+    /// with `destination_id`: both set together, both cleared on
+    /// un-route, both updated on re-route.
+    pub routed_at: Option<String>,
+}
+
+/// A row in the `destinations` table. User-managed label that a
+/// Capture can be Routed to. See ADR-0010.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Destination {
+    pub id: String,
+    pub name: String,
+    /// Palette key (e.g. "red", "teal"). `None` means no color picked.
+    pub color: Option<String>,
+    pub created_at: String,
+    pub deleted_at: Option<String>,
 }
 
 /// Resolved context for a capture about to be persisted: macOS
@@ -156,6 +166,16 @@ pub enum StoreError {
     Db(rusqlite::Error),
     Decode(String),
     NotFound(String),
+    /// A Destination operation failed because the name is already
+    /// taken by another live Destination. Surfaces from create /
+    /// rename / restore so the UI can prompt the user to pick a
+    /// different name.
+    DestinationNameConflict(String),
+    /// Caller passed a value that violates a precondition that the
+    /// command/UI layer is supposed to enforce (empty name, routing
+    /// to a soft-deleted destination, etc.). Indicates a bug in the
+    /// caller, not a user error.
+    InvalidArgument(String),
 }
 
 impl std::fmt::Display for StoreError {
@@ -165,6 +185,10 @@ impl std::fmt::Display for StoreError {
             StoreError::Db(e) => write!(f, "db error: {e}"),
             StoreError::Decode(msg) => write!(f, "decode error: {msg}"),
             StoreError::NotFound(id) => write!(f, "capture not found: {id}"),
+            StoreError::DestinationNameConflict(name) => {
+                write!(f, "destination name already in use: {name}")
+            }
+            StoreError::InvalidArgument(msg) => write!(f, "invalid argument: {msg}"),
         }
     }
 }
@@ -235,8 +259,22 @@ impl Store {
     }
 
     fn migrate(conn: &Connection) -> Result<(), StoreError> {
+        // Foreign keys are off by default in SQLite. We rely on the
+        // captures.destination_id FK to keep routed Captures pointing
+        // at real Destination rows.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS captures (
+            "CREATE TABLE IF NOT EXISTS destinations (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                color TEXT,
+                created_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_destinations_name_live
+                ON destinations(name) WHERE deleted_at IS NULL;
+            CREATE TABLE IF NOT EXISTS captures (
                 id TEXT PRIMARY KEY NOT NULL,
                 kind TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -246,10 +284,14 @@ impl Store {
                 deleted_at TEXT,
                 read_at TEXT,
                 source_title TEXT,
-                source_url TEXT
+                source_url TEXT,
+                destination_id TEXT REFERENCES destinations(id),
+                routed_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_captures_created_at
                 ON captures(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_captures_destination_id
+                ON captures(destination_id);
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
@@ -267,23 +309,6 @@ impl Store {
                 tokenize='unicode61 remove_diacritics 2'
             );",
         )?;
-
-        // v0.3 -> v0.4 migration: source_title / source_url columns
-        // for the per-browser context capture. PRAGMA-guarded
-        // ADD COLUMN keeps the migration idempotent on existing DBs
-        // (CREATE TABLE IF NOT EXISTS above already declares the
-        // columns for fresh installs).
-        let cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(captures)")?
-            .query_map([], |row| row.get::<_, String>(1))?
-            .filter_map(Result::ok)
-            .collect();
-        if !cols.iter().any(|c| c == "source_title") {
-            conn.execute("ALTER TABLE captures ADD COLUMN source_title TEXT", [])?;
-        }
-        if !cols.iter().any(|c| c == "source_url") {
-            conn.execute("ALTER TABLE captures ADD COLUMN source_url TEXT", [])?;
-        }
 
         Ok(())
     }
@@ -378,8 +403,8 @@ impl Store {
         conn.execute(
             "INSERT INTO captures
              (id, kind, created_at, payload, source_app, starred, deleted_at,
-              source_title, source_url)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?7)",
+              source_title, source_url, destination_id, routed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?7, NULL, NULL)",
             params![
                 &id,
                 kind.as_str(),
@@ -412,6 +437,8 @@ impl Store {
             read_at: None,
             source_title: ctx.source_title,
             source_url: ctx.source_url,
+            destination_id: None,
+            routed_at: None,
         };
         // Release the conn lock before touching the filesystem so a
         // slow disk write does not block other DB readers.
@@ -476,15 +503,19 @@ impl Store {
         })
     }
 
-    /// Return up to `limit` non-deleted captures, newest first.
+    /// Return up to `limit` Inbox captures (non-deleted, un-routed),
+    /// newest first. Routed captures live in the Archive surface; use
+    /// `list_archive_before` for those.
     pub fn list(&self, limit: u32) -> Result<Vec<Capture>, StoreError> {
         self.list_before(None, limit)
     }
 
-    /// Cursor-paginated list. Returns up to `limit` non-deleted captures
-    /// strictly older than `cursor` (when present), ordered newest first.
-    /// `cursor = None` returns the first page. ULIDs are time-sortable, so
-    /// `WHERE id < cursor` is equivalent to "older than".
+    /// Cursor-paginated Inbox list. Returns up to `limit` Inbox
+    /// captures (non-deleted, un-routed) strictly older than `cursor`
+    /// (when present), ordered newest first. `cursor = None` returns
+    /// the first page. ULIDs are time-sortable, so `WHERE id < cursor`
+    /// is equivalent to "older than". Routed captures are excluded —
+    /// see `list_archive_before` for those.
     pub fn list_before(
         &self,
         cursor: Option<Ulid>,
@@ -496,9 +527,9 @@ impl Store {
             Some(c) => {
                 let cursor_str = c.to_string();
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
                      FROM captures
-                     WHERE deleted_at IS NULL AND id < ?1
+                     WHERE deleted_at IS NULL AND destination_id IS NULL AND id < ?1
                      ORDER BY id DESC
                      LIMIT ?2",
                 )?;
@@ -509,9 +540,9 @@ impl Store {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
                      FROM captures
-                     WHERE deleted_at IS NULL
+                     WHERE deleted_at IS NULL AND destination_id IS NULL
                      ORDER BY id DESC
                      LIMIT ?1",
                 )?;
@@ -577,11 +608,12 @@ impl Store {
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url
+            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
              FROM captures c
              JOIN captures_fts f ON f.capture_id = c.id
              WHERE captures_fts MATCH ?1
                AND c.deleted_at IS NULL
+               AND c.destination_id IS NULL
              ORDER BY rank, c.id DESC
              LIMIT ?2",
         )?;
@@ -593,29 +625,47 @@ impl Store {
         Ok(out)
     }
 
-    /// Count non-deleted captures whose id is strictly greater than the
-    /// given ULID string. Legacy cursor-based unread count; the
-    /// per-item read tracking introduced in v1.0 replaces this for the
-    /// Dock badge, but the method stays exposed because it is still
-    /// referenced by older fixtures and may be useful for diagnostics.
+    /// Count non-deleted, un-routed captures whose id is strictly
+    /// greater than the given ULID string. Legacy cursor-based unread
+    /// count; the per-item read tracking introduced in v1.0 replaces
+    /// this for the Dock badge, but the method stays exposed because
+    /// it is still referenced by older fixtures and may be useful for
+    /// diagnostics. Routed captures are excluded — the user already
+    /// decided what to do with them.
     pub fn count_after(&self, cursor: &str) -> Result<u64, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM captures
-             WHERE id > ?1 AND deleted_at IS NULL",
+             WHERE id > ?1 AND deleted_at IS NULL AND destination_id IS NULL",
             params![cursor],
             |row| row.get(0),
         )?;
         Ok(n as u64)
     }
 
-    /// Count non-deleted captures the user has not yet interacted with.
-    /// Drives the Dock's unread badge under the per-item read model.
+    /// Count Inbox captures the user has not yet interacted with
+    /// (un-routed, non-deleted, never marked read). Drives the Dock's
+    /// unread badge.
     pub fn count_unread(&self) -> Result<u64, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM captures
-             WHERE deleted_at IS NULL AND read_at IS NULL",
+             WHERE deleted_at IS NULL
+               AND read_at IS NULL
+               AND destination_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
+    /// Count of all un-routed, non-deleted captures. Drives the
+    /// Inbox/Archive switcher's "Inbox (N)" badge.
+    pub fn count_inbox(&self) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM captures
+             WHERE deleted_at IS NULL AND destination_id IS NULL",
             [],
             |row| row.get(0),
         )?;
@@ -679,6 +729,344 @@ impl Store {
         Ok(())
     }
 
+    /// List live (non-soft-deleted) Destinations, alpha-sorted by
+    /// case-insensitive name. Used by the picker and by the live
+    /// Settings list.
+    pub fn destinations_list_live(&self) -> Result<Vec<Destination>, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, color, created_at, deleted_at
+             FROM destinations
+             WHERE deleted_at IS NULL
+             ORDER BY LOWER(name) ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_destination)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row??);
+        }
+        Ok(out)
+    }
+
+    /// List soft-deleted Destinations, alpha-sorted by name. Used by
+    /// the Settings "Soft-deleted" collapsible section for restore.
+    pub fn destinations_list_deleted(&self) -> Result<Vec<Destination>, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, color, created_at, deleted_at
+             FROM destinations
+             WHERE deleted_at IS NOT NULL
+             ORDER BY LOWER(name) ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_destination)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row??);
+        }
+        Ok(out)
+    }
+
+    /// Look up a single Destination by id, regardless of soft-delete
+    /// state. Returns `None` when the id has no row at all.
+    pub fn destination_find(&self, id: &str) -> Result<Option<Destination>, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, color, created_at, deleted_at
+             FROM destinations
+             WHERE id = ?1",
+        )?;
+        let row = stmt.query_row(params![id], row_to_destination).optional()?;
+        match row {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Create a new live Destination. `name` is trimmed; an empty
+    /// result rejects with `InvalidArgument`. Returns
+    /// `DestinationNameConflict` when the trimmed name matches another
+    /// live Destination's name.
+    pub fn destination_create(
+        &self,
+        name: &str,
+        color: Option<&str>,
+    ) -> Result<Destination, StoreError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StoreError::InvalidArgument(
+                "destination name must not be blank".into(),
+            ));
+        }
+        let color = normalize_color(color);
+        let id = Ulid::new().to_string();
+        let created_at = now_rfc3339();
+
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let result = conn.execute(
+            "INSERT INTO destinations (id, name, color, created_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+            params![&id, name, &color, &created_at],
+        );
+        if let Err(e) = result {
+            if is_unique_violation(&e) {
+                return Err(StoreError::DestinationNameConflict(name.to_string()));
+            }
+            return Err(StoreError::Db(e));
+        }
+        Ok(Destination {
+            id,
+            name: name.to_string(),
+            color,
+            created_at,
+            deleted_at: None,
+        })
+    }
+
+    /// Rename / recolor a Destination. Accepts any state (live or
+    /// soft-deleted) so the Settings UI can rename a soft-deleted
+    /// row before restore if needed. `name` is trimmed; empty rejects
+    /// with `InvalidArgument`. Returns `NotFound` when no row matches
+    /// and `DestinationNameConflict` when the new name collides with
+    /// another live Destination.
+    pub fn destination_update(
+        &self,
+        id: &str,
+        name: &str,
+        color: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StoreError::InvalidArgument(
+                "destination name must not be blank".into(),
+            ));
+        }
+        let color = normalize_color(color);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let result = conn.execute(
+            "UPDATE destinations SET name = ?1, color = ?2 WHERE id = ?3",
+            params![name, &color, id],
+        );
+        match result {
+            Ok(0) => Err(StoreError::NotFound(id.to_string())),
+            Ok(_) => Ok(()),
+            Err(e) if is_unique_violation(&e) => {
+                Err(StoreError::DestinationNameConflict(name.to_string()))
+            }
+            Err(e) => Err(StoreError::Db(e)),
+        }
+    }
+
+    /// Soft-delete a Destination. Stamps `deleted_at` so the row is
+    /// hidden from the picker but Captures already pointing at it
+    /// keep their reference. Idempotent: re-deleting a soft-deleted
+    /// row is a no-op (returns Ok).
+    pub fn destination_soft_delete(&self, id: &str) -> Result<(), StoreError> {
+        let now = now_rfc3339();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "UPDATE destinations SET deleted_at = ?1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![&now, id],
+        )?;
+        if n == 0 {
+            // Distinguish "doesn't exist" from "already deleted".
+            if self.destination_find(id)?.is_none() {
+                return Err(StoreError::NotFound(id.to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore a previously soft-deleted Destination. Returns
+    /// `DestinationNameConflict` when a live Destination already
+    /// holds the same name (the UI is expected to prompt the user
+    /// to rename the soft-deleted row first via `destination_update`
+    /// and then re-attempt restore).
+    pub fn destination_restore(&self, id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let result = conn.execute(
+            "UPDATE destinations SET deleted_at = NULL
+             WHERE id = ?1 AND deleted_at IS NOT NULL",
+            params![id],
+        );
+        match result {
+            Ok(0) => {
+                drop(conn);
+                if self.destination_find(id)?.is_none() {
+                    Err(StoreError::NotFound(id.to_string()))
+                } else {
+                    Ok(())
+                }
+            }
+            Ok(_) => Ok(()),
+            Err(e) if is_unique_violation(&e) => {
+                drop(conn);
+                // Recover the conflicting name from the row we tried
+                // to restore so the error carries useful context.
+                let name = self
+                    .destination_find(id)?
+                    .map(|d| d.name)
+                    .unwrap_or_else(|| id.to_string());
+                Err(StoreError::DestinationNameConflict(name))
+            }
+            Err(e) => Err(StoreError::Db(e)),
+        }
+    }
+
+    /// Route a Capture to a Destination. Sets `destination_id` and
+    /// stamps `routed_at` with now. Also marks the Capture as read
+    /// so a routed Capture never lingers in the unread Dock badge.
+    /// Refuses to route to a soft-deleted Destination — the picker
+    /// hides those, so reaching this branch indicates a UI bug.
+    pub fn capture_route(&self, id: &Ulid, destination_id: &str) -> Result<(), StoreError> {
+        let dest = self
+            .destination_find(destination_id)?
+            .ok_or_else(|| StoreError::NotFound(destination_id.to_string()))?;
+        if dest.deleted_at.is_some() {
+            return Err(StoreError::InvalidArgument(format!(
+                "cannot route to soft-deleted destination {destination_id}"
+            )));
+        }
+
+        let id_str = id.to_string();
+        let now = now_rfc3339();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "UPDATE captures
+             SET destination_id = ?1,
+                 routed_at = ?2,
+                 read_at = COALESCE(read_at, ?2)
+             WHERE id = ?3 AND deleted_at IS NULL",
+            params![destination_id, &now, &id_str],
+        )?;
+        if n == 0 {
+            return Err(StoreError::NotFound(id_str));
+        }
+        drop(conn);
+        self.refresh_dump(id);
+        Ok(())
+    }
+
+    /// Un-route a Capture back to the Inbox. Clears `destination_id`
+    /// and `routed_at`. `read_at` is preserved — un-routing does not
+    /// pretend the user never saw the capture. Returns `NotFound`
+    /// when no matching non-deleted row exists.
+    pub fn capture_unroute(&self, id: &Ulid) -> Result<(), StoreError> {
+        let id_str = id.to_string();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let n = conn.execute(
+            "UPDATE captures
+             SET destination_id = NULL, routed_at = NULL
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![&id_str],
+        )?;
+        if n == 0 {
+            return Err(StoreError::NotFound(id_str));
+        }
+        drop(conn);
+        self.refresh_dump(id);
+        Ok(())
+    }
+
+    /// List Archive captures (non-deleted, Routed) newest-routed
+    /// first, with optional filter by Destination id. `limit` caps
+    /// the result. Sort is `routed_at DESC, id DESC` so re-routing a
+    /// Capture surfaces it at the top.
+    pub fn list_archive(
+        &self,
+        destination_filter: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut out = Vec::new();
+        match destination_filter {
+            Some(dest_id) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
+                     FROM captures
+                     WHERE deleted_at IS NULL
+                       AND destination_id IS NOT NULL
+                       AND destination_id = ?1
+                     ORDER BY routed_at DESC, id DESC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![dest_id, limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
+                     FROM captures
+                     WHERE deleted_at IS NULL
+                       AND destination_id IS NOT NULL
+                     ORDER BY routed_at DESC, id DESC
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// FTS search scoped to the Archive (Routed, non-deleted). Mirror
+    /// of `search` but on the opposite side of the Inbox/Archive
+    /// split. Optional `destination_filter` narrows to one
+    /// Destination.
+    pub fn search_archive(
+        &self,
+        query: &str,
+        destination_filter: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
+        let Some(match_expr) = build_fts_match(query) else {
+            return Ok(Vec::new());
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut out = Vec::new();
+        match destination_filter {
+            Some(dest_id) => {
+                let mut stmt = conn.prepare(
+                    "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
+                     FROM captures c
+                     JOIN captures_fts f ON f.capture_id = c.id
+                     WHERE captures_fts MATCH ?1
+                       AND c.deleted_at IS NULL
+                       AND c.destination_id IS NOT NULL
+                       AND c.destination_id = ?2
+                     ORDER BY rank, c.routed_at DESC, c.id DESC
+                     LIMIT ?3",
+                )?;
+                let rows =
+                    stmt.query_map(params![&match_expr, dest_id, limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
+                     FROM captures c
+                     JOIN captures_fts f ON f.capture_id = c.id
+                     WHERE captures_fts MATCH ?1
+                       AND c.deleted_at IS NULL
+                       AND c.destination_id IS NOT NULL
+                     ORDER BY rank, c.routed_at DESC, c.id DESC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![&match_expr, limit], row_to_capture)?;
+                for row in rows {
+                    out.push(row??);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Test helper: returns the row by id ignoring the deleted_at flag.
     /// Lives behind the public surface so soft-delete tests can assert
     /// the tombstone is still in the table.
@@ -687,7 +1075,7 @@ impl Store {
         let id_str = id.to_string();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
+            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
              FROM captures
              WHERE id = ?1",
         )?;
@@ -712,6 +1100,8 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
     let read_at: Option<String> = row.get(7)?;
     let source_title: Option<String> = row.get(8)?;
     let source_url: Option<String> = row.get(9)?;
+    let destination_id: Option<String> = row.get(10)?;
+    let routed_at: Option<String> = row.get(11)?;
 
     let result = (|| -> Result<Capture, StoreError> {
         let kind = CaptureKind::parse(&kind_str)?;
@@ -727,9 +1117,54 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
             read_at,
             source_title,
             source_url,
+            destination_id,
+            routed_at,
         })
     })();
     Ok(result)
+}
+
+fn row_to_destination(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Result<Destination, StoreError>> {
+    let id: String = row.get(0)?;
+    let name: String = row.get(1)?;
+    let color: Option<String> = row.get(2)?;
+    let created_at: String = row.get(3)?;
+    let deleted_at: Option<String> = row.get(4)?;
+    Ok(Ok(Destination {
+        id,
+        name,
+        color,
+        created_at,
+        deleted_at,
+    }))
+}
+
+/// Normalize a user-supplied color into the storage shape: trim, drop
+/// to `None` when blank. The palette key set is enforced by the UI;
+/// the store accepts any non-blank string so the palette can grow
+/// without a DB migration.
+fn normalize_color(color: Option<&str>) -> Option<String> {
+    color
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(String::from)
+}
+
+/// Detects a SQLite UNIQUE-constraint violation. Used to map a failed
+/// destination INSERT/UPDATE into a `DestinationNameConflict`.
+fn is_unique_violation(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::ConstraintViolation,
+                extended_code: rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE,
+            },
+            _
+        )
+    )
 }
 
 /// Flatten a `CaptureInput` into the text we want indexed by FTS5.
