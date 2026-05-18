@@ -277,6 +277,7 @@
   .header {
     padding: 1.25rem 1.5rem 0.75rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    min-width: 0;
   }
 
   .title-row {
@@ -329,6 +330,11 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 0.35rem;
+    /* Without min-width:0 the chip max-width:100% rule resolves
+       against the meta-line's content-based width, so a long title
+       widens the column past the pane edge instead of clipping. */
+    min-width: 0;
+    max-width: 100%;
   }
 
   .timestamp {
