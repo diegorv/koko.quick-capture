@@ -320,5 +320,40 @@ describe("InboxList", () => {
       });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+
+    it("bare R triggers onRoute with the selected id (ADR-0010)", async () => {
+      const onRoute = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[1],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onRoute,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "R" });
+      expect(onRoute).toHaveBeenCalledTimes(1);
+      expect(onRoute).toHaveBeenCalledWith(ids[1]);
+    });
+
+    it("Cmd+R does NOT trigger onRoute (modifier filters it out)", async () => {
+      const onRoute = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onRoute,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), { key: "r", metaKey: true });
+      expect(onRoute).not.toHaveBeenCalled();
+    });
   });
 });

@@ -17,6 +17,7 @@
   import { CAPTURES_CHANGED } from "$lib/events";
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
+  import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
 
   const PAGE_SIZE = 50;
   const SCROLL_THRESHOLD_PX = 100;
@@ -349,6 +350,37 @@
     }
   }
 
+  // ── Triage picker (ADR-0010) ─────────────────────────────────────
+  let pickerOpen = $state(false);
+  let pickerCaptureId = $state<string | null>(null);
+
+  function onRoute(id: string) {
+    pickerCaptureId = id;
+    pickerOpen = true;
+  }
+
+  function onPickerClose() {
+    pickerOpen = false;
+    pickerCaptureId = null;
+  }
+
+  function onPickerAssigned(_destinationId: string) {
+    // Auto-advance: after a routed row leaves the Inbox, select the
+    // next row so the user can keep triaging with one key press each.
+    const id = pickerCaptureId;
+    if (id === null) return;
+    const list = searchResults ?? captures;
+    const idx = list.findIndex((c) => c.id === id);
+    const next = idx >= 0 ? list[idx + 1] ?? list[idx - 1] ?? null : null;
+    // Remove the routed row optimistically; captures.changed will
+    // refetch as a backstop.
+    captures = captures.filter((c) => c.id !== id);
+    if (searchResults !== null) {
+      searchResults = searchResults.filter((c) => c.id !== id);
+    }
+    selectedId = next ? next.id : null;
+  }
+
   function onOpenLink(url: string) {
     invokeFn("open_link", { url }).catch((err) => {
       console.error("open_link failed", err);
@@ -507,6 +539,7 @@
             {onDelete}
             {onOpen}
             {onClose}
+            {onRoute}
           />
           {#if loading}
             <div class="spinner" aria-live="polite">Loading…</div>
@@ -520,9 +553,18 @@
         {onOpenLink}
         {onReveal}
         {onStarToggle}
+        {onRoute}
       />
     </section>
   </div>
+  <DestinationPicker
+    open={pickerOpen}
+    captureId={pickerCaptureId}
+    invokeFn={(cmd, args) => invokeFn(cmd, args ?? {})}
+    onClose={onPickerClose}
+    onAssigned={onPickerAssigned}
+  />
+
   <footer class="statusbar" aria-label="Inbox stats">
     {#if totalLabel}
       <span class="stat">{totalLabel}</span>

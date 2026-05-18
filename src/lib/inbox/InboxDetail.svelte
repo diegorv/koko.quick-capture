@@ -35,9 +35,14 @@
     /** Optional star toggle. When omitted, the header star is
         display-only — useful for tests that do not exercise mutations. */
     onStarToggle?: (id: string, next: boolean) => void;
+    /** Optional route action. Header shows a "Route" button when this
+     * is provided so the user has a mouse-driven alternative to the
+     * `R` keyboard shortcut. */
+    onRoute?: (id: string) => void;
   }
 
-  const { capture, onOpenLink, onReveal, onStarToggle }: Props = $props();
+  const { capture, onOpenLink, onReveal, onStarToggle, onRoute }: Props =
+    $props();
 
   function str(value: unknown): string | null {
     return typeof value === "string" ? value : null;
@@ -111,6 +116,18 @@
           </button>
         {:else if capture.starred}
           <span class="star-btn active" title="Starred" aria-hidden="true">★</span>
+        {/if}
+        {#if onRoute}
+          <button
+            type="button"
+            class="route-btn"
+            aria-label="Route capture"
+            title="Route (R)"
+            onclick={() => onRoute(capture.id)}
+            data-testid="detail-route-btn"
+          >
+            Route
+          </button>
         {/if}
       </div>
       <p class="meta-line">
@@ -322,6 +339,32 @@
   .star-btn.active {
     color: #f59e0b;
     opacity: 1;
+  }
+
+  .route-btn {
+    appearance: none;
+    font: inherit;
+    font-size: 0.72rem;
+    border: 1px solid rgba(76, 29, 149, 0.5);
+    background: rgba(76, 29, 149, 0.1);
+    color: rgba(76, 29, 149, 1);
+    padding: 0.18rem 0.55rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 80ms ease;
+  }
+  .route-btn:hover {
+    background: rgba(76, 29, 149, 0.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    .route-btn {
+      border-color: rgba(167, 139, 250, 0.5);
+      background: rgba(167, 139, 250, 0.12);
+      color: rgba(167, 139, 250, 1);
+    }
+    .route-btn:hover {
+      background: rgba(167, 139, 250, 0.22);
+    }
   }
 
   .meta-line {

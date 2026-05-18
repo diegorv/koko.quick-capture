@@ -271,4 +271,43 @@ describe("InboxDetail", () => {
       expect(onReveal).toHaveBeenCalledWith("01H000000000000000000000F6");
     });
   });
+
+  describe("Route action (ADR-0010)", () => {
+    it("renders a Route button when onRoute is provided", () => {
+      const cap = note("01H000000000000000000000R1", "to route");
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onRoute: vi.fn(),
+        },
+      });
+      expect(getByTestId("detail-route-btn")).toBeTruthy();
+    });
+
+    it("omits the Route button when onRoute is not provided", () => {
+      const cap = note("01H000000000000000000000R2", "no route");
+      const { queryByTestId } = render(InboxDetail, {
+        props: { capture: cap, onOpenLink: vi.fn(), onReveal: vi.fn() },
+      });
+      expect(queryByTestId("detail-route-btn")).toBeNull();
+    });
+
+    it("clicking Route calls onRoute with the capture id", async () => {
+      const cap = note("01H000000000000000000000R3", "click me");
+      const onRoute = vi.fn();
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onRoute,
+        },
+      });
+      await fireEvent.click(getByTestId("detail-route-btn"));
+      expect(onRoute).toHaveBeenCalledTimes(1);
+      expect(onRoute).toHaveBeenCalledWith("01H000000000000000000000R3");
+    });
+  });
 });

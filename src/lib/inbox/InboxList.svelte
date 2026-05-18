@@ -35,6 +35,10 @@
     onDelete: (id: string) => void;
     onOpen?: (capture: Capture) => void;
     onClose?: () => void;
+    /** Bare `R` on the selected row triggers triage (ADR-0010). The
+     * parent owns the picker; the list just signals "user wants to
+     * route this id." */
+    onRoute?: (id: string) => void;
   }
 
   let {
@@ -45,6 +49,7 @@
     onDelete,
     onOpen,
     onClose,
+    onRoute,
   }: Props = $props();
 
   let listEl: HTMLUListElement | undefined = $state();
@@ -256,6 +261,18 @@
     ) {
       event.preventDefault();
       onStarToggle(current.id, !current.starred);
+      return;
+    }
+    // Bare `R` opens the triage picker for the selected row (ADR-0010).
+    if (
+      (event.key === "r" || event.key === "R") &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      if (!onRoute) return;
+      event.preventDefault();
+      onRoute(current.id);
     }
   }
 </script>
