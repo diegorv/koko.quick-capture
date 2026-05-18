@@ -1,26 +1,45 @@
 <script lang="ts">
-  // Composer view: single autofocused textarea, ESC cancels, Cmd+Enter saves.
-  // The component is decoupled from Tauri: the parent injects `save` and
-  // listens for the `close` callback so the component is testable in isolation.
+  // Composer view: CodeMirror-backed single-text editor. ESC cancels,
+  // Cmd+Enter saves. Swap from a plain <textarea> to CodeMirror was
+  // accepted in ADR-0011 to host the [[ wikilink autocomplete; this
+  // slice introduces the editor host without the completion source
+  // yet (added in a follow-up slice).
+  //
+  // The component is decoupled from Tauri: the parent injects `save`
+  // and listens for `onclose` so the component is testable in
+  // isolation. `oneditorReady` is a test-only seam that exposes the
+  // live EditorView so component tests can dispatch programmatic doc
+  // changes without simulating contenteditable input (per ADR-0005).
+
+  import { onMount, onDestroy } from "svelte";
+  import {
+    EditorView,
+    keymap,
+    placeholder as cmPlaceholder,
+  } from "@codemirror/view";
+  import { EditorState, Prec } from "@codemirror/state";
+  import { defaultKeymap } from "@codemirror/commands";
 
   interface Props {
     save: (text: string) => void | Promise<void>;
     onclose?: () => void;
     /**
      * Bumped by the parent every time the window is shown so the
-     * Composer can re-focus the textarea and clear stale text. The
-     * Composer window is created once at app startup and hidden/shown
-     * on every shortcut press, so the `use:focusOnMount` action only
-     * fires the first time; without an external focus signal,
-     * subsequent shows leave focus wherever the OS left it.
+     * Composer can re-focus the editor and clear stale text. The
+     * Composer window is created once at app startup and hidden /
+     * shown on every shortcut press, so without an external focus
+     * signal subsequent shows would leave focus wherever the OS
+     * left it.
      */
     focusKey?: number;
+    /** Test seam: receives the live EditorView once it mounts. */
+    oneditorReady?: (view: EditorView) => void;
   }
 
-  let { save, onclose, focusKey = 0 }: Props = $props();
+  let { save, onclose, focusKey = 0, oneditorReady }: Props = $props();
 
-  let text = $state("");
-  let textarea: HTMLTextAreaElement | undefined = $state();
+  let host: HTMLDivElement | undefined = $state();
+  let view: EditorView | undefined;
   // Flipped true for a beat after a successful save so the composer
   // can flash a brief green confirmation before the window hides.
   let saved = $state(false);
@@ -31,68 +50,110 @@
   let saving = false;
   const SAVE_FLASH_MS = 180;
 
-  function focusOnMount(node: HTMLTextAreaElement) {
-    node.focus();
+  async function handleSave(): Promise<boolean> {
+    if (!view || saving) return true;
+    saving = true;
+    try {
+      await save(view.state.doc.toString());
+      saved = true;
+      // Hold the green confirmation flash briefly so the user sees a
+      // visual ack before the window is hidden by the parent.
+      await new Promise<void>((resolve) => setTimeout(resolve, SAVE_FLASH_MS));
+      saved = false;
+    } finally {
+      saving = false;
+    }
+    onclose?.();
+    return true;
   }
 
-  $effect(() => {
-    // Re-run on every `focusKey` change. Reset text so each open
-    // starts from an empty draft, and re-focus the textarea. Also
-    // clear any leftover `saved` flash and the in-flight guard from
-    // a previous capture.
-    focusKey;
-    text = "";
-    saved = false;
-    saving = false;
-    textarea?.focus();
+  function handleEscape(): boolean {
+    onclose?.();
+    return true;
+  }
+
+  function resetDoc() {
+    if (!view) return;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: "" },
+    });
+    view.focus();
+  }
+
+  onMount(() => {
+    if (!host) return;
+    const state = EditorState.create({
+      doc: "",
+      extensions: [
+        cmPlaceholder("Capture a note..."),
+        // High-priority keymap so ESC + Cmd+Enter beat the default
+        // bindings. When the wikilink completion source lands the
+        // autocompletion extension installs its own completionKeymap
+        // at an even higher precedence; ESC closing the popup will
+        // therefore consume the key before this handler sees it,
+        // which is the wanted ordering.
+        Prec.high(
+          keymap.of([
+            { key: "Escape", run: () => handleEscape() },
+            {
+              key: "Mod-Enter",
+              run: () => {
+                void handleSave();
+                return true;
+              },
+            },
+          ]),
+        ),
+        keymap.of(defaultKeymap),
+        EditorView.lineWrapping,
+        EditorView.contentAttributes.of({
+          "aria-label": "Note text",
+          autocorrect: "off",
+          autocapitalize: "off",
+          spellcheck: "false",
+        }),
+        EditorView.theme({
+          "&": { height: "100%" },
+          ".cm-scroller": {
+            fontFamily:
+              "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            fontSize: "1.05rem",
+            lineHeight: "1.45",
+          },
+          ".cm-content": {
+            padding: 0,
+            caretColor: "currentColor",
+          },
+          ".cm-focused": { outline: "none" },
+        }),
+      ],
+    });
+    view = new EditorView({ state, parent: host });
+    view.focus();
+    oneditorReady?.(view);
   });
 
-  function quietTextarea(node: HTMLTextAreaElement) {
-    // WebKit-specific attributes that the Svelte type system does not
-    // know about. Setting them imperatively keeps them out of the
-    // textarea props type while still applying the behavior macOS
-    // WebView honors.
-    node.setAttribute("autocorrect", "off");
-    node.setAttribute("autocapitalize", "off");
-  }
+  onDestroy(() => {
+    view?.destroy();
+    view = undefined;
+  });
 
-  async function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onclose?.();
-      return;
+  $effect(() => {
+    // Re-run on every `focusKey` change. Reset the doc so each open
+    // starts from an empty draft, refocus the editor, and clear any
+    // leftover `saved` flash and the in-flight guard from a previous
+    // capture.
+    focusKey;
+    if (view) {
+      resetDoc();
+      saved = false;
+      saving = false;
     }
-    if (event.key === "Enter" && event.metaKey) {
-      event.preventDefault();
-      if (saving) return;
-      saving = true;
-      try {
-        await save(text);
-        saved = true;
-        // Hold the green confirmation flash briefly so the user sees a
-        // visual ack before the window is hidden by the parent.
-        await new Promise<void>((resolve) => setTimeout(resolve, SAVE_FLASH_MS));
-        saved = false;
-      } finally {
-        saving = false;
-      }
-      onclose?.();
-    }
-  }
+  });
 </script>
 
 <div class="composer" class:saved data-tauri-drag-region>
-  <textarea
-    bind:this={textarea}
-    bind:value={text}
-    onkeydown={handleKeydown}
-    use:focusOnMount
-    use:quietTextarea
-    placeholder="Capture a note..."
-    aria-label="Note text"
-    autocomplete="off"
-    spellcheck="false"
-  ></textarea>
+  <div class="editor" bind:this={host}></div>
   <div class="hint">ESC cancels · ⌘↩ saves</div>
 </div>
 
@@ -122,16 +183,22 @@
     box-shadow: inset 0 0 0 3px rgba(79, 70, 229, 0.6);
   }
 
-  textarea {
+  .editor {
     flex: 1;
-    width: 100%;
-    resize: none;
-    border: none;
-    outline: none;
-    font-size: 1.05rem;
-    line-height: 1.45;
-    font-family: inherit;
+    display: flex;
+    min-height: 0;
+  }
+
+  :global(.composer .cm-editor) {
+    flex: 1;
+    height: 100%;
     background: transparent;
+    color: inherit;
+  }
+  :global(.composer .cm-editor.cm-focused) {
+    outline: none;
+  }
+  :global(.composer .cm-content) {
     color: inherit;
   }
 
