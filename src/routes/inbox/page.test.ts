@@ -90,15 +90,56 @@ describe("inbox page", () => {
     expect(rows.length).toBe(2);
   });
 
+  it("renders the 'Inbox zero. Nice.' empty state when totalCount > 0 but list is empty", async () => {
+    const listFn = vi.fn(async () => [] as Capture[]);
+    const listenFn = vi.fn(
+      async (
+        _event: string,
+        _handler: (...args: never[]) => void,
+      ): Promise<UnlistenFn> => () => {},
+    );
+    // total_count > 0 means there are routed/deleted Captures somewhere
+    // — the Inbox is just drained.
+    const invokeFn = vi.fn(async (cmd: string) =>
+      cmd === "total_count" ? 5 : 0,
+    );
+
+    const { findByText } = render(Page, {
+      props: { listFn, listenFn, invokeFn },
+    });
+
+    expect(await findByText("Inbox zero. Nice.")).toBeTruthy();
+  });
+
+  it("renders the cold-start empty state when totalCount is 0", async () => {
+    const listFn = vi.fn(async () => [] as Capture[]);
+    const listenFn = vi.fn(
+      async (
+        _event: string,
+        _handler: (...args: never[]) => void,
+      ): Promise<UnlistenFn> => () => {},
+    );
+    const invokeFn = vi.fn(async () => 0);
+
+    const { findByText } = render(Page, {
+      props: { listFn, listenFn, invokeFn },
+    });
+
+    expect(await findByText("No captures yet")).toBeTruthy();
+  });
+
   it("navigates to /archive when view:open_archive fires (ADR-0010)", async () => {
     const gotoMod = await import("$app/navigation");
     const gotoSpy = vi.spyOn(gotoMod, "goto");
 
-    const listFn = vi.fn(async () => []);
+    const listFn = vi.fn(async () => [] as Capture[]);
     let fire: (() => void) | null = null;
     const listenFn = vi.fn(
-      async (event: string, handler: () => void): Promise<UnlistenFn> => {
-        if (event === "view:open_archive") fire = handler;
+      async (
+        event: string,
+        handler: (...args: never[]) => void,
+      ): Promise<UnlistenFn> => {
+        if (event === "view:open_archive") fire = () => handler();
         return () => {};
       },
     );

@@ -535,13 +535,22 @@
           </div>
         {:else if !loading && !searching && captures.length === 0}
           <div class="empty">
-            <div class="empty-glyph" aria-hidden="true">📥</div>
-            <h2 class="empty-title">No captures yet</h2>
-            <p class="empty-hint">
-              Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
-              or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
-            </p>
-            <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
+            {#if totalCount !== null && totalCount > 0}
+              <div class="empty-glyph" aria-hidden="true">✅</div>
+              <h2 class="empty-title">Inbox zero. Nice.</h2>
+              <p class="empty-hint">
+                Routed Captures live in the
+                <a class="empty-link" href="/archive">Archive</a>.
+              </p>
+            {:else}
+              <div class="empty-glyph" aria-hidden="true">📥</div>
+              <h2 class="empty-title">No captures yet</h2>
+              <p class="empty-hint">
+                Press <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>Space</kbd> to write a note,
+                or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> to capture the clipboard.
+              </p>
+              <p class="empty-hint">Drag a file onto the Dock to save it here.</p>
+            {/if}
           </div>
         {:else}
           <InboxList
@@ -828,6 +837,17 @@
     background: rgba(0, 0, 0, 0.06);
     border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 3px;
+  }
+
+  .empty-link {
+    color: rgba(76, 29, 149, 1);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .empty-link {
+      color: rgba(196, 181, 253, 1);
+    }
   }
 
   @media (prefers-color-scheme: dark) {

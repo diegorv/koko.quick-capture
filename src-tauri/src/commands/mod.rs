@@ -1022,6 +1022,9 @@ pub fn route_capture(
     store: State<'_, Store>,
 ) -> Result<(), String> {
     route_capture_with_store(&store, &id, &destination_id)?;
+    // Routing is an outbound triage signal; per Q13(e) in ADR-0010
+    // it deliberately does NOT emit `DOCK_PULSE`. The Dock's pulse
+    // animation is reserved for inbound Capture saves.
     let _ = app.emit(
         CAPTURES_CHANGED_EVENT,
         MutationNotice {
