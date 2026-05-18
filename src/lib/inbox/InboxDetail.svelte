@@ -39,10 +39,20 @@
      * is provided so the user has a mouse-driven alternative to the
      * `R` keyboard shortcut. */
     onRoute?: (id: string) => void;
+    /** Optional un-route action. Header shows a "Move to Inbox"
+     * button when this is provided — drives the Archive's reverse
+     * flow per ADR-0010. */
+    onUnroute?: (id: string) => void;
   }
 
-  const { capture, onOpenLink, onReveal, onStarToggle, onRoute }: Props =
-    $props();
+  const {
+    capture,
+    onOpenLink,
+    onReveal,
+    onStarToggle,
+    onRoute,
+    onUnroute,
+  }: Props = $props();
 
   function str(value: unknown): string | null {
     return typeof value === "string" ? value : null;
@@ -122,11 +132,23 @@
             type="button"
             class="route-btn"
             aria-label="Route capture"
-            title="Route (R)"
+            title={onUnroute ? "Re-route (R)" : "Route (R)"}
             onclick={() => onRoute(capture.id)}
             data-testid="detail-route-btn"
           >
-            Route
+            {onUnroute ? "Re-route" : "Route"}
+          </button>
+        {/if}
+        {#if onUnroute}
+          <button
+            type="button"
+            class="unroute-btn"
+            aria-label="Move capture back to Inbox"
+            title="Move to Inbox (⇧R)"
+            onclick={() => onUnroute(capture.id)}
+            data-testid="detail-unroute-btn"
+          >
+            Move to Inbox
           </button>
         {/if}
       </div>
@@ -341,17 +363,20 @@
     opacity: 1;
   }
 
-  .route-btn {
+  .route-btn,
+  .unroute-btn {
     appearance: none;
     font: inherit;
     font-size: 0.72rem;
-    border: 1px solid rgba(76, 29, 149, 0.5);
-    background: rgba(76, 29, 149, 0.1);
-    color: rgba(76, 29, 149, 1);
     padding: 0.18rem 0.55rem;
     border-radius: 6px;
     cursor: pointer;
     transition: background 80ms ease;
+  }
+  .route-btn {
+    border: 1px solid rgba(76, 29, 149, 0.5);
+    background: rgba(76, 29, 149, 0.1);
+    color: rgba(76, 29, 149, 1);
   }
   .route-btn:hover {
     background: rgba(76, 29, 149, 0.18);
@@ -364,6 +389,23 @@
     }
     .route-btn:hover {
       background: rgba(167, 139, 250, 0.22);
+    }
+  }
+  .unroute-btn {
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    background: transparent;
+    color: rgba(0, 0, 0, 0.7);
+  }
+  .unroute-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    .unroute-btn {
+      border-color: rgba(255, 255, 255, 0.2);
+      color: rgba(255, 255, 255, 0.75);
+    }
+    .unroute-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
     }
   }
 

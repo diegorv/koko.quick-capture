@@ -355,5 +355,48 @@ describe("InboxList", () => {
       await fireEvent.keyDown(getByRole("listbox"), { key: "r", metaKey: true });
       expect(onRoute).not.toHaveBeenCalled();
     });
+
+    it("Shift+R triggers onUnroute when provided (Archive flow)", async () => {
+      const onRoute = vi.fn();
+      const onUnroute = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onRoute,
+          onUnroute,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), {
+        key: "R",
+        shiftKey: true,
+      });
+      expect(onUnroute).toHaveBeenCalledWith(ids[0]);
+      expect(onRoute).not.toHaveBeenCalled();
+    });
+
+    it("Shift+R without onUnroute is a no-op (does NOT fall through to onRoute)", async () => {
+      const onRoute = vi.fn();
+      const { getByRole } = render(InboxList, {
+        props: {
+          captures: twoNotes(),
+          selectedId: ids[0],
+          onSelect: vi.fn(),
+          onStarToggle: vi.fn(),
+          onDelete: vi.fn(),
+          onRoute,
+        },
+      });
+
+      await fireEvent.keyDown(getByRole("listbox"), {
+        key: "R",
+        shiftKey: true,
+      });
+      expect(onRoute).not.toHaveBeenCalled();
+    });
   });
 });

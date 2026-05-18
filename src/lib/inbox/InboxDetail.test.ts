@@ -309,5 +309,49 @@ describe("InboxDetail", () => {
       expect(onRoute).toHaveBeenCalledTimes(1);
       expect(onRoute).toHaveBeenCalledWith("01H000000000000000000000R3");
     });
+
+    it("renders Move-to-Inbox button when onUnroute is provided (Archive)", () => {
+      const cap = note("01H000000000000000000000U1", "routed");
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onRoute: vi.fn(),
+          onUnroute: vi.fn(),
+        },
+      });
+      expect(getByTestId("detail-unroute-btn")).toBeTruthy();
+    });
+
+    it("Route button reads 'Re-route' when onUnroute is also provided", () => {
+      const cap = note("01H000000000000000000000U2", "routed");
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onRoute: vi.fn(),
+          onUnroute: vi.fn(),
+        },
+      });
+      expect(getByTestId("detail-route-btn").textContent?.trim()).toBe("Re-route");
+    });
+
+    it("clicking Move-to-Inbox calls onUnroute with the id", async () => {
+      const cap = note("01H000000000000000000000U3", "routed");
+      const onUnroute = vi.fn();
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onRoute: vi.fn(),
+          onUnroute,
+        },
+      });
+      await fireEvent.click(getByTestId("detail-unroute-btn"));
+      expect(onUnroute).toHaveBeenCalledWith("01H000000000000000000000U3");
+    });
   });
 });

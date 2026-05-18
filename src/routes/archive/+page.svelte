@@ -16,6 +16,7 @@
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
   import MainNav from "$lib/main/MainNav.svelte";
+  import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
   import { colorHex } from "$lib/destinations/palette";
 
   const PAGE_SIZE = 100;
@@ -179,6 +180,50 @@
     }
   }
 
+  // ── Re-route + un-route (ADR-0010 slice 6) ──────────────────────
+  let pickerOpen = $state(false);
+  let pickerCaptureId = $state<string | null>(null);
+  let pickerCurrentDest = $state<string | null>(null);
+
+  function onRoute(id: string) {
+    const capture = captures.find((c) => c.id === id);
+    pickerCaptureId = id;
+    pickerCurrentDest = capture?.destination_id ?? null;
+    pickerOpen = true;
+  }
+
+  function onPickerClose() {
+    pickerOpen = false;
+    pickerCaptureId = null;
+    pickerCurrentDest = null;
+  }
+
+  function onPickerAssigned(_destinationId: string) {
+    // No row removal here — re-routing keeps the Capture in the
+    // Archive. Just clear selection if the filter no longer covers it
+    // and let `captures:changed` trigger a refresh.
+    const id = pickerCaptureId;
+    if (id === null) return;
+    if (selectedId === id) {
+      // Selection stays; refresh updates the destination_id.
+    }
+  }
+
+  async function onUnroute(id: string) {
+    // Optimistic: yank the row from the Archive view. The Inbox
+    // surfaces it again when the user switches tabs.
+    captures = captures.filter((c) => c.id !== id);
+    if (selectedId === id) selectedId = null;
+    try {
+      await invokeFn("unroute_capture", { id });
+    } catch (err) {
+      console.error("unroute_capture failed", err);
+      // Refresh on failure to put the row back if it should still be
+      // here.
+      await refresh();
+    }
+  }
+
   onMount(async () => {
     await refresh();
     unlistenCaptures = await listenFn(CAPTURES_CHANGED, () => {
@@ -262,6 +307,8 @@
           {onDelete}
           {onOpen}
           {onClose}
+          {onRoute}
+          {onUnroute}
         />
       {/if}
     </section>
@@ -271,9 +318,20 @@
         {onOpenLink}
         {onReveal}
         {onStarToggle}
+        {onRoute}
+        {onUnroute}
       />
     </section>
   </div>
+
+  <DestinationPicker
+    open={pickerOpen}
+    captureId={pickerCaptureId}
+    currentDestinationId={pickerCurrentDest}
+    invokeFn={(cmd, args) => invokeFn(cmd, args ?? {})}
+    onClose={onPickerClose}
+    onAssigned={onPickerAssigned}
+  />
 </div>
 
 <style>

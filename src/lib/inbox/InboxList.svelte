@@ -39,6 +39,10 @@
      * parent owns the picker; the list just signals "user wants to
      * route this id." */
     onRoute?: (id: string) => void;
+    /** `Shift+R` on the selected row un-routes it (Archive only).
+     * The parent removes the row from the Archive list and the
+     * Capture re-surfaces in the Inbox. */
+    onUnroute?: (id: string) => void;
   }
 
   let {
@@ -50,6 +54,7 @@
     onOpen,
     onClose,
     onRoute,
+    onUnroute,
   }: Props = $props();
 
   let listEl: HTMLUListElement | undefined = $state();
@@ -263,13 +268,21 @@
       onStarToggle(current.id, !current.starred);
       return;
     }
-    // Bare `R` opens the triage picker for the selected row (ADR-0010).
+    // `R` opens the triage picker for the selected row (ADR-0010).
+    // `Shift+R` un-routes (only meaningful in the Archive view, where
+    // the parent provides `onUnroute`).
     if (
       (event.key === "r" || event.key === "R") &&
       !event.metaKey &&
       !event.ctrlKey &&
       !event.altKey
     ) {
+      if (event.shiftKey) {
+        if (!onUnroute) return;
+        event.preventDefault();
+        onUnroute(current.id);
+        return;
+      }
       if (!onRoute) return;
       event.preventDefault();
       onRoute(current.id);

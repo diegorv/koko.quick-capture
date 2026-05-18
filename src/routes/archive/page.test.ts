@@ -139,6 +139,72 @@ describe("archive page", () => {
     });
   });
 
+  it("Shift+R on the list invokes unroute_capture and drops the row", async () => {
+    const dests = [mkDest("D1", "Todoist")];
+    const capt = [mkCapture("C1", "alpha", "D1"), mkCapture("C2", "bravo", "D1")];
+    const unrouteSpy = vi.fn();
+    const invokeFn = makeInvoke({
+      list_archive: () => capt,
+      list_destinations: () => dests,
+      inbox_count: () => 0,
+      unroute_capture: (args) => {
+        unrouteSpy(args);
+        return null;
+      },
+    });
+
+    const { findAllByRole, getByRole } = render(Page, {
+      props: { invokeFn, listenFn: noopListen(), hideFn: vi.fn(async () => {}) },
+    });
+
+    const initial = await findAllByRole("option");
+    expect(initial.length).toBe(2);
+    // Select the first row by clicking it.
+    await fireEvent.click(initial[0]);
+    await fireEvent.keyDown(getByRole("listbox"), { key: "R", shiftKey: true });
+
+    await waitFor(() =>
+      expect(unrouteSpy).toHaveBeenCalledWith({ id: "C1" }),
+    );
+    await waitFor(async () => {
+      const after = await findAllByRole("option");
+      expect(after.length).toBe(1);
+    });
+  });
+
+  it("R on the list opens the picker pre-selected to the current destination", async () => {
+    const dests = [mkDest("D1", "Todoist"), mkDest("D2", "Readwise")];
+    const capt = [mkCapture("C1", "alpha", "D2")];
+    const routeSpy = vi.fn();
+    const invokeFn = makeInvoke({
+      list_archive: () => capt,
+      list_destinations: () => dests,
+      inbox_count: () => 0,
+      route_capture: (args) => {
+        routeSpy(args);
+        return null;
+      },
+    });
+
+    const { findAllByRole, getByRole, findByTestId } = render(Page, {
+      props: { invokeFn, listenFn: noopListen(), hideFn: vi.fn(async () => {}) },
+    });
+
+    const rows = await findAllByRole("option");
+    await fireEvent.click(rows[0]);
+    await fireEvent.keyDown(getByRole("listbox"), { key: "R" });
+
+    // Picker mounted with the row's current destination pre-selected.
+    const search = await findByTestId("picker-search");
+    await fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() =>
+      expect(routeSpy).toHaveBeenCalledWith({
+        id: "C1",
+        destinationId: "D2",
+      }),
+    );
+  });
+
   it("surfaces the soft-deleted-destination hint when an orphaned capture is present", async () => {
     const dests: Destination[] = []; // No live destinations.
     const capt = [mkCapture("C1", "orphan", "DGHOST")];
