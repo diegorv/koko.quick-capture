@@ -213,19 +213,24 @@
   :global(.composer .cm-tooltip.cm-tooltip-autocomplete) {
     background: #ffffff;
     border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 8px;
+    border-radius: 6px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
     font-family: inherit;
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     overflow: hidden;
+    /* Minimum width gives short names (1-2 chars) a usable hit area
+       without making the popup feel cramped when names are long. */
+    min-width: 9rem;
   }
   :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul) {
-    max-height: 14rem;
+    max-height: 13rem;
     font-family: inherit;
   }
   :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li) {
-    padding: 0.25rem 0.6rem;
+    padding: 0.18rem 0.55rem;
     color: #0f0f0f;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
   }
   :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]) {
     background: rgba(79, 70, 229, 0.85);
