@@ -105,7 +105,14 @@
           <span class="star-btn active" title="Starred" aria-hidden="true">★</span>
         {/if}
       </div>
-      <p class="timestamp">{formatTimestamp(capture.created_at)}</p>
+      <p class="meta-line">
+        <span class="timestamp">{formatTimestamp(capture.created_at)}</span>
+        {#if capture.source_app}
+          <span class="source-app" title={capture.source_app}>
+            from {capture.source_app}
+          </span>
+        {/if}
+      </p>
     </header>
 
     {#if capture.kind === "Link"}
@@ -293,10 +300,38 @@
     opacity: 1;
   }
 
-  .timestamp {
+  .meta-line {
     margin: 0.35rem 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .timestamp {
     font-size: 0.78rem;
     opacity: 0.55;
+  }
+
+  .source-app {
+    font-size: 0.7rem;
+    padding: 0.08rem 0.4rem;
+    border-radius: 999px;
+    background: rgba(76, 29, 149, 0.1);
+    color: rgba(76, 29, 149, 0.95);
+    border: 1px solid rgba(76, 29, 149, 0.3);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @media (prefers-color-scheme: dark) {
+    .source-app {
+      background: rgba(167, 139, 250, 0.15);
+      color: rgba(167, 139, 250, 0.95);
+      border-color: rgba(167, 139, 250, 0.35);
+    }
   }
 
   .body {

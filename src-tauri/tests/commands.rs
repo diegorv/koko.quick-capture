@@ -22,7 +22,7 @@ fn temp_store() -> (TempDir, Store) {
 fn save_note_persists_a_row() {
     let (_dir, store) = temp_store();
 
-    let saved = save_note_with_store(&store, "hello note").expect("save note");
+    let saved = save_note_with_store(&store, "hello note", None).expect("save note");
     assert_eq!(saved.kind, CaptureKind::Note);
     assert_eq!(
         saved.payload.get("text").and_then(|v| v.as_str()),
@@ -79,7 +79,7 @@ fn list_captures_rejects_invalid_cursor_string() {
 #[test]
 fn star_capture_toggles_flag() {
     let (_dir, store) = temp_store();
-    let saved = save_note_with_store(&store, "to star").expect("save");
+    let saved = save_note_with_store(&store, "to star", None).expect("save");
 
     star_capture_with_store(&store, &saved.id, true).expect("star");
     let after_star = store.list(10).expect("list");
@@ -109,9 +109,9 @@ fn star_capture_rejects_invalid_ulid() {
 #[test]
 fn delete_capture_hides_from_list() {
     let (_dir, store) = temp_store();
-    let keep = save_note_with_store(&store, "keep me").expect("save keep");
+    let keep = save_note_with_store(&store, "keep me", None).expect("save keep");
     std::thread::sleep(std::time::Duration::from_millis(2));
-    let drop = save_note_with_store(&store, "drop me").expect("save drop");
+    let drop = save_note_with_store(&store, "drop me", None).expect("save drop");
 
     delete_capture_with_store(&store, &drop.id).expect("delete");
 
@@ -156,7 +156,7 @@ fn unread_count_with_store_counts_rows_with_null_read_at() {
 
     // Freshly-saved rows are unread by default.
     for i in 0..5 {
-        save_note_with_store(&store, &format!("note {i}")).expect("save");
+        save_note_with_store(&store, &format!("note {i}"), None).expect("save");
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     assert_eq!(unread_count_with_store(&store).expect("count"), 5);
@@ -168,7 +168,7 @@ fn unread_count_with_store_ignores_soft_deleted_and_already_read() {
 
     let mut ids = Vec::with_capacity(3);
     for i in 0..3 {
-        let saved = save_note_with_store(&store, &format!("n{i}")).expect("save");
+        let saved = save_note_with_store(&store, &format!("n{i}"), None).expect("save");
         ids.push(saved.id);
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -196,7 +196,7 @@ fn total_count_with_store_counts_live_rows_and_ignores_soft_deleted() {
     let (_dir, store) = temp_store();
     let mut ids = Vec::with_capacity(3);
     for i in 0..3 {
-        let saved = save_note_with_store(&store, &format!("t{i}")).expect("save");
+        let saved = save_note_with_store(&store, &format!("n{i}"), None).expect("save");
         ids.push(saved.id);
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -217,7 +217,7 @@ fn mark_read_with_store_flips_one_row_and_returns_remaining_unread() {
 
     let mut ids = Vec::with_capacity(3);
     for i in 0..3 {
-        let saved = save_note_with_store(&store, &format!("n{i}")).expect("save");
+        let saved = save_note_with_store(&store, &format!("n{i}"), None).expect("save");
         ids.push(saved.id);
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -231,7 +231,7 @@ fn mark_read_with_store_flips_one_row_and_returns_remaining_unread() {
 #[test]
 fn mark_read_with_store_is_idempotent() {
     let (_dir, store) = temp_store();
-    let saved = save_note_with_store(&store, "only").expect("save");
+    let saved = save_note_with_store(&store, "only", None).expect("save");
 
     let first = mark_read_with_store(&store, &saved.id).expect("first");
     assert_eq!(first, 0);
@@ -310,8 +310,8 @@ fn is_clipboard_duplicate_matches_same_link_url() {
 #[test]
 fn search_captures_finds_indexed_note_text() {
     let (_dir, store) = temp_store();
-    save_note_with_store(&store, "hello world").expect("save");
-    save_note_with_store(&store, "completely unrelated").expect("save");
+    save_note_with_store(&store, "hello world", None).expect("save");
+    save_note_with_store(&store, "completely unrelated", None).expect("save");
 
     let results = search_captures_with_store(&store, "hello", 10).expect("search");
     assert_eq!(results.len(), 1);
@@ -324,7 +324,7 @@ fn search_captures_finds_indexed_note_text() {
 #[test]
 fn search_captures_supports_prefix_match() {
     let (_dir, store) = temp_store();
-    save_note_with_store(&store, "engineering notebook").expect("save");
+    save_note_with_store(&store, "engineering notebook", None).expect("save");
 
     let results = search_captures_with_store(&store, "engin", 10).expect("search");
     assert_eq!(results.len(), 1);
@@ -333,7 +333,7 @@ fn search_captures_supports_prefix_match() {
 #[test]
 fn search_captures_excludes_soft_deleted_rows() {
     let (_dir, store) = temp_store();
-    let saved = save_note_with_store(&store, "secret").expect("save");
+    let saved = save_note_with_store(&store, "secret", None).expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse");
 
     assert_eq!(
@@ -356,7 +356,7 @@ fn search_captures_excludes_soft_deleted_rows() {
 #[test]
 fn search_captures_empty_query_returns_no_rows() {
     let (_dir, store) = temp_store();
-    save_note_with_store(&store, "hello").expect("save");
+    save_note_with_store(&store, "hello", None).expect("save");
     assert!(search_captures_with_store(&store, "   ", 10)
         .expect("search")
         .is_empty());
@@ -368,7 +368,7 @@ fn search_captures_sanitises_punctuation_in_query() {
     // FTS5 would reject `https://example.com` raw because of the
     // special chars; build_fts_match must strip them down to
     // alphanumeric tokens.
-    save_note_with_store(&store, "see https://example.com for docs").expect("save");
+    save_note_with_store(&store, "see https://example.com for docs", None).expect("save");
     let results = search_captures_with_store(&store, "https://example.com", 10).expect("search");
     assert_eq!(results.len(), 1);
 }
@@ -377,7 +377,7 @@ fn search_captures_sanitises_punctuation_in_query() {
 fn save_note_rejects_empty_text_and_writes_nothing() {
     let (_dir, store) = temp_store();
 
-    let err = save_note_with_store(&store, "   \n\t").expect_err("empty text must error");
+    let err = save_note_with_store(&store, "   \n\t", None).expect_err("empty text must error");
     assert!(
         err.to_lowercase().contains("empty"),
         "expected error message to mention empty, got: {err}"

@@ -35,15 +35,22 @@ pub struct MutationNotice<'a> {
 }
 
 /// Save a free-text Note. Empty / whitespace-only input is rejected.
-pub fn save_note_with_store(store: &Store, text: &str) -> Result<Capture, String> {
+pub fn save_note_with_store(
+    store: &Store,
+    text: &str,
+    source_app: Option<String>,
+) -> Result<Capture, String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err("note text is empty".to_string());
     }
     store
-        .save(CaptureInput::Note {
-            text: text.to_string(),
-        })
+        .save_with_source(
+            CaptureInput::Note {
+                text: text.to_string(),
+            },
+            source_app,
+        )
         .map_err(|e| e.to_string())
 }
 
@@ -53,7 +60,14 @@ pub fn save_note(
     app: AppHandle,
     store: State<'_, Store>,
 ) -> Result<Capture, String> {
-    let capture = save_note_with_store(&store, &text)?;
+    // Resolve the app that was frontmost when the Composer was
+    // summoned (`PrevFrontmostPid` is `peek()`ed so the dismiss
+    // path's reactivation target stays intact).
+    let source_app = {
+        let pid = app.state::<PrevFrontmostPid>().peek();
+        bundle_id_for_pid(pid)
+    };
+    let capture = save_note_with_store(&store, &text, source_app)?;
     let _ = app.emit(CAPTURES_CHANGED_EVENT, &capture);
     let _ = app.emit(DOCK_PULSE_EVENT, ());
     Ok(capture)
@@ -73,6 +87,7 @@ pub fn save_note(
 pub fn capture_clipboard_now_with(
     clipboard: &dyn Clipboard,
     store: &Store,
+    source_app: Option<String>,
 ) -> Result<Vec<Capture>, String> {
     let snapshot = clipboard.read().map_err(|e| e.to_string())?;
     let inputs = decide(snapshot).map_err(|e| e.to_string())?;
@@ -92,7 +107,9 @@ pub fn capture_clipboard_now_with(
         {
             continue;
         }
-        let saved = store.save(input).map_err(|e| e.to_string())?;
+        let saved = store
+            .save_with_source(input, source_app.clone())
+            .map_err(|e| e.to_string())?;
         latest = Some(saved.clone());
         out.push(saved);
     }
@@ -141,7 +158,9 @@ pub fn capture_clipboard_now(
     app: AppHandle,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    let captures = capture_clipboard_now_with(&SystemClipboard::new(), &store)?;
+    let source_app = frontmost_bundle_id();
+    let captures =
+        capture_clipboard_now_with(&SystemClipboard::new(), &store, source_app)?;
     for capture in &captures {
         let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
         let _ = app.emit(DOCK_PULSE_EVENT, ());
@@ -349,7 +368,12 @@ pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
 /// and the Dock pulses once per save.
 pub fn capture_clipboard_and_broadcast(app: &AppHandle) {
     let store = app.state::<Store>();
-    match capture_clipboard_now_with(&SystemClipboard::new(), &store) {
+    // The global shortcut fires while the user's prior app is still
+    // frontmost (we are Accessory and never auto-activate), so
+    // NSWorkspace.frontmostApplication is exactly the "source app"
+    // we want to stamp on the new captures.
+    let source_app = frontmost_bundle_id();
+    match capture_clipboard_now_with(&SystemClipboard::new(), &store, source_app) {
         Ok(captures) => {
             for capture in &captures {
                 let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
@@ -432,6 +456,13 @@ impl PrevFrontmostPid {
     pub fn take(&self) -> i32 {
         self.0.swap(-1, std::sync::atomic::Ordering::SeqCst)
     }
+
+    /// Read the stored PID without resetting it. Used by `save_note`
+    /// to stamp `source_app` on the saved Capture while leaving the
+    /// dismiss path's reactivation target intact.
+    pub fn peek(&self) -> i32 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Snapshot the macOS frontmost app PID via NSWorkspace into the
@@ -463,6 +494,70 @@ pub fn record_prev_frontmost(app: &AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn record_prev_frontmost(_app: &AppHandle) {}
+
+/// Read the bundle identifier of whatever macOS app is currently
+/// frontmost. Used by clipboard capture (the shortcut handler is
+/// invoked while the user's prior app is still frontmost — our app
+/// stays Accessory and does not steal activation) to stamp
+/// `source_app` on the saved Capture.
+#[cfg(target_os = "macos")]
+pub fn frontmost_bundle_id() -> Option<String> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSString;
+    unsafe {
+        let workspace: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+        let app: *mut AnyObject = msg_send![workspace, frontmostApplication];
+        if app.is_null() {
+            return None;
+        }
+        let bundle: *mut NSString = msg_send![app, bundleIdentifier];
+        if bundle.is_null() {
+            return None;
+        }
+        Some((*bundle).to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn frontmost_bundle_id() -> Option<String> {
+    None
+}
+
+/// Resolve an NSRunningApplication by PID and return its bundle
+/// identifier. Used by the Composer save path: the user's prior app
+/// was snapshotted on summon via `PrevFrontmostPid`, and this is
+/// how we turn the stored PID into the human-recognisable
+/// `source_app` field.
+#[cfg(target_os = "macos")]
+pub fn bundle_id_for_pid(pid: i32) -> Option<String> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSString;
+    if pid <= 0 {
+        return None;
+    }
+    unsafe {
+        let cls: *mut AnyObject =
+            msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+        if cls.is_null() {
+            return None;
+        }
+        let bundle: *mut NSString = msg_send![cls, bundleIdentifier];
+        if bundle.is_null() {
+            return None;
+        }
+        Some((*bundle).to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn bundle_id_for_pid(_pid: i32) -> Option<String> {
+    None
+}
 
 /// Activate the app whose PID was last recorded by
 /// `record_prev_frontmost`. Takes the stored PID (resetting to -1)

@@ -292,24 +292,49 @@ impl Store {
         }
     }
 
-    /// Persist a new Capture. The id is a freshly minted ULID and the
-    /// `created_at` is now (UTC, RFC3339). For `Shot { source: Bytes }`
-    /// the bytes are written to `blobs/<ulid>.<ext>` next to the DB and
-    /// `payload.blob_path` records the resolved path.
+    /// Persist a new Capture. Equivalent to `save_with_source(input, None)`;
+    /// kept as the simple default for tests + paths that have no source
+    /// app to attribute (drag-drop, programmatic seeds).
     pub fn save(&self, input: CaptureInput) -> Result<Capture, StoreError> {
+        self.save_with_source(input, None)
+    }
+
+    /// Persist a new Capture with an optional `source_app` (macOS
+    /// bundle identifier of the frontmost app at capture time). The
+    /// id is a freshly minted ULID and the `created_at` is now (UTC,
+    /// RFC3339). For `Shot { source: Bytes }` the bytes are written
+    /// to `blobs/<ulid>.<ext>` next to the DB and `payload.blob_path`
+    /// records the resolved path.
+    pub fn save_with_source(
+        &self,
+        input: CaptureInput,
+        source_app: Option<String>,
+    ) -> Result<Capture, StoreError> {
         let id = Ulid::new().to_string();
         let kind = input.kind();
         let created_at = now_rfc3339();
         let payload = self.build_payload(&id, &input)?;
         let payload_str = serde_json::to_string(&payload)?;
 
-        let search_text = searchable_text_for_input(&input);
+        // Include source_app in the FTS index so a search for
+        // "safari" surfaces every capture taken while Safari was
+        // frontmost. Concatenate after the payload text with a
+        // space so the tokenizer treats it as a separate token.
+        let mut search_text = searchable_text_for_input(&input);
+        if let Some(s) = source_app.as_deref() {
+            if !s.is_empty() {
+                if !search_text.is_empty() {
+                    search_text.push(' ');
+                }
+                search_text.push_str(s);
+            }
+        }
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO captures (id, kind, created_at, payload, source_app, starred, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, NULL, 0, NULL)",
-            params![&id, kind.as_str(), &created_at, &payload_str],
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL)",
+            params![&id, kind.as_str(), &created_at, &payload_str, &source_app],
         )?;
         // Mirror the row into the FTS5 index. Errors here are
         // logged-and-ignored at the call site; failing the entire
@@ -327,7 +352,7 @@ impl Store {
             kind,
             created_at,
             payload,
-            source_app: None,
+            source_app,
             starred: false,
             deleted_at: None,
             read_at: None,
