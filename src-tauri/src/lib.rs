@@ -4,6 +4,7 @@ pub mod dock;
 pub mod drag_drop;
 pub mod events;
 pub mod kind_detect;
+pub mod mentions;
 pub mod shell;
 pub mod shortcuts;
 pub mod store;

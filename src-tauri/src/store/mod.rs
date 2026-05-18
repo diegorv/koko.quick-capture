@@ -11,6 +11,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
+use crate::mentions::extract_mentions;
+
 /// Settings key for the ULID of the newest Capture at the moment the
 /// user last opened the Inbox. The Dock's unread badge is the count of
 /// non-deleted captures with `id > <this value>`.
@@ -244,6 +246,7 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         Self::migrate(&conn)?;
+        Self::maybe_backfill_mentions(&conn)?;
         let blobs_dir = path
             .parent()
             .map(|p| p.join("blobs"))
@@ -314,9 +317,66 @@ impl Store {
                 capture_id UNINDEXED,
                 text,
                 tokenize='unicode61 remove_diacritics 2'
-            );",
+            );
+            -- Wikilink mentions extracted from Note payloads at save
+            -- time. Lets the Inbox + Archive filter captures by the
+            -- people referenced in `[[Name]]` tokens without scanning
+            -- payload text per query. `name_normalized` is the
+            -- lowercased form used for case-insensitive matching;
+            -- `name` keeps the first-seen casing for display.
+            -- ON DELETE CASCADE because mentions are derived data
+            -- with no value once their owning Capture is gone.
+            CREATE TABLE IF NOT EXISTS capture_mentions (
+                capture_id TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                name_normalized TEXT NOT NULL,
+                PRIMARY KEY (capture_id, name_normalized)
+            );
+            CREATE INDEX IF NOT EXISTS idx_capture_mentions_name_norm
+                ON capture_mentions(name_normalized);",
         )?;
 
+        Ok(())
+    }
+
+    /// One-shot rebuild of the `capture_mentions` index from existing
+    /// Note payloads. Runs at every `open()` but only does work when
+    /// the table is empty and there is at least one Note row to scan
+    /// — so new installs skip the scan, and existing installs catch
+    /// up exactly once. Subsequent saves keep the index current
+    /// inline in `save_with_context`.
+    fn maybe_backfill_mentions(conn: &Connection) -> Result<(), StoreError> {
+        let mentions_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM capture_mentions",
+            [],
+            |r| r.get(0),
+        )?;
+        if mentions_count > 0 {
+            return Ok(());
+        }
+        let notes_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM captures
+             WHERE kind = 'Note' AND deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )?;
+        if notes_count == 0 {
+            return Ok(());
+        }
+        let mut stmt = conn.prepare(
+            "SELECT id, payload FROM captures
+             WHERE kind = 'Note' AND deleted_at IS NULL",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (id, payload) = row?;
+            let parsed: serde_json::Value = serde_json::from_str(&payload)?;
+            if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
+                index_mentions_into(conn, &id, text)?;
+            }
+        }
         Ok(())
     }
 
@@ -431,6 +491,18 @@ impl Store {
             params![&id, &search_text],
         ) {
             eprintln!("fts5 insert failed for {id}: {e}");
+        }
+
+        // Wikilink mentions index. Note is the only kind that carries
+        // user-typed wikilinks today (Composer's [[ autocomplete);
+        // other kinds get no mention rows. Insert failures are
+        // logged-and-ignored for the same reason as FTS — the
+        // derived index can be rebuilt from payload but the source
+        // of truth (the capture row) must not fail to save.
+        if let CaptureInput::Note { text } = &input {
+            if let Err(e) = index_mentions_into(&conn, &id, text) {
+                eprintln!("mentions index insert failed for {id}: {e}");
+            }
         }
 
         let capture = Capture {
@@ -664,6 +736,25 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(n as u64)
+    }
+
+    /// List the distinct `[[Name]]` mentions on a single capture,
+    /// alpha-sorted by lowercased name. Used by the detail pane to
+    /// render mention chips alongside the payload.
+    pub fn mentions_for_capture(&self, id: &Ulid) -> Result<Vec<String>, StoreError> {
+        let id_str = id.to_string();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT name FROM capture_mentions
+             WHERE capture_id = ?1
+             ORDER BY name_normalized ASC",
+        )?;
+        let rows = stmt.query_map(params![&id_str], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Count of all un-routed, non-deleted captures. Drives the
@@ -1181,6 +1272,35 @@ fn is_unique_violation(err: &rusqlite::Error) -> bool {
 
 /// Flatten a `CaptureInput` into the text we want indexed by FTS5.
 /// Per-kind so we capture every searchable surface (URLs for Link,
+/// Insert the mentions extracted from `text` into the
+/// `capture_mentions` table, deduped per capture by lowercased name.
+/// Idempotent via the (capture_id, name_normalized) primary key —
+/// re-running for the same capture is a no-op rather than a
+/// constraint violation, which keeps the backfill scan safe to
+/// repeat. Free function so it can be reused both from
+/// `save_with_context` and from the backfill scan in
+/// `maybe_backfill_mentions`.
+fn index_mentions_into(
+    conn: &Connection,
+    capture_id: &str,
+    text: &str,
+) -> Result<(), rusqlite::Error> {
+    let names = extract_mentions(text);
+    if names.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "INSERT OR IGNORE INTO capture_mentions
+         (capture_id, name, name_normalized)
+         VALUES (?1, ?2, ?3)",
+    )?;
+    for name in names {
+        let normalized = name.to_lowercase();
+        stmt.execute(params![capture_id, &name, &normalized])?;
+    }
+    Ok(())
+}
+
 /// file names for File, path for Shot, plain text for Note / Clip)
 /// without dumping the raw JSON keys into the index.
 fn searchable_text_for_input(input: &CaptureInput) -> String {
