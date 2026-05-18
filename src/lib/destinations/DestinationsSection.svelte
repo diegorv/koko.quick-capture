@@ -13,7 +13,10 @@
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import type { Destination } from "$lib/captures/types";
   import { DESTINATIONS_CHANGED } from "$lib/events";
-  import { PALETTE_KEYS, colorHex, type PaletteKey } from "./palette";
+  import { formatError } from "$lib/utils/format-error";
+  import type { PaletteKey } from "./palette";
+  import DestinationDot from "./DestinationDot.svelte";
+  import PaletteSwatches from "./PaletteSwatches.svelte";
 
   type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   type ListenFn = (event: string, handler: () => void) => Promise<UnlistenFn>;
@@ -53,9 +56,11 @@
   let unlisten: UnlistenFn | null = null;
 
   onMount(async () => {
-    await refresh();
+    await refresh({ includeDeleted: true });
     unlisten = await listenFn(DESTINATIONS_CHANGED, () => {
-      void refresh();
+      // Only refetch the deleted list while the section is visible —
+      // mutations to live destinations don't change a hidden list.
+      void refresh({ includeDeleted: showDeleted });
     });
   });
 
@@ -63,16 +68,37 @@
     if (unlisten) unlisten();
   });
 
-  async function refresh() {
+  // First pass on mount loads both lists in parallel so the toggle's
+  // visibility reflects reality. Subsequent `destinations:changed`
+  // events skip the deleted query when the section is collapsed.
+  async function refresh(opts: { includeDeleted: boolean } = { includeDeleted: false }) {
     try {
-      const [liveRows, deletedRows] = await Promise.all([
-        invokeFn("list_destinations") as Promise<Destination[]>,
-        invokeFn("list_deleted_destinations") as Promise<Destination[]>,
-      ]);
-      live = liveRows;
-      deleted = deletedRows;
+      const liveP = invokeFn("list_destinations") as Promise<Destination[]>;
+      if (opts.includeDeleted) {
+        const [liveRows, deletedRows] = await Promise.all([
+          liveP,
+          invokeFn("list_deleted_destinations") as Promise<Destination[]>,
+        ]);
+        live = liveRows;
+        deleted = deletedRows;
+      } else {
+        live = await liveP;
+      }
     } catch (err) {
       console.error("destinations refresh failed", err);
+    }
+  }
+
+  async function toggleDeleted() {
+    showDeleted = !showDeleted;
+    if (showDeleted) {
+      try {
+        deleted = (await invokeFn(
+          "list_deleted_destinations",
+        )) as Destination[];
+      } catch (err) {
+        console.error("list_deleted_destinations failed", err);
+      }
     }
   }
 
@@ -100,7 +126,7 @@
       });
       createDraft = null;
       errorMessage = null;
-      await refresh();
+      await refresh({ includeDeleted: showDeleted });
     } catch (err) {
       errorMessage = formatError(err);
     }
@@ -138,7 +164,7 @@
         color: draft.color,
       });
       cancelEdit(id);
-      await refresh();
+      await refresh({ includeDeleted: showDeleted });
     } catch (err) {
       errorMessage = formatError(err);
     }
@@ -157,7 +183,7 @@
     try {
       await invokeFn("soft_delete_destination", { id });
       pendingDeleteId = null;
-      await refresh();
+      await refresh({ includeDeleted: showDeleted });
     } catch (err) {
       errorMessage = formatError(err);
     }
@@ -166,17 +192,12 @@
   async function restore(id: string) {
     try {
       await invokeFn("restore_destination", { id });
-      await refresh();
+      await refresh({ includeDeleted: showDeleted });
     } catch (err) {
       errorMessage = formatError(err);
     }
   }
 
-  function formatError(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (typeof err === "string") return err;
-    return String(err);
-  }
 </script>
 
 <section class="section" data-testid="destinations-section">
@@ -207,25 +228,10 @@
         }}
         data-testid="create-name-input"
       />
-      <div class="swatches">
-        <button
-          type="button"
-          class="swatch swatch-none"
-          class:selected={createDraft.color === null}
-          aria-label="No color"
-          onclick={() => createDraft && (createDraft.color = null)}
-        ></button>
-        {#each PALETTE_KEYS as key}
-          <button
-            type="button"
-            class="swatch"
-            class:selected={createDraft.color === key}
-            style="background-color: {colorHex(key)};"
-            aria-label={key}
-            onclick={() => createDraft && (createDraft.color = key)}
-          ></button>
-        {/each}
-      </div>
+      <PaletteSwatches
+        selected={createDraft.color}
+        onSelect={(c) => createDraft && (createDraft.color = c)}
+      />
       <div class="form-actions">
         <button type="button" class="primary" onclick={submitCreate}>Save</button>
         <button type="button" class="ghost" onclick={cancelCreate}>Cancel</button>
@@ -255,25 +261,10 @@
                 if (e.key === "Escape") cancelEdit(dest.id);
               }}
             />
-            <div class="swatches">
-              <button
-                type="button"
-                class="swatch swatch-none"
-                class:selected={editDrafts[dest.id].color === null}
-                aria-label="No color"
-                onclick={() => (editDrafts[dest.id].color = null)}
-              ></button>
-              {#each PALETTE_KEYS as key}
-                <button
-                  type="button"
-                  class="swatch"
-                  class:selected={editDrafts[dest.id].color === key}
-                  style="background-color: {colorHex(key)};"
-                  aria-label={key}
-                  onclick={() => (editDrafts[dest.id].color = key)}
-                ></button>
-              {/each}
-            </div>
+            <PaletteSwatches
+              selected={editDrafts[dest.id].color}
+              onSelect={(c) => (editDrafts[dest.id].color = c)}
+            />
             <div class="form-actions">
               <button
                 type="button"
@@ -289,15 +280,7 @@
           </div>
         {:else}
           <span class="row-main">
-            {#if dest.color}
-              <span
-                class="dot"
-                style="background-color: {colorHex(dest.color)};"
-                aria-hidden="true"
-              ></span>
-            {:else}
-              <span class="dot dot-empty" aria-hidden="true"></span>
-            {/if}
+            <DestinationDot color={dest.color} />
             <span class="name">{dest.name}</span>
           </span>
           <span class="row-actions">
@@ -350,7 +333,7 @@
       <button
         type="button"
         class="deleted-toggle"
-        onclick={() => (showDeleted = !showDeleted)}
+        onclick={toggleDeleted}
         aria-expanded={showDeleted}
       >
         {showDeleted ? "▼" : "▶"} Soft-deleted ({deleted.length})
@@ -360,15 +343,7 @@
           {#each deleted as dest (dest.id)}
             <li class="row deleted-row" data-testid="deleted-row">
               <span class="row-main">
-                {#if dest.color}
-                  <span
-                    class="dot"
-                    style="background-color: {colorHex(dest.color)};"
-                    aria-hidden="true"
-                  ></span>
-                {:else}
-                  <span class="dot dot-empty" aria-hidden="true"></span>
-                {/if}
+                <DestinationDot color={dest.color} />
                 <span class="name">{dest.name}</span>
               </span>
               <span class="row-actions">
@@ -541,38 +516,6 @@
     }
   }
 
-  .swatches {
-    display: flex;
-    gap: 0.35rem;
-    flex-wrap: wrap;
-  }
-  .swatch {
-    width: 1.2rem;
-    height: 1.2rem;
-    border-radius: 999px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    cursor: pointer;
-    padding: 0;
-    transition: transform 80ms ease;
-  }
-  .swatch:hover {
-    transform: scale(1.08);
-  }
-  .swatch.selected {
-    outline: 2px solid currentColor;
-    outline-offset: 1.5px;
-  }
-  .swatch-none {
-    background:
-      linear-gradient(
-        45deg,
-        rgba(0, 0, 0, 0.1) 0%,
-        transparent 50%,
-        rgba(0, 0, 0, 0.1) 100%
-      );
-    background-color: transparent !important;
-  }
-
   .form-actions {
     display: flex;
     gap: 0.4rem;
@@ -614,21 +557,6 @@
     white-space: nowrap;
   }
 
-  .dot {
-    width: 0.7rem;
-    height: 0.7rem;
-    border-radius: 999px;
-    flex-shrink: 0;
-  }
-  .dot-empty {
-    border: 1px dashed rgba(0, 0, 0, 0.2);
-    background: transparent;
-  }
-  @media (prefers-color-scheme: dark) {
-    .dot-empty {
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-  }
 
   .row-actions {
     display: flex;

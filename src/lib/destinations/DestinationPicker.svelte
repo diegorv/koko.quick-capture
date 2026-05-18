@@ -17,7 +17,10 @@
   import { tick } from "svelte";
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import type { Destination } from "$lib/captures/types";
-  import { PALETTE_KEYS, colorHex, type PaletteKey } from "./palette";
+  import { formatError } from "$lib/utils/format-error";
+  import type { PaletteKey } from "./palette";
+  import DestinationDot from "./DestinationDot.svelte";
+  import PaletteSwatches from "./PaletteSwatches.svelte";
 
   type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -208,11 +211,6 @@
     }
   }
 
-  function formatError(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (typeof err === "string") return err;
-    return String(err);
-  }
 </script>
 
 {#if open}
@@ -265,15 +263,7 @@
               }}
               onmouseenter={() => (highlightIdx = idx)}
             >
-              {#if dest.color}
-                <span
-                  class="dot"
-                  style="background-color: {colorHex(dest.color)};"
-                  aria-hidden="true"
-                ></span>
-              {:else}
-                <span class="dot dot-empty" aria-hidden="true"></span>
-              {/if}
+              <DestinationDot color={dest.color} />
               <span class="name">{dest.name}</span>
             </li>
           {/each}
@@ -296,24 +286,11 @@
           onkeydown={handleCreateKeydown}
           data-testid="picker-create-input"
         />
-        <div class="swatches">
-          <button
-            type="button"
-            class="swatch swatch-none"
-            class:selected={createDraft.color === null}
-            aria-label="No color"
-            onclick={() => (createDraft.color = null)}
-          ></button>
-          {#each PALETTE_KEYS as key}
-            <button
-              type="button"
-              class="swatch"
-              class:selected={createDraft.color === key}
-              style="background-color: {colorHex(key)};"
-              aria-label={key}
-              onclick={() => (createDraft.color = key)}
-            ></button>
-          {/each}
+        <div class="swatches-row">
+          <PaletteSwatches
+            selected={createDraft.color}
+            onSelect={(c) => (createDraft.color = c)}
+          />
         </div>
         <footer class="footer">
           <button
@@ -417,22 +394,6 @@
   .name {
     font-size: 0.9rem;
   }
-  .dot {
-    width: 0.7rem;
-    height: 0.7rem;
-    border-radius: 999px;
-    flex-shrink: 0;
-  }
-  .dot-empty {
-    border: 1px dashed rgba(0, 0, 0, 0.2);
-    background: transparent;
-  }
-  @media (prefers-color-scheme: dark) {
-    .dot-empty {
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-  }
-
   .hint {
     padding: 0.6rem 0.9rem;
     color: rgba(0, 0, 0, 0.55);
@@ -488,37 +449,8 @@
     gap: 0.6rem;
     padding: 0 0 0.55rem;
   }
-  .swatches {
-    display: flex;
-    gap: 0.35rem;
-    flex-wrap: wrap;
+  .swatches-row {
     padding: 0 0.9rem;
-  }
-  .swatch {
-    width: 1.2rem;
-    height: 1.2rem;
-    border-radius: 999px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    cursor: pointer;
-    padding: 0;
-    transition: transform 80ms ease;
-  }
-  .swatch:hover {
-    transform: scale(1.08);
-  }
-  .swatch.selected {
-    outline: 2px solid currentColor;
-    outline-offset: 1.5px;
-  }
-  .swatch-none {
-    background:
-      linear-gradient(
-        45deg,
-        rgba(0, 0, 0, 0.1) 0%,
-        transparent 50%,
-        rgba(0, 0, 0, 0.1) 100%
-      );
-    background-color: transparent !important;
   }
 
   .primary,

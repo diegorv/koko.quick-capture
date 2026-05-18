@@ -22,7 +22,7 @@
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
   import MainNav from "$lib/main/MainNav.svelte";
   import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
-  import { colorHex } from "$lib/destinations/palette";
+  import DestinationDot from "$lib/destinations/DestinationDot.svelte";
 
   const PAGE_SIZE = 100;
 
@@ -232,21 +232,26 @@
 
   onMount(async () => {
     await refresh();
-    unlistenCaptures = await listenFn(CAPTURES_CHANGED, () => {
-      void refresh();
-    });
-    unlistenDestinations = await listenFn(DESTINATIONS_CHANGED, () => {
-      void refresh();
-    });
-    unlistenNavigate = await listenFn(VIEW_OPEN_INBOX, () => {
-      void goto("/inbox");
-    });
+    // Listener registration is fire-and-forget after setup — fire all
+    // three in parallel so mount completes faster.
+    [unlistenCaptures, unlistenDestinations, unlistenNavigate] =
+      await Promise.all([
+        listenFn(CAPTURES_CHANGED, () => {
+          void refresh();
+        }),
+        listenFn(DESTINATIONS_CHANGED, () => {
+          void refresh();
+        }),
+        listenFn(VIEW_OPEN_INBOX, () => {
+          void goto("/inbox");
+        }),
+      ]);
   });
 
   onDestroy(() => {
-    if (unlistenCaptures) unlistenCaptures();
-    if (unlistenDestinations) unlistenDestinations();
-    if (unlistenNavigate) unlistenNavigate();
+    unlistenCaptures?.();
+    unlistenDestinations?.();
+    unlistenNavigate?.();
   });
 </script>
 
@@ -273,15 +278,7 @@
         onclick={() => selectFilter(dest.id)}
         data-testid="filter-chip"
       >
-        {#if dest.color}
-          <span
-            class="dot"
-            style="background-color: {colorHex(dest.color)};"
-            aria-hidden="true"
-          ></span>
-        {:else}
-          <span class="dot dot-empty" aria-hidden="true"></span>
-        {/if}
+        <DestinationDot color={dest.color} size="0.6rem" />
         <span class="chip-name">{dest.name}</span>
         <span class="chip-count">{countsByDestination.get(dest.id) ?? 0}</span>
       </button>
@@ -449,22 +446,6 @@
   @media (prefers-color-scheme: dark) {
     .chip-count {
       background: rgba(255, 255, 255, 0.1);
-    }
-  }
-
-  .dot {
-    width: 0.6rem;
-    height: 0.6rem;
-    border-radius: 999px;
-    flex-shrink: 0;
-  }
-  .dot-empty {
-    border: 1px dashed rgba(0, 0, 0, 0.2);
-    background: transparent;
-  }
-  @media (prefers-color-scheme: dark) {
-    .dot-empty {
-      border-color: rgba(255, 255, 255, 0.2);
     }
   }
 

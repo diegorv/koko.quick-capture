@@ -977,38 +977,24 @@ impl Store {
         destination_filter: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Capture>, StoreError> {
+        // Single statement with an `IFNULL(?, destination_id) =
+        // destination_id` clause that becomes a no-op when the filter
+        // is None — saves a second prepared statement per call and
+        // keeps the SQL in one place.
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
+             FROM captures
+             WHERE deleted_at IS NULL
+               AND destination_id IS NOT NULL
+               AND destination_id = COALESCE(?1, destination_id)
+             ORDER BY routed_at DESC, id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![destination_filter, limit], row_to_capture)?;
         let mut out = Vec::new();
-        match destination_filter {
-            Some(dest_id) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
-                     FROM captures
-                     WHERE deleted_at IS NULL
-                       AND destination_id IS NOT NULL
-                       AND destination_id = ?1
-                     ORDER BY routed_at DESC, id DESC
-                     LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![dest_id, limit], row_to_capture)?;
-                for row in rows {
-                    out.push(row??);
-                }
-            }
-            None => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
-                     FROM captures
-                     WHERE deleted_at IS NULL
-                       AND destination_id IS NOT NULL
-                     ORDER BY routed_at DESC, id DESC
-                     LIMIT ?1",
-                )?;
-                let rows = stmt.query_map(params![limit], row_to_capture)?;
-                for row in rows {
-                    out.push(row??);
-                }
-            }
+        for row in rows {
+            out.push(row??);
         }
         Ok(out)
     }
@@ -1027,42 +1013,24 @@ impl Store {
             return Ok(Vec::new());
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
+             FROM captures c
+             JOIN captures_fts f ON f.capture_id = c.id
+             WHERE captures_fts MATCH ?1
+               AND c.deleted_at IS NULL
+               AND c.destination_id IS NOT NULL
+               AND c.destination_id = COALESCE(?2, c.destination_id)
+             ORDER BY rank, c.routed_at DESC, c.id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![&match_expr, destination_filter, limit],
+            row_to_capture,
+        )?;
         let mut out = Vec::new();
-        match destination_filter {
-            Some(dest_id) => {
-                let mut stmt = conn.prepare(
-                    "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
-                     FROM captures c
-                     JOIN captures_fts f ON f.capture_id = c.id
-                     WHERE captures_fts MATCH ?1
-                       AND c.deleted_at IS NULL
-                       AND c.destination_id IS NOT NULL
-                       AND c.destination_id = ?2
-                     ORDER BY rank, c.routed_at DESC, c.id DESC
-                     LIMIT ?3",
-                )?;
-                let rows =
-                    stmt.query_map(params![&match_expr, dest_id, limit], row_to_capture)?;
-                for row in rows {
-                    out.push(row??);
-                }
-            }
-            None => {
-                let mut stmt = conn.prepare(
-                    "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
-                     FROM captures c
-                     JOIN captures_fts f ON f.capture_id = c.id
-                     WHERE captures_fts MATCH ?1
-                       AND c.deleted_at IS NULL
-                       AND c.destination_id IS NOT NULL
-                     ORDER BY rank, c.routed_at DESC, c.id DESC
-                     LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![&match_expr, limit], row_to_capture)?;
-                for row in rows {
-                    out.push(row??);
-                }
-            }
+        for row in rows {
+            out.push(row??);
         }
         Ok(out)
     }
