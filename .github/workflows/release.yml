@@ -42,10 +42,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
-          channel_re='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc\.[0-9]+))?$'
+          channel_re='^v?[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc\.[0-9]+))?$'
           if ! [[ "$TAG" =~ $channel_re ]]; then
             echo "::error::Tag '$TAG' does not match an accepted release channel pattern."
-            echo "::error::Accepted: X.Y.Z (stable), X.Y.Z-alpha, X.Y.Z-beta, X.Y.Z-rc.N"
+            echo "::error::Accepted: X.Y.Z (stable), X.Y.Z-alpha, X.Y.Z-beta, X.Y.Z-rc.N (optional 'v' prefix)"
             exit 1
           fi
           echo "Tag '$TAG' matches accepted channel pattern."
