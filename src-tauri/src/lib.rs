@@ -24,7 +24,8 @@ use tauri_plugin_global_shortcut::{
 use crate::commands::save_dropped_files_with_store;
 use crate::dock::{default_context_menu, FullscreenObserver};
 use crate::events::{
-    CAPTURES_CHANGED, DOCK_DRAG_ENTER, DOCK_DRAG_LEAVE, DOCK_PULSE, TRAY_OPEN_INBOX,
+    CAPTURES_CHANGED, DOCK_DRAG_ENTER, DOCK_DRAG_LEAVE, DOCK_PULSE, TRAY_OPEN_ARCHIVE,
+    TRAY_OPEN_INBOX,
 };
 use crate::shortcuts::{default_registry, ShortcutBinding, ShortcutId};
 use crate::store::Store;
@@ -147,6 +148,10 @@ pub(crate) fn tray_menu_item_icon(item: TrayMenuItem, stroke: &str) -> tauri::im
     let template = match item {
         TrayMenuItem::OpenComposer => SQUARE_PEN_SVG,
         TrayMenuItem::OpenInbox => INBOX_SVG,
+        // The Archive item reuses the Inbox glyph; both surfaces are
+        // "lists of Captures" and a dedicated archive icon would just
+        // be noise.
+        TrayMenuItem::OpenArchive => INBOX_SVG,
         TrayMenuItem::OpenSettings => SETTINGS_SVG,
         TrayMenuItem::Quit => X_SVG,
     };
@@ -226,6 +231,7 @@ fn tray_menu_item_accelerator(item: TrayMenuItem) -> &'static str {
     match item {
         TrayMenuItem::OpenComposer => "Ctrl+Alt+Cmd+Space",
         TrayMenuItem::OpenInbox => "Ctrl+Alt+Cmd+I",
+        TrayMenuItem::OpenArchive => "Ctrl+Alt+Cmd+A",
         // No global shortcut bound for Settings yet — the accelerator
         // hint is display-only on every menu item anyway, so Cmd+,
         // (the macOS convention) is shown for familiarity even
@@ -248,6 +254,7 @@ fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
         ShortcutId::OpenComposer => commands::show_composer(app),
         ShortcutId::CaptureClipboard => commands::capture_clipboard_and_broadcast(app),
         ShortcutId::OpenInbox => commands::show_inbox(app),
+        ShortcutId::OpenArchive => commands::show_archive(app),
     }
 }
 
@@ -267,6 +274,9 @@ fn dispatch_menu_item(app: &tauri::AppHandle, item: TrayMenuItem) {
         TrayMenuItem::OpenComposer => commands::show_composer(app),
         TrayMenuItem::OpenInbox => {
             let _ = app.emit(TRAY_OPEN_INBOX, ());
+        }
+        TrayMenuItem::OpenArchive => {
+            let _ = app.emit(TRAY_OPEN_ARCHIVE, ());
         }
         TrayMenuItem::OpenSettings => commands::show_settings(app),
         TrayMenuItem::Quit => {
@@ -413,6 +423,11 @@ pub fn run() {
             let inbox_app = app.handle().clone();
             app.listen(TRAY_OPEN_INBOX, move |_evt| {
                 commands::show_inbox(&inbox_app);
+            });
+
+            let archive_app = app.handle().clone();
+            app.listen(TRAY_OPEN_ARCHIVE, move |_evt| {
+                commands::show_archive(&archive_app);
             });
 
             // Tray menu: build from the testable registry so the

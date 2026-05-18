@@ -28,14 +28,16 @@ describe("inbox page", () => {
     ];
     const listFn = vi.fn(async (_cursor: string | null, _limit: number) => initial);
 
-    // Capture the listen handler so the test can fire a synthetic event.
+    // Capture the captures:changed handler specifically — the page
+    // also registers a navigation listener on `view:open_archive`
+    // which we ignore here.
     let fire: ((payload: Capture) => void) | null = null;
     const listenFn = vi.fn(
       async (
-        _event: string,
+        event: string,
         handler: (payload: Capture) => void,
       ): Promise<UnlistenFn> => {
-        fire = handler;
+        if (event === "captures:changed") fire = handler;
         return () => {};
       },
     );
@@ -63,10 +65,10 @@ describe("inbox page", () => {
     let fire: ((payload: Capture) => void) | null = null;
     const listenFn = vi.fn(
       async (
-        _event: string,
+        event: string,
         handler: (payload: Capture) => void,
       ): Promise<UnlistenFn> => {
-        fire = handler;
+        if (event === "captures:changed") fire = handler;
         return () => {};
       },
     );
@@ -86,5 +88,27 @@ describe("inbox page", () => {
 
     const rows = await findAllByRole("option");
     expect(rows.length).toBe(2);
+  });
+
+  it("navigates to /archive when view:open_archive fires (ADR-0010)", async () => {
+    const gotoMod = await import("$app/navigation");
+    const gotoSpy = vi.spyOn(gotoMod, "goto");
+
+    const listFn = vi.fn(async () => []);
+    let fire: (() => void) | null = null;
+    const listenFn = vi.fn(
+      async (event: string, handler: () => void): Promise<UnlistenFn> => {
+        if (event === "view:open_archive") fire = handler;
+        return () => {};
+      },
+    );
+    const invokeFn = vi.fn(async () => 0);
+
+    render(Page, { props: { listFn, listenFn, invokeFn } });
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fire).not.toBeNull();
+    fire!();
+    expect(gotoSpy).toHaveBeenCalledWith("/archive");
   });
 });

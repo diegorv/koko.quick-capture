@@ -11,6 +11,7 @@
 pub enum TrayMenuItem {
     OpenComposer,
     OpenInbox,
+    OpenArchive,
     OpenSettings,
     Quit,
 }
@@ -29,7 +30,7 @@ pub struct TrayMenuBinding {
 }
 
 /// Menu order is the visual order shown to the user: Open Composer,
-/// Open Inbox, Quit.
+/// Open Inbox, Open Archive, Settings, Quit.
 pub fn default_menu() -> Vec<TrayMenuBinding> {
     vec![
         TrayMenuBinding {
@@ -43,6 +44,12 @@ pub fn default_menu() -> Vec<TrayMenuBinding> {
             label: "Open Inbox",
             event: "tray:open_inbox",
             menu_id: "tray:open_inbox",
+        },
+        TrayMenuBinding {
+            item: TrayMenuItem::OpenArchive,
+            label: "Open Archive…",
+            event: "tray:open_archive",
+            menu_id: "tray:open_archive",
         },
         TrayMenuBinding {
             item: TrayMenuItem::OpenSettings,

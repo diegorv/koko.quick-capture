@@ -23,6 +23,7 @@ use crate::store::{Capture, CaptureContext, CaptureInput, CaptureKind, Destinati
 use crate::events::{
     CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DESTINATIONS_CHANGED as DESTINATIONS_CHANGED_EVENT,
     DOCK_PULSE as DOCK_PULSE_EVENT, DOCK_UNREAD_CHANGED as DOCK_UNREAD_CHANGED_EVENT, OPEN_COMPOSER,
+    VIEW_OPEN_ARCHIVE, VIEW_OPEN_INBOX,
 };
 
 /// Thin payload emitted with `captures:changed` on star / soft-delete.
@@ -412,7 +413,9 @@ pub fn show_composer(app: &AppHandle) {
 /// macOS activation policy to Regular so Cmd+Tab surfaces the app
 /// while the Inbox is on screen, then shows + focuses the window.
 /// The close path (`hide_inbox` command + the window's CloseRequested
-/// handler) reverts the policy.
+/// handler) reverts the policy. After the window is on screen, emits
+/// `VIEW_OPEN_INBOX` so the active route navigates to `/inbox` if it
+/// is currently on `/archive`.
 pub fn show_inbox(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -421,6 +424,22 @@ pub fn show_inbox(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
+        let _ = handle.emit(VIEW_OPEN_INBOX, ());
+    });
+}
+
+/// Bring the main window to screen on the Archive view. Mirrors
+/// `show_inbox` but emits `VIEW_OPEN_ARCHIVE` so the active route
+/// navigates to `/archive` once the window is up.
+pub fn show_archive(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        crate::set_inbox_activation_policy(&handle, true);
+        if let Some(window) = handle.get_webview_window("inbox") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = handle.emit(VIEW_OPEN_ARCHIVE, ());
     });
 }
 

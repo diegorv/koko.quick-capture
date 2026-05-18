@@ -13,6 +13,7 @@ pub enum ShortcutId {
     OpenComposer,
     CaptureClipboard,
     OpenInbox,
+    OpenArchive,
 }
 
 /// One row in the registry: which accelerator triggers it, and which
@@ -44,6 +45,11 @@ pub fn default_registry() -> Vec<ShortcutBinding> {
             id: ShortcutId::OpenInbox,
             accelerator: "Ctrl+Alt+Cmd+I",
             event: "open_inbox",
+        },
+        ShortcutBinding {
+            id: ShortcutId::OpenArchive,
+            accelerator: "Ctrl+Alt+Cmd+A",
+            event: "open_archive",
         },
     ]
 }

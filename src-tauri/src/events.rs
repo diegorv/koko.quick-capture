@@ -63,3 +63,18 @@ pub const TRAY_OPEN_INBOX: &str = "tray:open_inbox";
 /// `list_destinations`. Settings, the triage picker, and the Archive
 /// filter bar all listen.
 pub const DESTINATIONS_CHANGED: &str = "destinations:changed";
+
+/// Emitted by the tray / dock menus' "Open Archive…" item. Rust
+/// subscribes via `app.listen` and shows the main window navigated
+/// to the Archive view. Mirrors `TRAY_OPEN_INBOX`.
+pub const TRAY_OPEN_ARCHIVE: &str = "tray:open_archive";
+
+/// Front-end navigation signal emitted after `show_inbox` brings the
+/// main window to screen. The currently mounted route listens and
+/// calls `goto('/inbox')` if it is not already there so the
+/// shortcut / menu always lands the user on the Inbox.
+pub const VIEW_OPEN_INBOX: &str = "view:open_inbox";
+
+/// Front-end navigation signal emitted after `show_archive`. Mirror
+/// of `VIEW_OPEN_INBOX` for the Archive surface.
+pub const VIEW_OPEN_ARCHIVE: &str = "view:open_archive";

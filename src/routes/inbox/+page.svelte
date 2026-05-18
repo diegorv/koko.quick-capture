@@ -13,8 +13,9 @@
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
+  import { goto } from "$app/navigation";
   import type { Capture } from "$lib/captures/types";
-  import { CAPTURES_CHANGED } from "$lib/events";
+  import { CAPTURES_CHANGED, VIEW_OPEN_ARCHIVE } from "$lib/events";
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
   import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
@@ -70,6 +71,7 @@
   let loading = $state(false);
   let exhausted = $state(false);
   let unlisten: UnlistenFn | null = null;
+  let unlistenNavigate: UnlistenFn | null = null;
   let totalCount = $state<number | null>(null);
   let unreadCount = $state<number | null>(null);
   let now = $state(Date.now());
@@ -444,10 +446,18 @@
     } catch (err) {
       console.error("listen captures:changed failed", err);
     }
+    try {
+      unlistenNavigate = await listenFn(VIEW_OPEN_ARCHIVE, () => {
+        void goto("/archive");
+      });
+    } catch (err) {
+      console.error("listen view:open_archive failed", err);
+    }
   });
 
   onDestroy(() => {
     unlisten?.();
+    unlistenNavigate?.();
     if (nowTimer !== null) {
       clearInterval(nowTimer);
       nowTimer = null;

@@ -38,3 +38,15 @@ fn default_registry_contains_open_inbox_binding() {
     assert_eq!(open_inbox.accelerator, "Ctrl+Alt+Cmd+I");
     assert_eq!(open_inbox.event, "open_inbox");
 }
+
+#[test]
+fn default_registry_contains_open_archive_binding() {
+    let bindings = default_registry();
+    let open_archive = bindings
+        .iter()
+        .find(|b| b.id == ShortcutId::OpenArchive)
+        .expect("OpenArchive binding must be present");
+
+    assert_eq!(open_archive.accelerator, "Ctrl+Alt+Cmd+A");
+    assert_eq!(open_archive.event, "open_archive");
+}

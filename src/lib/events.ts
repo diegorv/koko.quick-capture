@@ -16,3 +16,6 @@ export const DOCK_FULLSCREEN_ENTERED = "dock:fullscreen:entered" as const;
 export const DOCK_FULLSCREEN_EXITED = "dock:fullscreen:exited" as const;
 export const TRAY_OPEN_INBOX = "tray:open_inbox" as const;
 export const DESTINATIONS_CHANGED = "destinations:changed" as const;
+export const TRAY_OPEN_ARCHIVE = "tray:open_archive" as const;
+export const VIEW_OPEN_INBOX = "view:open_inbox" as const;
+export const VIEW_OPEN_ARCHIVE = "view:open_archive" as const;

@@ -205,6 +205,33 @@ describe("archive page", () => {
     );
   });
 
+  it("navigates to /inbox when view:open_inbox fires (ADR-0010 slice 7)", async () => {
+    const gotoMod = await import("$app/navigation");
+    const gotoSpy = vi.spyOn(gotoMod, "goto");
+
+    const invokeFn = makeInvoke({
+      list_archive: () => [],
+      list_destinations: () => [],
+      inbox_count: () => 0,
+    });
+    let fire: (() => void) | null = null;
+    const listenFn = vi.fn(
+      async (event: string, handler: (payload: unknown) => void): Promise<UnlistenFn> => {
+        if (event === "view:open_inbox") fire = handler as () => void;
+        return () => {};
+      },
+    );
+
+    render(Page, {
+      props: { invokeFn, listenFn, hideFn: vi.fn(async () => {}) },
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fire).not.toBeNull();
+    fire!();
+    expect(gotoSpy).toHaveBeenCalledWith("/inbox");
+  });
+
   it("surfaces the soft-deleted-destination hint when an orphaned capture is present", async () => {
     const dests: Destination[] = []; // No live destinations.
     const capt = [mkCapture("C1", "orphan", "DGHOST")];

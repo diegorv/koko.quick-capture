@@ -11,8 +11,13 @@
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
+  import { goto } from "$app/navigation";
   import type { Capture, Destination } from "$lib/captures/types";
-  import { CAPTURES_CHANGED, DESTINATIONS_CHANGED } from "$lib/events";
+  import {
+    CAPTURES_CHANGED,
+    DESTINATIONS_CHANGED,
+    VIEW_OPEN_INBOX,
+  } from "$lib/events";
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
   import MainNav from "$lib/main/MainNav.svelte";
@@ -53,6 +58,7 @@
 
   let unlistenCaptures: UnlistenFn | null = null;
   let unlistenDestinations: UnlistenFn | null = null;
+  let unlistenNavigate: UnlistenFn | null = null;
 
   const destinationsById = $derived.by(() => {
     const map = new Map<string, Destination>();
@@ -232,11 +238,15 @@
     unlistenDestinations = await listenFn(DESTINATIONS_CHANGED, () => {
       void refresh();
     });
+    unlistenNavigate = await listenFn(VIEW_OPEN_INBOX, () => {
+      void goto("/inbox");
+    });
   });
 
   onDestroy(() => {
     if (unlistenCaptures) unlistenCaptures();
     if (unlistenDestinations) unlistenDestinations();
+    if (unlistenNavigate) unlistenNavigate();
   });
 </script>
 

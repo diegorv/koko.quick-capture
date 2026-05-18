@@ -28,12 +28,13 @@ pub struct DockMenuBinding {
     pub menu_id: &'static str,
 }
 
-/// Dock context menu in visual order: Open Composer, Open Inbox, Quit.
-/// Reuses `tray::default_menu()` as the single source of truth for
-/// label + event name; only the `menu_id` differs.
+/// Dock context menu in visual order: Open Composer, Open Inbox,
+/// Open Archive, Settings, Quit. Reuses `tray::default_menu()` as the
+/// single source of truth for label + event name; only the `menu_id`
+/// differs.
 pub fn default_context_menu() -> Vec<DockMenuBinding> {
     let tray = default_menu();
-    debug_assert_eq!(tray.len(), 4, "tray menu shape changed; update dock menu");
+    debug_assert_eq!(tray.len(), 5, "tray menu shape changed; update dock menu");
     vec![
         DockMenuBinding {
             tray: tray[0].clone(),
@@ -45,10 +46,14 @@ pub fn default_context_menu() -> Vec<DockMenuBinding> {
         },
         DockMenuBinding {
             tray: tray[2].clone(),
-            menu_id: "dock:open_settings",
+            menu_id: "dock:open_archive",
         },
         DockMenuBinding {
             tray: tray[3].clone(),
+            menu_id: "dock:open_settings",
+        },
+        DockMenuBinding {
+            tray: tray[4].clone(),
             menu_id: "dock:quit",
         },
     ]

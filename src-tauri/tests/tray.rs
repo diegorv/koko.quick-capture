@@ -5,9 +5,9 @@
 use quick_capture_lib::tray::{default_menu, TrayMenuItem};
 
 #[test]
-fn default_menu_has_four_items_in_order() {
+fn default_menu_has_five_items_in_order() {
     let menu = default_menu();
-    assert_eq!(menu.len(), 4);
+    assert_eq!(menu.len(), 5);
 
     assert_eq!(menu[0].item, TrayMenuItem::OpenComposer);
     assert_eq!(menu[0].label, "Open Composer");
@@ -17,11 +17,15 @@ fn default_menu_has_four_items_in_order() {
     assert_eq!(menu[1].label, "Open Inbox");
     assert_eq!(menu[1].event, "tray:open_inbox");
 
-    assert_eq!(menu[2].item, TrayMenuItem::OpenSettings);
-    assert_eq!(menu[2].label, "Settings…");
-    assert_eq!(menu[2].event, "tray:open_settings");
+    assert_eq!(menu[2].item, TrayMenuItem::OpenArchive);
+    assert_eq!(menu[2].label, "Open Archive…");
+    assert_eq!(menu[2].event, "tray:open_archive");
 
-    assert_eq!(menu[3].item, TrayMenuItem::Quit);
-    assert_eq!(menu[3].label, "Quit");
-    assert_eq!(menu[3].event, "tray:quit");
+    assert_eq!(menu[3].item, TrayMenuItem::OpenSettings);
+    assert_eq!(menu[3].label, "Settings…");
+    assert_eq!(menu[3].event, "tray:open_settings");
+
+    assert_eq!(menu[4].item, TrayMenuItem::Quit);
+    assert_eq!(menu[4].label, "Quit");
+    assert_eq!(menu[4].event, "tray:quit");
 }
