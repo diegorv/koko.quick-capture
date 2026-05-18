@@ -1204,17 +1204,35 @@ pub fn list_people(store: State<'_, Store>) -> Result<Vec<PersonEntry>, String> 
 }
 
 /// Open the native folder picker and return the chosen path, or
-/// `None` if the user cancelled. The plugin handles the macOS
-/// main-thread hop internally. Kept as a Rust command (not a direct
-/// JS call to the dialog plugin) to keep ADR-0004 ("Rust owns all
-/// data and system access") clean and self-consistent.
+/// `None` if the user cancelled. Kept as a Rust command (not a
+/// direct JS call to the dialog plugin) to keep ADR-0004 ("Rust
+/// owns all data and system access") clean and self-consistent.
+///
+/// Uses the async callback API + an mpsc channel + a blocking
+/// thread to await the result. The `blocking_pick_folder` variant
+/// deadlocks here on macOS — the dialog must run on the main
+/// thread and `blocking_pick_folder` blocks the caller waiting for
+/// it; when the caller IS the main thread the dialog never gets a
+/// chance to show. The async command + spawn_blocking pattern
+/// keeps the wait off both the main thread and the tokio worker.
 #[tauri::command]
-pub fn pick_wikilink_source_folder(app: AppHandle) -> Result<Option<String>, String> {
+pub async fn pick_wikilink_source_folder(
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    use std::sync::mpsc;
     use tauri_plugin_dialog::DialogExt;
-    let chosen = app
-        .dialog()
+
+    let (tx, rx) = mpsc::channel();
+    app.dialog()
         .file()
         .set_title("Choose Wikilink source folder")
-        .blocking_pick_folder();
+        .pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        rx.recv().unwrap_or(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(chosen.map(|fp| fp.to_string()))
 }
