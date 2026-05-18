@@ -18,6 +18,7 @@
   import InboxList from "$lib/inbox/InboxList.svelte";
   import InboxDetail from "$lib/inbox/InboxDetail.svelte";
   import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
+  import MainNav from "$lib/main/MainNav.svelte";
 
   const PAGE_SIZE = 50;
   const SCROLL_THRESHOLD_PX = 100;
@@ -462,7 +463,9 @@
 </script>
 
 <div class="inbox" data-testid="inbox">
-  <div class="titlebar" data-tauri-drag-region aria-hidden="true"></div>
+  <div class="titlebar" data-tauri-drag-region aria-hidden="true">
+    <MainNav active="inbox" />
+  </div>
   <div class="panes">
     <div class="list-column">
       <div class="searchbar">
@@ -583,7 +586,7 @@
 <style>
   .inbox {
     display: grid;
-    grid-template-rows: 28px 1fr 24px;
+    grid-template-rows: 40px 1fr 24px;
     height: 100vh;
     width: 100vw;
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -600,6 +603,14 @@
      rule, which is a no-op in some Tauri 2 webview configurations). */
   .titlebar {
     background-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0.25rem;
+  }
+  .titlebar :global(button),
+  .titlebar :global(input) {
+    -webkit-app-region: no-drag;
   }
 
   .panes {

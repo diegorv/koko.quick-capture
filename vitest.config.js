@@ -12,6 +12,14 @@ export default defineConfig({
       // page-level component tests (which load `+page.svelte` files
       // that import via `$lib`) can resolve runtime modules.
       $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
+      // `$app/navigation` (SvelteKit runtime) is normally provided by
+      // the kit plugin, which we are NOT using in this vitest config.
+      // Tests that exercise navigation must inject their own handler;
+      // this stub resolves the import to a no-op so component-level
+      // specs do not blow up loading the module.
+      "$app/navigation": fileURLToPath(
+        new URL("./src/test-stubs/app-navigation.ts", import.meta.url),
+      ),
     },
   },
   test: {
