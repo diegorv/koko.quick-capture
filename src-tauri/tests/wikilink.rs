@@ -5,11 +5,13 @@
 //! "configured but missing/empty on disk" silent-empty contract.
 
 use std::fs;
+use std::path::PathBuf;
 
 use quick_capture_lib::commands::{
     get_wikilink_source_folder_with_store, list_people_with_store,
-    set_wikilink_source_folder_with_store,
+    reveal_wikilink_source_folder_with, set_wikilink_source_folder_with_store,
 };
+use quick_capture_lib::shell::{FakeShell, ShellCall};
 use quick_capture_lib::store::Store;
 use tempfile::{tempdir, TempDir};
 
@@ -110,6 +112,44 @@ fn list_people_returns_sorted_md_files_when_set() {
     let rows = list_people_with_store(&store).unwrap();
     let names: Vec<_> = rows.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, vec!["ana beatriz", "Diego"]);
+}
+
+#[test]
+fn reveal_errors_when_no_folder_is_configured() {
+    let (_db, store) = temp_store();
+    let shell = FakeShell::new();
+    let err = reveal_wikilink_source_folder_with(&shell, &store).unwrap_err();
+    assert!(err.contains("no folder configured"));
+    assert!(shell.calls().is_empty());
+}
+
+#[test]
+fn reveal_errors_when_configured_folder_is_missing_on_disk() {
+    let (_db, store) = temp_store();
+    let people = tempdir().unwrap();
+    let path_str = people.path().to_string_lossy().into_owned();
+    set_wikilink_source_folder_with_store(&store, Some(&path_str)).unwrap();
+    drop(people); // remove on disk
+
+    let shell = FakeShell::new();
+    let err = reveal_wikilink_source_folder_with(&shell, &store).unwrap_err();
+    assert!(err.contains("no longer exists"));
+    assert!(shell.calls().is_empty());
+}
+
+#[test]
+fn reveal_hands_the_path_to_the_shell() {
+    let (_db, store) = temp_store();
+    let people = tempdir().unwrap();
+    let path_str = people.path().to_string_lossy().into_owned();
+    set_wikilink_source_folder_with_store(&store, Some(&path_str)).unwrap();
+
+    let shell = FakeShell::new();
+    reveal_wikilink_source_folder_with(&shell, &store).unwrap();
+    assert_eq!(
+        shell.calls(),
+        vec![ShellCall::RevealInFinder(PathBuf::from(&path_str))],
+    );
 }
 
 #[test]

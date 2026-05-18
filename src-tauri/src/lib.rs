@@ -653,7 +653,8 @@ pub fn run() {
             commands::get_wikilink_source_folder,
             commands::set_wikilink_source_folder,
             commands::list_people,
-            commands::pick_wikilink_source_folder
+            commands::pick_wikilink_source_folder,
+            commands::reveal_wikilink_source_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

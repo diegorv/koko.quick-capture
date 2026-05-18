@@ -146,6 +146,47 @@ describe("WikilinkFolderSection", () => {
     });
   });
 
+  it("invokes reveal_wikilink_source_folder when Reveal in Finder is clicked", async () => {
+    let revealCalls = 0;
+    const invokeFn = makeInvoke({
+      get_wikilink_source_folder: () => "/Users/me/people",
+      reveal_wikilink_source_folder: () => {
+        revealCalls += 1;
+        return null;
+      },
+    });
+
+    const { getByTestId } = render(WikilinkFolderSection, {
+      props: { invokeFn },
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
+        "/Users/me/people",
+      ),
+    );
+
+    await fireEvent.click(getByTestId("wikilink-reveal-btn"));
+    await waitFor(() => expect(revealCalls).toBe(1));
+  });
+
+  it("does not render the Reveal button when the folder is unset", async () => {
+    const invokeFn = makeInvoke({
+      get_wikilink_source_folder: () => null,
+    });
+
+    const { getByTestId } = render(WikilinkFolderSection, {
+      props: { invokeFn },
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
+        "Not set",
+      ),
+    );
+    expect(() => getByTestId("wikilink-reveal-btn")).toThrow();
+  });
+
   it("surfaces a validation error from the Rust setter", async () => {
     let stored: string | null = null;
     const invokeFn = makeInvoke({

@@ -1203,6 +1203,30 @@ pub fn list_people(store: State<'_, Store>) -> Result<Vec<PersonEntry>, String> 
     list_people_with_store(&store)
 }
 
+/// Reveal the configured Wikilink source folder in macOS Finder.
+/// Errors when no folder is set or when the configured folder no
+/// longer exists on disk — the Settings UI calls this only after
+/// confirming a path is present, but the disk state can drift.
+pub fn reveal_wikilink_source_folder_with(
+    shell: &dyn Shell,
+    store: &Store,
+) -> Result<(), String> {
+    let folder = get_wikilink_source_folder_with_store(store)?
+        .ok_or_else(|| "no folder configured".to_string())?;
+    let path = std::path::Path::new(&folder);
+    if !path.exists() {
+        return Err("folder no longer exists on disk".to_string());
+    }
+    shell.reveal_in_finder(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reveal_wikilink_source_folder(
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    reveal_wikilink_source_folder_with(&SystemShell::new(), &store)
+}
+
 /// Open the native folder picker and return the chosen path, or
 /// `None` if the user cancelled. Kept as a Rust command (not a
 /// direct JS call to the dialog plugin) to keep ADR-0004 ("Rust

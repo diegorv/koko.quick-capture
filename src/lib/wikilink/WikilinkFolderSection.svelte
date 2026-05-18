@@ -72,6 +72,16 @@
       busy = false;
     }
   }
+
+  async function revealFolder() {
+    if (busy || folder === null) return;
+    errorMessage = null;
+    try {
+      await invokeFn("reveal_wikilink_source_folder");
+    } catch (err) {
+      errorMessage = formatError(err);
+    }
+  }
 </script>
 
 <section class="section" data-testid="wikilink-folder-section">
@@ -103,6 +113,15 @@
         Choose folder…
       </button>
       {#if folder !== null}
+        <button
+          type="button"
+          class="ghost"
+          disabled={busy}
+          onclick={revealFolder}
+          data-testid="wikilink-reveal-btn"
+        >
+          Reveal in Finder
+        </button>
         <button
           type="button"
           class="ghost"
