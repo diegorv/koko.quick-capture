@@ -600,6 +600,23 @@ impl Store {
         cursor: Option<Ulid>,
         limit: u32,
     ) -> Result<Vec<Capture>, StoreError> {
+        self.list_before_filtered(cursor, None, limit)
+    }
+
+    /// Inbox list with an optional `[[Name]]` mention filter. Behaves
+    /// exactly like `list_before` when `mention_filter` is `None`;
+    /// otherwise narrows to Inbox captures that have an entry in
+    /// `capture_mentions` for the lowercased name. The filter is
+    /// case-insensitive — the caller passes the user-typed form and
+    /// the SQL normalises with `LOWER`.
+    pub fn list_before_filtered(
+        &self,
+        cursor: Option<Ulid>,
+        mention_filter: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
+        let mention_norm = mention_filter.map(|s| s.to_lowercase());
+        let mention_param: Option<&str> = mention_norm.as_deref();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut out = Vec::new();
         match cursor {
@@ -609,10 +626,16 @@ impl Store {
                     "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
                      FROM captures
                      WHERE deleted_at IS NULL AND destination_id IS NULL AND id < ?1
+                       AND (?2 IS NULL OR id IN (
+                            SELECT capture_id FROM capture_mentions
+                            WHERE name_normalized = ?2))
                      ORDER BY id DESC
-                     LIMIT ?2",
+                     LIMIT ?3",
                 )?;
-                let rows = stmt.query_map(params![&cursor_str, limit], row_to_capture)?;
+                let rows = stmt.query_map(
+                    params![&cursor_str, mention_param, limit],
+                    row_to_capture,
+                )?;
                 for row in rows {
                     out.push(row??);
                 }
@@ -622,10 +645,16 @@ impl Store {
                     "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
                      FROM captures
                      WHERE deleted_at IS NULL AND destination_id IS NULL
+                       AND (?1 IS NULL OR id IN (
+                            SELECT capture_id FROM capture_mentions
+                            WHERE name_normalized = ?1))
                      ORDER BY id DESC
-                     LIMIT ?1",
+                     LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![limit], row_to_capture)?;
+                let rows = stmt.query_map(
+                    params![mention_param, limit],
+                    row_to_capture,
+                )?;
                 for row in rows {
                     out.push(row??);
                 }
@@ -682,9 +711,23 @@ impl Store {
     /// return an empty Vec — the caller is expected to fall back to
     /// `list_before` for "no search active".
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<Capture>, StoreError> {
+        self.search_filtered(query, None, limit)
+    }
+
+    /// Inbox FTS search with an optional `[[Name]]` mention filter.
+    /// Same matching semantics as `list_before_filtered` for the
+    /// mention column (case-insensitive against `name_normalized`).
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        mention_filter: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
         let Some(match_expr) = build_fts_match(query) else {
             return Ok(Vec::new());
         };
+        let mention_norm = mention_filter.map(|s| s.to_lowercase());
+        let mention_param: Option<&str> = mention_norm.as_deref();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
@@ -693,10 +736,16 @@ impl Store {
              WHERE captures_fts MATCH ?1
                AND c.deleted_at IS NULL
                AND c.destination_id IS NULL
+               AND (?2 IS NULL OR c.id IN (
+                    SELECT capture_id FROM capture_mentions
+                    WHERE name_normalized = ?2))
              ORDER BY rank, c.id DESC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![&match_expr, limit], row_to_capture)?;
+        let rows = stmt.query_map(
+            params![&match_expr, mention_param, limit],
+            row_to_capture,
+        )?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row??);
@@ -1078,11 +1127,26 @@ impl Store {
         cursor: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Capture>, StoreError> {
+        self.list_archive_filtered(destination_filter, None, cursor, limit)
+    }
+
+    /// Archive list with both a Destination filter (existing) and an
+    /// optional `[[Name]]` mention filter (slice 2 addition). Both
+    /// filters AND together.
+    pub fn list_archive_filtered(
+        &self,
+        destination_filter: Option<&str>,
+        mention_filter: Option<&str>,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
         let parsed = parse_archive_cursor(cursor)?;
         let (cursor_routed_at, cursor_id) = parsed
             .as_ref()
             .map(|(r, i)| (Some(r.as_str()), Some(i.as_str())))
             .unwrap_or((None, None));
+        let mention_norm = mention_filter.map(|s| s.to_lowercase());
+        let mention_param: Option<&str> = mention_norm.as_deref();
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -1094,11 +1158,20 @@ impl Store {
                AND (?2 IS NULL
                     OR routed_at < ?2
                     OR (routed_at = ?2 AND id < ?3))
+               AND (?5 IS NULL OR id IN (
+                    SELECT capture_id FROM capture_mentions
+                    WHERE name_normalized = ?5))
              ORDER BY routed_at DESC, id DESC
              LIMIT ?4",
         )?;
         let rows = stmt.query_map(
-            params![destination_filter, cursor_routed_at, cursor_id, limit],
+            params![
+                destination_filter,
+                cursor_routed_at,
+                cursor_id,
+                limit,
+                mention_param
+            ],
             row_to_capture,
         )?;
         let mut out = Vec::new();
@@ -1118,9 +1191,22 @@ impl Store {
         destination_filter: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Capture>, StoreError> {
+        self.search_archive_filtered(query, destination_filter, None, limit)
+    }
+
+    /// Archive FTS with both Destination + mention filters.
+    pub fn search_archive_filtered(
+        &self,
+        query: &str,
+        destination_filter: Option<&str>,
+        mention_filter: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Capture>, StoreError> {
         let Some(match_expr) = build_fts_match(query) else {
             return Ok(Vec::new());
         };
+        let mention_norm = mention_filter.map(|s| s.to_lowercase());
+        let mention_param: Option<&str> = mention_norm.as_deref();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url, c.destination_id, c.routed_at
@@ -1130,11 +1216,14 @@ impl Store {
                AND c.deleted_at IS NULL
                AND c.destination_id IS NOT NULL
                AND c.destination_id = COALESCE(?2, c.destination_id)
+               AND (?4 IS NULL OR c.id IN (
+                    SELECT capture_id FROM capture_mentions
+                    WHERE name_normalized = ?4))
              ORDER BY rank, c.routed_at DESC, c.id DESC
              LIMIT ?3",
         )?;
         let rows = stmt.query_map(
-            params![&match_expr, destination_filter, limit],
+            params![&match_expr, destination_filter, limit, mention_param],
             row_to_capture,
         )?;
         // (Search is rank-ordered, not chronological, so it doesn't

@@ -219,13 +219,16 @@ pub fn save_dropped_files(
 pub fn list_captures_with_store(
     store: &Store,
     cursor: Option<&str>,
+    mention: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Capture>, String> {
     let parsed = match cursor {
         Some(s) => Some(Ulid::from_str(s).map_err(|e| format!("invalid cursor: {e}"))?),
         None => None,
     };
-    store.list_before(parsed, limit).map_err(|e| e.to_string())
+    store
+        .list_before_filtered(parsed, mention, limit)
+        .map_err(|e| e.to_string())
 }
 
 /// Full-text search across all non-deleted captures. Thin wrapper
@@ -234,27 +237,32 @@ pub fn list_captures_with_store(
 pub fn search_captures_with_store(
     store: &Store,
     query: &str,
+    mention: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Capture>, String> {
-    store.search(query, limit).map_err(|e| e.to_string())
+    store
+        .search_filtered(query, mention, limit)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn search_captures(
     query: String,
+    mention: Option<String>,
     limit: u32,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    search_captures_with_store(&store, &query, limit)
+    search_captures_with_store(&store, &query, mention.as_deref(), limit)
 }
 
 #[tauri::command]
 pub fn list_captures(
     cursor: Option<String>,
+    mention: Option<String>,
     limit: u32,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    list_captures_with_store(&store, cursor.as_deref(), limit)
+    list_captures_with_store(&store, cursor.as_deref(), mention.as_deref(), limit)
 }
 
 /// Toggle the `starred` flag on a capture. Parses `id` as a ULID and
@@ -1072,22 +1080,30 @@ pub fn unroute_capture(
 pub fn list_archive_with_store(
     store: &Store,
     destination_id: Option<&str>,
+    mention: Option<&str>,
     cursor: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Capture>, String> {
     store
-        .list_archive(destination_id, cursor, limit)
+        .list_archive_filtered(destination_id, mention, cursor, limit)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn list_archive(
     destination_id: Option<String>,
+    mention: Option<String>,
     cursor: Option<String>,
     limit: u32,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    list_archive_with_store(&store, destination_id.as_deref(), cursor.as_deref(), limit)
+    list_archive_with_store(
+        &store,
+        destination_id.as_deref(),
+        mention.as_deref(),
+        cursor.as_deref(),
+        limit,
+    )
 }
 
 /// Archive FTS search. Mirrors `search_captures` but scopes results
@@ -1096,10 +1112,11 @@ pub fn search_archive_with_store(
     store: &Store,
     query: &str,
     destination_id: Option<&str>,
+    mention: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Capture>, String> {
     store
-        .search_archive(query, destination_id, limit)
+        .search_archive_filtered(query, destination_id, mention, limit)
         .map_err(|e| e.to_string())
 }
 
@@ -1107,10 +1124,17 @@ pub fn search_archive_with_store(
 pub fn search_archive(
     query: String,
     destination_id: Option<String>,
+    mention: Option<String>,
     limit: u32,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    search_archive_with_store(&store, &query, destination_id.as_deref(), limit)
+    search_archive_with_store(
+        &store,
+        &query,
+        destination_id.as_deref(),
+        mention.as_deref(),
+        limit,
+    )
 }
 
 /// Count of un-routed, non-deleted Captures. Drives the Inbox/Archive
@@ -1225,6 +1249,28 @@ pub fn reveal_wikilink_source_folder(
     store: State<'_, Store>,
 ) -> Result<(), String> {
     reveal_wikilink_source_folder_with(&SystemShell::new(), &store)
+}
+
+/// List the distinct `[[Name]]` mentions on a single capture,
+/// alpha-sorted by lowercased name. Powers the detail pane's
+/// clickable mention chips. Pure pass-through to
+/// `Store::mentions_for_capture` after ULID parsing.
+pub fn list_capture_mentions_with_store(
+    store: &Store,
+    id: &str,
+) -> Result<Vec<String>, String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    store
+        .mentions_for_capture(&parsed)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_capture_mentions(
+    id: String,
+    store: State<'_, Store>,
+) -> Result<Vec<String>, String> {
+    list_capture_mentions_with_store(&store, &id)
 }
 
 /// Open the native folder picker and return the chosen path, or

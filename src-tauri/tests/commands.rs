@@ -58,13 +58,14 @@ fn list_captures_pages_through_cursor() {
         .expect("save c");
 
     // First page (cursor=None): newest first.
-    let first = list_captures_with_store(&store, None, 2).expect("first page");
+    let first = list_captures_with_store(&store, None, None, 2).expect("first page");
     assert_eq!(first.len(), 2);
     assert_eq!(first[0].id, c.id);
     assert_eq!(first[1].id, b.id);
 
     // Second page (cursor=b.id) returns the remaining 1.
-    let second = list_captures_with_store(&store, Some(&b.id), 2).expect("second page");
+    let second =
+        list_captures_with_store(&store, Some(&b.id), None, 2).expect("second page");
     assert_eq!(second.len(), 1);
     assert_eq!(second[0].id, a.id);
 }
@@ -72,7 +73,7 @@ fn list_captures_pages_through_cursor() {
 #[test]
 fn list_captures_rejects_invalid_cursor_string() {
     let (_dir, store) = temp_store();
-    let err = list_captures_with_store(&store, Some("not-a-ulid"), 10)
+    let err = list_captures_with_store(&store, Some("not-a-ulid"), None, 10)
         .expect_err("invalid cursor must error");
     assert!(
         err.to_lowercase().contains("cursor"),
@@ -120,7 +121,7 @@ fn delete_capture_hides_from_list() {
     delete_capture_with_store(&store, &drop.id).expect("delete");
 
     // Soft-deleted row no longer surfaces in list_captures.
-    let listed = list_captures_with_store(&store, None, 10).expect("list");
+    let listed = list_captures_with_store(&store, None, None, 10).expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, keep.id);
 
@@ -317,7 +318,7 @@ fn search_captures_finds_indexed_note_text() {
     save_note_with_store(&store, "hello world", CaptureContext::default()).expect("save");
     save_note_with_store(&store, "completely unrelated", CaptureContext::default()).expect("save");
 
-    let results = search_captures_with_store(&store, "hello", 10).expect("search");
+    let results = search_captures_with_store(&store, "hello", None, 10).expect("search");
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].payload.get("text").and_then(|v| v.as_str()),
@@ -330,7 +331,7 @@ fn search_captures_supports_prefix_match() {
     let (_dir, store) = temp_store();
     save_note_with_store(&store, "engineering notebook", CaptureContext::default()).expect("save");
 
-    let results = search_captures_with_store(&store, "engin", 10).expect("search");
+    let results = search_captures_with_store(&store, "engin", None, 10).expect("search");
     assert_eq!(results.len(), 1);
 }
 
@@ -341,7 +342,7 @@ fn search_captures_excludes_soft_deleted_rows() {
     let id = Ulid::from_string(&saved.id).expect("parse");
 
     assert_eq!(
-        search_captures_with_store(&store, "secret", 10)
+        search_captures_with_store(&store, "secret", None, 10)
             .expect("search before")
             .len(),
         1
@@ -349,7 +350,7 @@ fn search_captures_excludes_soft_deleted_rows() {
 
     store.soft_delete(&id).expect("soft delete");
     assert_eq!(
-        search_captures_with_store(&store, "secret", 10)
+        search_captures_with_store(&store, "secret", None, 10)
             .expect("search after")
             .len(),
         0,
@@ -361,7 +362,7 @@ fn search_captures_excludes_soft_deleted_rows() {
 fn search_captures_empty_query_returns_no_rows() {
     let (_dir, store) = temp_store();
     save_note_with_store(&store, "hello", CaptureContext::default()).expect("save");
-    assert!(search_captures_with_store(&store, "   ", 10)
+    assert!(search_captures_with_store(&store, "   ", None, 10)
         .expect("search")
         .is_empty());
 }
@@ -373,7 +374,8 @@ fn search_captures_sanitises_punctuation_in_query() {
     // special chars; build_fts_match must strip them down to
     // alphanumeric tokens.
     save_note_with_store(&store, "see https://example.com for docs", CaptureContext::default()).expect("save");
-    let results = search_captures_with_store(&store, "https://example.com", 10).expect("search");
+    let results =
+        search_captures_with_store(&store, "https://example.com", None, 10).expect("search");
     assert_eq!(results.len(), 1);
 }
 
@@ -494,9 +496,9 @@ fn route_capture_command_moves_capture_out_of_inbox_and_into_archive() {
 
     route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
 
-    let inbox = list_captures_with_store(&store, None, 10).expect("inbox");
+    let inbox = list_captures_with_store(&store, None, None, 10).expect("inbox");
     assert!(inbox.is_empty(), "routed row must leave inbox");
-    let archive = list_archive_with_store(&store, None, None, 10).expect("archive");
+    let archive = list_archive_with_store(&store, None, None, None, 10).expect("archive");
     assert_eq!(archive.len(), 1);
     assert_eq!(archive[0].id, saved.id);
     assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
@@ -538,7 +540,7 @@ fn unroute_capture_command_returns_capture_to_inbox() {
     route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
     unroute_capture_with_store(&store, &saved.id).expect("unroute");
 
-    let inbox = list_captures_with_store(&store, None, 10).expect("inbox");
+    let inbox = list_captures_with_store(&store, None, None, 10).expect("inbox");
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].id, saved.id);
     assert!(inbox[0].destination_id.is_none());
@@ -553,7 +555,7 @@ fn search_archive_command_excludes_inbox_results() {
     let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
     route_capture_with_store(&store, &routed.id, &dest.id).expect("route");
 
-    let hits = search_archive_with_store(&store, "alpha", None, 10).expect("search");
+    let hits = search_archive_with_store(&store, "alpha", None, None, 10).expect("search");
     let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(ids, vec![routed.id.as_str()]);
     let _ = kept; // referenced for clarity above
@@ -569,10 +571,12 @@ fn list_archive_command_filters_by_destination() {
     route_capture_with_store(&store, &a.id, &dest_a.id).expect("route a");
     route_capture_with_store(&store, &b.id, &dest_b.id).expect("route b");
 
-    let only_a = list_archive_with_store(&store, Some(&dest_a.id), None, 10).expect("filter a");
+    let only_a =
+        list_archive_with_store(&store, Some(&dest_a.id), None, None, 10).expect("filter a");
     assert_eq!(only_a.len(), 1);
     assert_eq!(only_a[0].id, a.id);
-    let only_b = list_archive_with_store(&store, Some(&dest_b.id), None, 10).expect("filter b");
+    let only_b =
+        list_archive_with_store(&store, Some(&dest_b.id), None, None, 10).expect("filter b");
     assert_eq!(only_b.len(), 1);
     assert_eq!(only_b[0].id, b.id);
 }
