@@ -22,6 +22,8 @@ function link(id: string, url: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -35,6 +37,8 @@ function clip(id: string, text: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -48,6 +52,8 @@ function note(id: string, text: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -66,6 +72,8 @@ function pathShot(id: string, sourcePath: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -84,6 +92,8 @@ function bytesShot(id: string, blobPath: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -101,6 +111,8 @@ function file(id: string, name: string, sourcePath: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 

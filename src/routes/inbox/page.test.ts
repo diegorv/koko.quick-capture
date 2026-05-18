@@ -14,6 +14,8 @@ function note(id: string, text: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 

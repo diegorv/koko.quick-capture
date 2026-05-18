@@ -127,6 +127,27 @@ pub struct Capture {
     /// the Inbox. `None` means unread. Newly-saved rows are unread by
     /// default; the row flips on the first `mark_read` call.
     pub read_at: Option<String>,
+    /// macOS window title of the source app at capture time. Either
+    /// the active tab's title (browsers) or the window title bar
+    /// text (other apps). `None` when context resolution failed or
+    /// the app does not expose a meaningful title.
+    pub source_title: Option<String>,
+    /// Active URL of the source app at capture time. Populated only
+    /// for known browsers (Chrome / Safari / Arc / Edge / Brave);
+    /// `None` for everything else.
+    pub source_url: Option<String>,
+}
+
+/// Resolved context for a capture about to be persisted: macOS
+/// bundle id of the source app, plus optional window title / URL for
+/// known browsers. Defaults to all-`None` so callers without context
+/// can use `CaptureContext::default()` instead of three explicit
+/// `None`s.
+#[derive(Debug, Clone, Default)]
+pub struct CaptureContext {
+    pub source_app: Option<String>,
+    pub source_title: Option<String>,
+    pub source_url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -223,7 +244,9 @@ impl Store {
                 source_app TEXT,
                 starred INTEGER NOT NULL DEFAULT 0,
                 deleted_at TEXT,
-                read_at TEXT
+                read_at TEXT,
+                source_title TEXT,
+                source_url TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_captures_created_at
                 ON captures(created_at DESC);
@@ -244,6 +267,23 @@ impl Store {
                 tokenize='unicode61 remove_diacritics 2'
             );",
         )?;
+
+        // v0.3 -> v0.4 migration: source_title / source_url columns
+        // for the per-browser context capture. PRAGMA-guarded
+        // ADD COLUMN keeps the migration idempotent on existing DBs
+        // (CREATE TABLE IF NOT EXISTS above already declares the
+        // columns for fresh installs).
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(captures)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .collect();
+        if !cols.iter().any(|c| c == "source_title") {
+            conn.execute("ALTER TABLE captures ADD COLUMN source_title TEXT", [])?;
+        }
+        if !cols.iter().any(|c| c == "source_url") {
+            conn.execute("ALTER TABLE captures ADD COLUMN source_url TEXT", [])?;
+        }
 
         Ok(())
     }
@@ -292,23 +332,25 @@ impl Store {
         }
     }
 
-    /// Persist a new Capture. Equivalent to `save_with_source(input, None)`;
-    /// kept as the simple default for tests + paths that have no source
-    /// app to attribute (drag-drop, programmatic seeds).
+    /// Persist a new Capture. Equivalent to
+    /// `save_with_context(input, Default::default())`; kept as the
+    /// simple default for tests + paths that have no context to
+    /// attribute (drag-drop, programmatic seeds).
     pub fn save(&self, input: CaptureInput) -> Result<Capture, StoreError> {
-        self.save_with_source(input, None)
+        self.save_with_context(input, CaptureContext::default())
     }
 
-    /// Persist a new Capture with an optional `source_app` (macOS
-    /// bundle identifier of the frontmost app at capture time). The
-    /// id is a freshly minted ULID and the `created_at` is now (UTC,
-    /// RFC3339). For `Shot { source: Bytes }` the bytes are written
-    /// to `blobs/<ulid>.<ext>` next to the DB and `payload.blob_path`
+    /// Persist a new Capture with the resolved macOS context
+    /// (source_app bundle id + optional window title + optional
+    /// active URL for known browsers). The id is a freshly minted
+    /// ULID and the `created_at` is now (UTC, RFC3339). For
+    /// `Shot { source: Bytes }` the bytes are written to
+    /// `blobs/<ulid>.<ext>` next to the DB and `payload.blob_path`
     /// records the resolved path.
-    pub fn save_with_source(
+    pub fn save_with_context(
         &self,
         input: CaptureInput,
-        source_app: Option<String>,
+        ctx: CaptureContext,
     ) -> Result<Capture, StoreError> {
         let id = Ulid::new().to_string();
         let kind = input.kind();
@@ -316,25 +358,37 @@ impl Store {
         let payload = self.build_payload(&id, &input)?;
         let payload_str = serde_json::to_string(&payload)?;
 
-        // Include source_app in the FTS index so a search for
-        // "safari" surfaces every capture taken while Safari was
-        // frontmost. Concatenate after the payload text with a
-        // space so the tokenizer treats it as a separate token.
+        // Append context fields to the FTS index so a search for the
+        // app name, page title, or URL host surfaces captures taken
+        // in that context. Each is its own whitespace-separated
+        // token group for the tokenizer.
         let mut search_text = searchable_text_for_input(&input);
-        if let Some(s) = source_app.as_deref() {
-            if !s.is_empty() {
-                if !search_text.is_empty() {
-                    search_text.push(' ');
+        for extra in [&ctx.source_app, &ctx.source_title, &ctx.source_url] {
+            if let Some(s) = extra.as_deref() {
+                if !s.is_empty() {
+                    if !search_text.is_empty() {
+                        search_text.push(' ');
+                    }
+                    search_text.push_str(s);
                 }
-                search_text.push_str(s);
             }
         }
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO captures (id, kind, created_at, payload, source_app, starred, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL)",
-            params![&id, kind.as_str(), &created_at, &payload_str, &source_app],
+            "INSERT INTO captures
+             (id, kind, created_at, payload, source_app, starred, deleted_at,
+              source_title, source_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?7)",
+            params![
+                &id,
+                kind.as_str(),
+                &created_at,
+                &payload_str,
+                &ctx.source_app,
+                &ctx.source_title,
+                &ctx.source_url,
+            ],
         )?;
         // Mirror the row into the FTS5 index. Errors here are
         // logged-and-ignored at the call site; failing the entire
@@ -352,10 +406,12 @@ impl Store {
             kind,
             created_at,
             payload,
-            source_app,
+            source_app: ctx.source_app,
             starred: false,
             deleted_at: None,
             read_at: None,
+            source_title: ctx.source_title,
+            source_url: ctx.source_url,
         };
         // Release the conn lock before touching the filesystem so a
         // slow disk write does not block other DB readers.
@@ -440,7 +496,7 @@ impl Store {
             Some(c) => {
                 let cursor_str = c.to_string();
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
                      FROM captures
                      WHERE deleted_at IS NULL AND id < ?1
                      ORDER BY id DESC
@@ -453,7 +509,7 @@ impl Store {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
+                    "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
                      FROM captures
                      WHERE deleted_at IS NULL
                      ORDER BY id DESC
@@ -521,7 +577,7 @@ impl Store {
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at
+            "SELECT c.id, c.kind, c.created_at, c.payload, c.source_app, c.starred, c.deleted_at, c.read_at, c.source_title, c.source_url
              FROM captures c
              JOIN captures_fts f ON f.capture_id = c.id
              WHERE captures_fts MATCH ?1
@@ -631,7 +687,7 @@ impl Store {
         let id_str = id.to_string();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at
+            "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url
              FROM captures
              WHERE id = ?1",
         )?;
@@ -654,6 +710,8 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
     let starred: i64 = row.get(5)?;
     let deleted_at: Option<String> = row.get(6)?;
     let read_at: Option<String> = row.get(7)?;
+    let source_title: Option<String> = row.get(8)?;
+    let source_url: Option<String> = row.get(9)?;
 
     let result = (|| -> Result<Capture, StoreError> {
         let kind = CaptureKind::parse(&kind_str)?;
@@ -667,6 +725,8 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Capture, S
             starred: starred != 0,
             deleted_at,
             read_at,
+            source_title,
+            source_url,
         })
     })();
     Ok(result)

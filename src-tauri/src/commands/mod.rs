@@ -18,7 +18,7 @@ use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
-use crate::store::{Capture, CaptureInput, CaptureKind, Store};
+use crate::store::{Capture, CaptureContext, CaptureInput, CaptureKind, Store};
 
 use crate::events::{
     CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT,
@@ -38,18 +38,18 @@ pub struct MutationNotice<'a> {
 pub fn save_note_with_store(
     store: &Store,
     text: &str,
-    source_app: Option<String>,
+    ctx: CaptureContext,
 ) -> Result<Capture, String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err("note text is empty".to_string());
     }
     store
-        .save_with_source(
+        .save_with_context(
             CaptureInput::Note {
                 text: text.to_string(),
             },
-            source_app,
+            ctx,
         )
         .map_err(|e| e.to_string())
 }
@@ -62,12 +62,17 @@ pub fn save_note(
 ) -> Result<Capture, String> {
     // Resolve the app that was frontmost when the Composer was
     // summoned (`PrevFrontmostPid` is `peek()`ed so the dismiss
-    // path's reactivation target stays intact).
-    let source_app = {
+    // path's reactivation target stays intact). The browser context
+    // (title + URL) is fetched via AppleScript with that bundle as
+    // target — Chrome / Safari respond even when not frontmost, so
+    // we get the tab the user was actually looking at when they
+    // summoned the Composer.
+    let bundle = {
         let pid = app.state::<PrevFrontmostPid>().peek();
         bundle_id_for_pid(pid)
     };
-    let capture = save_note_with_store(&store, &text, source_app)?;
+    let ctx = resolve_context_for_bundle(bundle.as_deref());
+    let capture = save_note_with_store(&store, &text, ctx)?;
     let _ = app.emit(CAPTURES_CHANGED_EVENT, &capture);
     let _ = app.emit(DOCK_PULSE_EVENT, ());
     Ok(capture)
@@ -87,7 +92,7 @@ pub fn save_note(
 pub fn capture_clipboard_now_with(
     clipboard: &dyn Clipboard,
     store: &Store,
-    source_app: Option<String>,
+    ctx: CaptureContext,
 ) -> Result<Vec<Capture>, String> {
     let snapshot = clipboard.read().map_err(|e| e.to_string())?;
     let inputs = decide(snapshot).map_err(|e| e.to_string())?;
@@ -108,7 +113,7 @@ pub fn capture_clipboard_now_with(
             continue;
         }
         let saved = store
-            .save_with_source(input, source_app.clone())
+            .save_with_context(input, ctx.clone())
             .map_err(|e| e.to_string())?;
         latest = Some(saved.clone());
         out.push(saved);
@@ -158,9 +163,9 @@ pub fn capture_clipboard_now(
     app: AppHandle,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    let source_app = frontmost_bundle_id();
+    let ctx = resolve_context_for_bundle(frontmost_bundle_id().as_deref());
     let captures =
-        capture_clipboard_now_with(&SystemClipboard::new(), &store, source_app)?;
+        capture_clipboard_now_with(&SystemClipboard::new(), &store, ctx)?;
     for capture in &captures {
         let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
         let _ = app.emit(DOCK_PULSE_EVENT, ());
@@ -372,8 +377,8 @@ pub fn capture_clipboard_and_broadcast(app: &AppHandle) {
     // frontmost (we are Accessory and never auto-activate), so
     // NSWorkspace.frontmostApplication is exactly the "source app"
     // we want to stamp on the new captures.
-    let source_app = frontmost_bundle_id();
-    match capture_clipboard_now_with(&SystemClipboard::new(), &store, source_app) {
+    let ctx = resolve_context_for_bundle(frontmost_bundle_id().as_deref());
+    match capture_clipboard_now_with(&SystemClipboard::new(), &store, ctx) {
         Ok(captures) => {
             for capture in &captures {
                 let _ = app.emit(CAPTURES_CHANGED_EVENT, capture);
@@ -557,6 +562,110 @@ pub fn bundle_id_for_pid(pid: i32) -> Option<String> {
 #[cfg(not(target_os = "macos"))]
 pub fn bundle_id_for_pid(_pid: i32) -> Option<String> {
     None
+}
+
+/// Build a `CaptureContext` from a macOS bundle id. Looks up the
+/// active tab title + URL for known browsers (Chrome, Safari) via
+/// AppleScript; returns app-only context for anything else. `None`
+/// bundle id (resolution failed) yields all-`None` context.
+pub fn resolve_context_for_bundle(bundle_id: Option<&str>) -> CaptureContext {
+    let Some(bid) = bundle_id else {
+        return CaptureContext::default();
+    };
+    let (title, url) = match bid {
+        // Chrome (stable / Canary / Beta / Dev) all share the same
+        // AppleScript dictionary; targeting by bundle id makes them
+        // all work without a per-build branch.
+        b if b.starts_with("com.google.Chrome") => browser_active_tab_chrome(b),
+        b @ ("com.apple.Safari" | "com.apple.SafariTechnologyPreview") => {
+            safari_active_tab(b)
+        }
+        _ => (None, None),
+    };
+    CaptureContext {
+        source_app: Some(bid.to_string()),
+        source_title: title,
+        source_url: url,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn browser_active_tab_chrome(bundle: &str) -> (Option<String>, Option<String>) {
+    let script = format!(
+        r#"tell application id "{bundle}"
+            if (count of windows) = 0 then return ""
+            set t to active tab of front window
+            return (URL of t) & "
+" & (title of t)
+        end tell"#
+    );
+    parse_url_then_title(run_osascript(&script))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn browser_active_tab_chrome(_bundle: &str) -> (Option<String>, Option<String>) {
+    (None, None)
+}
+
+#[cfg(target_os = "macos")]
+fn safari_active_tab(bundle: &str) -> (Option<String>, Option<String>) {
+    let script = format!(
+        r#"tell application id "{bundle}"
+            if (count of documents) = 0 then return ""
+            return (URL of front document) & "
+" & (name of front document)
+        end tell"#
+    );
+    parse_url_then_title(run_osascript(&script))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn safari_active_tab(_bundle: &str) -> (Option<String>, Option<String>) {
+    (None, None)
+}
+
+/// Run an AppleScript snippet via `osascript -e`. Returns the
+/// trimmed stdout on success, or `None` on spawn failure / non-zero
+/// exit / empty output. macOS will prompt the user the first time
+/// the app tries to script another app (Apple Events permission).
+#[cfg(target_os = "macos")]
+fn run_osascript(script: &str) -> Option<String> {
+    let out = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Parse a two-line "url\ntitle" string into (title, url). Both
+/// fields are independently optional — a partial response from the
+/// browser still surfaces whatever it managed to return.
+fn parse_url_then_title(out: Option<String>) -> (Option<String>, Option<String>) {
+    let Some(text) = out else {
+        return (None, None);
+    };
+    let mut lines = text.lines();
+    let url = lines
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let title = lines
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    (title, url)
 }
 
 /// Activate the app whose PID was last recorded by

@@ -18,4 +18,11 @@ export interface Capture {
    * the Inbox. `null` means unread; the row stays unread until the
    * user clicks it or selects it via the keyboard. */
   read_at: string | null;
+  /** Window title of the source app at capture time. Active tab
+   * title for browsers; window title bar text for other apps when
+   * resolvable. `null` when nothing was captured. */
+  source_title: string | null;
+  /** Active URL of the source app at capture time. Populated only
+   * for known browsers (Chrome / Safari). `null` everywhere else. */
+  source_url: string | null;
 }

@@ -13,6 +13,8 @@ function note(id: string, text: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -26,6 +28,8 @@ function link(id: string, url: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 
@@ -43,6 +47,8 @@ function file(id: string, original_name: string): Capture {
     starred: false,
     deleted_at: null,
     read_at: null,
+    source_title: null,
+    source_url: null,
   };
 }
 

@@ -47,6 +47,14 @@
     return kind;
   }
 
+  function hostnameOf(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
+
   function formatTimestamp(iso: string): string {
     const d = new Date(iso);
     const now = new Date();
@@ -111,6 +119,21 @@
           <span class="source-app" title={capture.source_app}>
             from {capture.source_app}
           </span>
+        {/if}
+        {#if capture.source_title}
+          <span class="source-title" title={capture.source_title}>
+            “{capture.source_title}”
+          </span>
+        {/if}
+        {#if capture.source_url}
+          <button
+            type="button"
+            class="source-url"
+            title={capture.source_url}
+            onclick={() => onOpenLink(capture.source_url!)}
+          >
+            ↗ {hostnameOf(capture.source_url)}
+          </button>
         {/if}
       </p>
     </header>
@@ -313,24 +336,49 @@
     opacity: 0.55;
   }
 
-  .source-app {
+  .source-app,
+  .source-title,
+  .source-url {
     font-size: 0.7rem;
-    padding: 0.08rem 0.4rem;
+    padding: 0.08rem 0.5rem;
     border-radius: 999px;
     background: rgba(76, 29, 149, 0.1);
     color: rgba(76, 29, 149, 0.95);
     border: 1px solid rgba(76, 29, 149, 0.3);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: nowrap;
-    max-width: 100%;
+    max-width: 32ch;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .source-app {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .source-url {
+    appearance: none;
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      background 80ms ease,
+      border-color 80ms ease;
+  }
+  .source-url:hover {
+    background: rgba(76, 29, 149, 0.18);
+    border-color: rgba(76, 29, 149, 0.55);
+  }
+
   @media (prefers-color-scheme: dark) {
-    .source-app {
+    .source-app,
+    .source-title,
+    .source-url {
       background: rgba(167, 139, 250, 0.15);
       color: rgba(167, 139, 250, 0.95);
       border-color: rgba(167, 139, 250, 0.35);
+    }
+    .source-url:hover {
+      background: rgba(167, 139, 250, 0.25);
+      border-color: rgba(167, 139, 250, 0.55);
     }
   }
 

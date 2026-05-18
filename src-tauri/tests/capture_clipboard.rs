@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use image::{ImageBuffer, Rgba};
 use quick_capture_lib::clipboard::{ClipboardError, ClipboardSnapshot, FakeClipboard};
 use quick_capture_lib::commands::capture_clipboard_now_with;
-use quick_capture_lib::store::{CaptureKind, Store};
+use quick_capture_lib::store::{CaptureContext, CaptureKind, Store};
 use tempfile::TempDir;
 
 fn temp_store() -> (TempDir, Store) {
@@ -47,7 +47,7 @@ fn https_text_persists_as_link() {
     let (_dir, store) = temp_store();
     let cb = text_clipboard("https://example.com");
 
-    let saved = one(capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed"));
+    let saved = one(capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed"));
 
     assert_eq!(saved.kind, CaptureKind::Link);
     assert_eq!(
@@ -74,7 +74,7 @@ fn www_text_is_promoted_to_https_link() {
     let (_dir, store) = temp_store();
     let cb = text_clipboard("www.example.com");
 
-    let saved = one(capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed"));
+    let saved = one(capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed"));
 
     assert_eq!(saved.kind, CaptureKind::Link);
     assert_eq!(
@@ -93,7 +93,7 @@ fn mailto_text_persists_as_link() {
     let (_dir, store) = temp_store();
     let cb = text_clipboard("mailto:a@b.com");
 
-    let saved = one(capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed"));
+    let saved = one(capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed"));
     assert_eq!(saved.kind, CaptureKind::Link);
     assert_eq!(
         saved.payload.get("url").and_then(|v| v.as_str()),
@@ -106,7 +106,7 @@ fn plain_text_persists_as_clip() {
     let (_dir, store) = temp_store();
     let cb = text_clipboard("just a thought I had");
 
-    let saved = one(capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed"));
+    let saved = one(capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed"));
 
     assert_eq!(saved.kind, CaptureKind::Clip);
     assert_eq!(
@@ -120,7 +120,7 @@ fn empty_clipboard_errors_and_writes_nothing() {
     let (_dir, store) = temp_store();
     let cb = FakeClipboard::with(Err(ClipboardError::Empty));
 
-    let err = capture_clipboard_now_with(&cb, &store, None).expect_err("empty clipboard must error");
+    let err = capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect_err("empty clipboard must error");
     assert!(
         err.to_lowercase().contains("empty"),
         "expected error to mention empty, got: {err}"
@@ -139,7 +139,7 @@ fn whitespace_only_clipboard_text_errors_and_writes_nothing() {
     let cb = text_clipboard("   \n\t ");
 
     let err =
-        capture_clipboard_now_with(&cb, &store, None).expect_err("whitespace-only must error");
+        capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect_err("whitespace-only must error");
     assert!(
         err.to_lowercase().contains("empty"),
         "expected error to mention empty, got: {err}"
@@ -160,7 +160,7 @@ fn image_snapshot_persists_as_shot_with_blob() {
         mime: "image/png".into(),
     }));
 
-    let saved = one(capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed"));
+    let saved = one(capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed"));
 
     assert_eq!(saved.kind, CaptureKind::Shot);
     assert_eq!(
@@ -196,7 +196,7 @@ fn files_snapshot_with_mixed_mimes_expands_to_n_captures() {
     ];
     let cb = FakeClipboard::with(Ok(ClipboardSnapshot::Files(paths.clone())));
 
-    let saved = capture_clipboard_now_with(&cb, &store, None).expect("capture should succeed");
+    let saved = capture_clipboard_now_with(&cb, &store, CaptureContext::default()).expect("capture should succeed");
 
     assert_eq!(saved.len(), 3);
     assert_eq!(saved[0].kind, CaptureKind::Shot);
@@ -237,7 +237,7 @@ fn empty_files_snapshot_errors_and_writes_nothing() {
     let (_dir, store) = temp_store();
     let cb = FakeClipboard::with(Ok(ClipboardSnapshot::Files(vec![])));
 
-    let err = capture_clipboard_now_with(&cb, &store, None)
+    let err = capture_clipboard_now_with(&cb, &store, CaptureContext::default())
         .expect_err("empty files list must error");
     assert!(
         err.to_lowercase().contains("empty"),
