@@ -153,7 +153,16 @@
         {/if}
       </div>
       <p class="meta-line">
-        <span class="timestamp">{formatTimestamp(capture.created_at)}</span>
+        {#if capture.routed_at}
+          <span class="timestamp" title="Routed">
+            routed {formatTimestamp(capture.routed_at)}
+          </span>
+          <span class="timestamp captured" title="Captured">
+            · captured {formatTimestamp(capture.created_at)}
+          </span>
+        {:else}
+          <span class="timestamp">{formatTimestamp(capture.created_at)}</span>
+        {/if}
         {#if capture.source_app}
           <span class="source-app" title={capture.source_app}>
             from {capture.source_app}
@@ -425,6 +434,9 @@
   .timestamp {
     font-size: 0.78rem;
     opacity: 0.55;
+  }
+  .timestamp.captured {
+    opacity: 0.4;
   }
 
   .source-app,

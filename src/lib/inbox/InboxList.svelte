@@ -195,7 +195,10 @@
     const items: GroupItem[] = [];
     let last: string | null = null;
     for (const capture of captures) {
-      const bucket = dateBucket(capture.created_at, now);
+      // Routed Captures bucket by routing time (when did I file it),
+      // not capture time. The Inbox view never sees a routed row so
+      // this falls through to created_at there.
+      const bucket = dateBucket(capture.routed_at ?? capture.created_at, now);
       if (bucket !== last) {
         items.push({ kind: "header", label: bucket });
         last = bucket;
@@ -322,7 +325,7 @@
         <KindIcon size={16} strokeWidth={1.75} />
       </span>
       <span class="payload">{preview(capture)}</span>
-      <span class="time">{relativeTime(capture.created_at)}</span>
+      <span class="time">{relativeTime(capture.routed_at ?? capture.created_at)}</span>
       <button
         class="icon star"
         class:active={capture.starred}
