@@ -1,10 +1,10 @@
 <script lang="ts">
-  // Settings window placeholder. v0.3 only displays static
-  // information; editing shortcuts / storage path / etc. lands in
-  // future slices.
+  // Settings window. Holds the static info panels and (per ADR-0010)
+  // the Destinations management section.
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getVersion } from "@tauri-apps/api/app";
+  import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
 
   let version = $state("…");
   let totalCount = $state<number | null>(null);
@@ -78,6 +78,8 @@
       {/each}
     </dl>
   </section>
+
+  <DestinationsSection />
 
   <section class="section">
     <h2>Storage</h2>

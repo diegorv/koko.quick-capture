@@ -25,4 +25,21 @@ export interface Capture {
   /** Active URL of the source app at capture time. Populated only
    * for known browsers (Chrome / Safari). `null` everywhere else. */
   source_url: string | null;
+  /** ULID of the Destination this Capture is Routed to. `null` means
+   * the Capture is still in the Inbox. See ADR-0010. */
+  destination_id: string | null;
+  /** ISO timestamp of the most recent routing event. Paired with
+   * `destination_id`. */
+  routed_at: string | null;
+}
+
+/** A user-managed routing target. See ADR-0010. */
+export interface Destination {
+  id: string;
+  name: string;
+  /** Palette key (e.g. "red", "teal") or `null` for no color. */
+  color: string | null;
+  created_at: string;
+  /** Soft-delete marker. `null` for live Destinations. */
+  deleted_at: string | null;
 }

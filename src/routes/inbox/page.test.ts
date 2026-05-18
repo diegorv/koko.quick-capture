@@ -16,6 +16,8 @@ function note(id: string, text: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 

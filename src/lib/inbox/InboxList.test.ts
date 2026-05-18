@@ -15,6 +15,8 @@ function note(id: string, text: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -30,6 +32,8 @@ function link(id: string, url: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -49,6 +53,8 @@ function file(id: string, original_name: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 

@@ -24,6 +24,8 @@ function link(id: string, url: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -39,6 +41,8 @@ function clip(id: string, text: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -54,6 +58,8 @@ function note(id: string, text: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -74,6 +80,8 @@ function pathShot(id: string, sourcePath: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -94,6 +102,8 @@ function bytesShot(id: string, blobPath: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
@@ -113,6 +123,8 @@ function file(id: string, name: string, sourcePath: string): Capture {
     read_at: null,
     source_title: null,
     source_url: null,
+    destination_id: null,
+    routed_at: null,
   };
 }
 
