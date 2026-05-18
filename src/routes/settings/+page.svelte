@@ -5,6 +5,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getVersion } from "@tauri-apps/api/app";
   import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
+  import WikilinkFolderSection from "$lib/wikilink/WikilinkFolderSection.svelte";
 
   let version = $state("…");
   let totalCount = $state<number | null>(null);
@@ -80,6 +81,8 @@
   </section>
 
   <DestinationsSection />
+
+  <WikilinkFolderSection />
 
   <section class="section">
     <h2>Storage</h2>
