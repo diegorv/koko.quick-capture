@@ -16,6 +16,13 @@ use ulid::Ulid;
 /// non-deleted captures with `id > <this value>`.
 pub const SETTING_LAST_INBOX_OPEN_ID: &str = "last_inbox_open_id";
 
+/// Settings key for the user-configured Wikilink source folder (see
+/// CONTEXT.md and ADR-0011). Absolute filesystem path whose top-level
+/// `.md` filenames feed the Composer's `[[` autocomplete. An empty
+/// string is the "unset" sentinel — the setter writes "" when the
+/// user clears the path.
+pub const SETTING_WIKILINK_SOURCE_FOLDER: &str = "wikilink_source_folder";
+
 /// ULID min (26 zero characters). Used as the default `count_after`
 /// cursor when `SETTING_LAST_INBOX_OPEN_ID` has never been written, so
 /// the first-launch badge equals the total non-deleted capture count.

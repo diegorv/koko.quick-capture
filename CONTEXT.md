@@ -94,6 +94,18 @@ A Destination has an optional **color** chosen from a small preset palette. Colo
 
 A Destination can be soft-deleted from Settings. Soft-deleted Destinations are hidden from the assignment picker but Captures already pointing at them keep the reference; the Archive surfaces them with a "(deleted)" indicator so the user can re-route or restore.
 
+## Wikilink
+
+A `[[token]]` reference embedded in the text payload of a Capture (in practice, today, a Note Capture's `text`). The token names a file the user expects to resolve **elsewhere** — typically inside a companion notes app like brain — not inside QC. QC neither resolves wikilinks nor follows them; it only produces them. The Composer offers autocompletion for `[[` so the user can drop a recognized token without retyping it, but the saved Capture is still plain text and the token is just text inside it.
+
+A Wikilink's surface form is `[[name]]`. Forms with display aliases (`[[name|alias]]`) and intra-document anchors (`[[name#heading]]`) are not produced by the Composer in this release; if they appear in payload they were typed by hand.
+
+## Wikilink source folder
+
+A user-configured absolute filesystem path whose top-level `.md` filenames feed the Composer's `[[` autocomplete. The folder is the **autocomplete source** only — its contents are listed by name, never read. The folder is the user's choice (e.g. a `_people` folder in their notes vault); QC has no opinion about what the names represent. The setting is single-valued and optional: when unset, `[[` typing produces no autocomplete and the Composer behaves like a plain text field; when set but empty/missing on disk, the autocomplete popup shows a "no entries" message instead of suggestions.
+
+The source folder is read flat: subdirectories and non-`.md` files are ignored. Listing happens on demand each time `[[` triggers autocompletion; QC does not cache or watch the folder.
+
 ## Archive
 
 The view of Captures that have been Routed. Distinct from the [Inbox](#inbox), which shows only un-Routed, non-deleted Captures. Archive search is scoped to Routed Captures only; Inbox search is scoped to Inbox Captures only — the two searches are intentionally separate.

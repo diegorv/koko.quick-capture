@@ -8,6 +8,7 @@ pub mod shell;
 pub mod shortcuts;
 pub mod store;
 pub mod tray;
+pub mod wikilink;
 
 use std::str::FromStr;
 
@@ -335,6 +336,11 @@ pub fn run() {
                 )
                 .build(),
         )
+        // Dialog plugin: used Rust-side from `pick_wikilink_source_folder`
+        // to open the native folder picker (ADR-0011). No JS-side dialog
+        // access is granted; the capability file does not surface
+        // `dialog:*` to any window.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Accessory mode: no Dock icon, no system menu bar (see
             // ADR-0009). The app lives in the Tray and is summoned by
@@ -643,7 +649,11 @@ pub fn run() {
             commands::unroute_capture,
             commands::list_archive,
             commands::search_archive,
-            commands::inbox_count
+            commands::inbox_count,
+            commands::get_wikilink_source_folder,
+            commands::set_wikilink_source_folder,
+            commands::list_people,
+            commands::pick_wikilink_source_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

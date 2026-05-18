@@ -18,7 +18,11 @@ use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
-use crate::store::{Capture, CaptureContext, CaptureInput, CaptureKind, Destination, Store};
+use crate::store::{
+    Capture, CaptureContext, CaptureInput, CaptureKind, Destination, Store,
+    SETTING_WIKILINK_SOURCE_FOLDER,
+};
+use crate::wikilink::{read_people_dir, validate_folder, FolderError, PersonEntry};
 
 use crate::events::{
     CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DESTINATIONS_CHANGED as DESTINATIONS_CHANGED_EVENT,
@@ -1118,4 +1122,99 @@ pub fn inbox_count_with_store(store: &Store) -> Result<u64, String> {
 #[tauri::command]
 pub fn inbox_count(store: State<'_, Store>) -> Result<u64, String> {
     inbox_count_with_store(&store)
+}
+
+// ── Wikilink source folder + autocomplete (ADR-0011) ──────────────
+
+/// Read the user-configured Wikilink source folder. Returns `None`
+/// when unset (empty-string sentinel or missing row). The Settings page
+/// uses this to render the current state; the Composer never calls
+/// this — it goes through `list_people`.
+pub fn get_wikilink_source_folder_with_store(
+    store: &Store,
+) -> Result<Option<String>, String> {
+    let raw = store
+        .settings_get(SETTING_WIKILINK_SOURCE_FOLDER)
+        .map_err(|e| e.to_string())?;
+    Ok(raw.filter(|s| !s.is_empty()))
+}
+
+#[tauri::command]
+pub fn get_wikilink_source_folder(
+    store: State<'_, Store>,
+) -> Result<Option<String>, String> {
+    get_wikilink_source_folder_with_store(&store)
+}
+
+/// Persist a new Wikilink source folder. `None` (or an empty string)
+/// clears the setting back to "unset" — stored as `""` so callers can
+/// tell "explicitly cleared" from "never written" if that ever
+/// matters. A `Some(path)` is validated (exists + is a readable
+/// directory) and any failure surfaces as a string the Settings page
+/// can render inline.
+pub fn set_wikilink_source_folder_with_store(
+    store: &Store,
+    path: Option<&str>,
+) -> Result<(), String> {
+    match path {
+        None | Some("") => store
+            .settings_set(SETTING_WIKILINK_SOURCE_FOLDER, "")
+            .map_err(|e| e.to_string()),
+        Some(p) => {
+            validate_folder(std::path::Path::new(p)).map_err(|e| e.to_string())?;
+            store
+                .settings_set(SETTING_WIKILINK_SOURCE_FOLDER, p)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_wikilink_source_folder(
+    path: Option<String>,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    set_wikilink_source_folder_with_store(&store, path.as_deref())
+}
+
+/// Read top-level `.md` filenames from the configured source folder
+/// for the Composer's `[[` autocomplete. Reads the folder path from
+/// `app_settings` itself so the JS side never has to thread settings
+/// state across the (separate) Composer / Settings windows.
+///
+/// Returns an empty Vec when the folder is unset or set-but-missing —
+/// these are user-visible "feature dormant" / "feature broken but
+/// recoverable" states (Q9b), not errors. Genuine IO failures during
+/// enumeration still surface as `Err` so they can be logged.
+pub fn list_people_with_store(store: &Store) -> Result<Vec<PersonEntry>, String> {
+    let configured = match get_wikilink_source_folder_with_store(store)? {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+    match read_people_dir(std::path::Path::new(&configured)) {
+        Ok(rows) => Ok(rows),
+        Err(FolderError::NotFound) | Err(FolderError::NotADirectory) => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn list_people(store: State<'_, Store>) -> Result<Vec<PersonEntry>, String> {
+    list_people_with_store(&store)
+}
+
+/// Open the native folder picker and return the chosen path, or
+/// `None` if the user cancelled. The plugin handles the macOS
+/// main-thread hop internally. Kept as a Rust command (not a direct
+/// JS call to the dialog plugin) to keep ADR-0004 ("Rust owns all
+/// data and system access") clean and self-consistent.
+#[tauri::command]
+pub fn pick_wikilink_source_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Choose Wikilink source folder")
+        .blocking_pick_folder();
+    Ok(chosen.map(|fp| fp.to_string()))
 }
