@@ -15,3 +15,4 @@ export const DOCK_DRAG_LEAVE = "dock:drag:leave" as const;
 export const DOCK_FULLSCREEN_ENTERED = "dock:fullscreen:entered" as const;
 export const DOCK_FULLSCREEN_EXITED = "dock:fullscreen:exited" as const;
 export const TRAY_OPEN_INBOX = "tray:open_inbox" as const;
+export const DESTINATIONS_CHANGED = "destinations:changed" as const;

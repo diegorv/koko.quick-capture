@@ -18,11 +18,11 @@ use crate::dock::default_context_menu;
 use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
-use crate::store::{Capture, CaptureContext, CaptureInput, CaptureKind, Store};
+use crate::store::{Capture, CaptureContext, CaptureInput, CaptureKind, Destination, Store};
 
 use crate::events::{
-    CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT,
-    DOCK_UNREAD_CHANGED as DOCK_UNREAD_CHANGED_EVENT, OPEN_COMPOSER,
+    CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DESTINATIONS_CHANGED as DESTINATIONS_CHANGED_EVENT,
+    DOCK_PULSE as DOCK_PULSE_EVENT, DOCK_UNREAD_CHANGED as DOCK_UNREAD_CHANGED_EVENT, OPEN_COMPOSER,
 };
 
 /// Thin payload emitted with `captures:changed` on star / soft-delete.
@@ -870,4 +870,228 @@ pub fn reveal_capture_with(
 #[tauri::command]
 pub fn reveal_capture(id: String, store: State<'_, Store>) -> Result<(), String> {
     reveal_capture_with(&SystemShell::new(), &store, &id)
+}
+
+// ── Destinations + routing (ADR-0010) ─────────────────────────────
+
+/// List live Destinations, alpha-sorted. Settings + triage picker +
+/// Archive filter bar all consume this surface; soft-deleted rows
+/// come back via `list_deleted_destinations`.
+pub fn list_destinations_with_store(store: &Store) -> Result<Vec<Destination>, String> {
+    store.destinations_list_live().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_destinations(store: State<'_, Store>) -> Result<Vec<Destination>, String> {
+    list_destinations_with_store(&store)
+}
+
+/// List soft-deleted Destinations. Drives the "Soft-deleted" section
+/// of the Settings panel for restore.
+pub fn list_deleted_destinations_with_store(store: &Store) -> Result<Vec<Destination>, String> {
+    store
+        .destinations_list_deleted()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_deleted_destinations(store: State<'_, Store>) -> Result<Vec<Destination>, String> {
+    list_deleted_destinations_with_store(&store)
+}
+
+/// Create a Destination. Returns the new row. Surfaces conflict +
+/// blank-name errors as string messages so the UI can prompt the
+/// user without parsing a typed error.
+pub fn create_destination_with_store(
+    store: &Store,
+    name: &str,
+    color: Option<&str>,
+) -> Result<Destination, String> {
+    store
+        .destination_create(name, color)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_destination(
+    name: String,
+    color: Option<String>,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<Destination, String> {
+    let created = create_destination_with_store(&store, &name, color.as_deref())?;
+    let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
+    Ok(created)
+}
+
+pub fn update_destination_with_store(
+    store: &Store,
+    id: &str,
+    name: &str,
+    color: Option<&str>,
+) -> Result<(), String> {
+    store
+        .destination_update(id, name, color)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_destination(
+    id: String,
+    name: String,
+    color: Option<String>,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    update_destination_with_store(&store, &id, &name, color.as_deref())?;
+    let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
+    Ok(())
+}
+
+pub fn soft_delete_destination_with_store(store: &Store, id: &str) -> Result<(), String> {
+    store
+        .destination_soft_delete(id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn soft_delete_destination(
+    id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    soft_delete_destination_with_store(&store, &id)?;
+    let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
+    Ok(())
+}
+
+pub fn restore_destination_with_store(store: &Store, id: &str) -> Result<(), String> {
+    store.destination_restore(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn restore_destination(
+    id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    restore_destination_with_store(&store, &id)?;
+    let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
+    Ok(())
+}
+
+/// Route a Capture to a Destination. Parses the capture id as a ULID,
+/// then delegates to `Store::capture_route`. The Tauri wrapper emits
+/// `captures:changed` and `dock:unread:changed` so the Inbox, Archive,
+/// and Dock badge all re-sync.
+pub fn route_capture_with_store(
+    store: &Store,
+    id: &str,
+    destination_id: &str,
+) -> Result<(), String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    store
+        .capture_route(&parsed, destination_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn route_capture(
+    id: String,
+    destination_id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    route_capture_with_store(&store, &id, &destination_id)?;
+    let _ = app.emit(
+        CAPTURES_CHANGED_EVENT,
+        MutationNotice {
+            id: &id,
+            kind: "routed",
+        },
+    );
+    if let Ok(unread) = store.count_unread() {
+        let _ = app.emit(DOCK_UNREAD_CHANGED_EVENT, unread);
+    }
+    Ok(())
+}
+
+/// Un-route a Capture back to the Inbox. Read-state survives, so the
+/// Dock unread count does not change; we still emit
+/// `captures:changed` so both list views re-fetch.
+pub fn unroute_capture_with_store(store: &Store, id: &str) -> Result<(), String> {
+    let parsed = Ulid::from_str(id).map_err(|e| format!("invalid id: {e}"))?;
+    store.capture_unroute(&parsed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn unroute_capture(
+    id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    unroute_capture_with_store(&store, &id)?;
+    let _ = app.emit(
+        CAPTURES_CHANGED_EVENT,
+        MutationNotice {
+            id: &id,
+            kind: "unrouted",
+        },
+    );
+    Ok(())
+}
+
+/// Archive listing. `destination_id = None` returns every Routed
+/// Capture; passing one narrows to that Destination's bucket.
+pub fn list_archive_with_store(
+    store: &Store,
+    destination_id: Option<&str>,
+    limit: u32,
+) -> Result<Vec<Capture>, String> {
+    store
+        .list_archive(destination_id, limit)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_archive(
+    destination_id: Option<String>,
+    limit: u32,
+    store: State<'_, Store>,
+) -> Result<Vec<Capture>, String> {
+    list_archive_with_store(&store, destination_id.as_deref(), limit)
+}
+
+/// Archive FTS search. Mirrors `search_captures` but scopes results
+/// to Routed Captures (and optionally one Destination).
+pub fn search_archive_with_store(
+    store: &Store,
+    query: &str,
+    destination_id: Option<&str>,
+    limit: u32,
+) -> Result<Vec<Capture>, String> {
+    store
+        .search_archive(query, destination_id, limit)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn search_archive(
+    query: String,
+    destination_id: Option<String>,
+    limit: u32,
+    store: State<'_, Store>,
+) -> Result<Vec<Capture>, String> {
+    search_archive_with_store(&store, &query, destination_id.as_deref(), limit)
+}
+
+/// Count of un-routed, non-deleted Captures. Drives the Inbox/Archive
+/// switcher's "Inbox (N)" badge.
+pub fn inbox_count_with_store(store: &Store) -> Result<u64, String> {
+    store.count_inbox().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn inbox_count(store: State<'_, Store>) -> Result<u64, String> {
+    inbox_count_with_store(&store)
 }

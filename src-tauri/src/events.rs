@@ -57,3 +57,9 @@ pub const DOCK_FULLSCREEN_EXITED: &str = "dock:fullscreen:exited";
 /// takes, just routed through the bus so the menu handler stays
 /// dispatch-only.
 pub const TRAY_OPEN_INBOX: &str = "tray:open_inbox";
+
+/// Emitted on every Destination mutation (create / update /
+/// soft-delete / restore). Carries no payload — subscribers refetch
+/// `list_destinations`. Settings, the triage picker, and the Archive
+/// filter bar all listen.
+pub const DESTINATIONS_CHANGED: &str = "destinations:changed";

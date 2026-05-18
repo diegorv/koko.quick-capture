@@ -617,7 +617,18 @@ pub fn run() {
             commands::open_link,
             commands::get_db_path,
             commands::reveal_db_in_finder,
-            commands::reveal_capture
+            commands::reveal_capture,
+            commands::list_destinations,
+            commands::list_deleted_destinations,
+            commands::create_destination,
+            commands::update_destination,
+            commands::soft_delete_destination,
+            commands::restore_destination,
+            commands::route_capture,
+            commands::unroute_capture,
+            commands::list_archive,
+            commands::search_archive,
+            commands::inbox_count
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

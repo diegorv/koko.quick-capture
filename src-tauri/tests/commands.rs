@@ -3,9 +3,13 @@
 //! to) so we do not need to spin up a Tauri runtime.
 
 use quick_capture_lib::commands::{
-    delete_capture_with_store, is_clipboard_duplicate, list_captures_with_store, mark_read_with_store,
-    save_note_with_store, search_captures_with_store, star_capture_with_store, total_count_with_store,
-    unread_count_with_store,
+    create_destination_with_store, delete_capture_with_store, inbox_count_with_store,
+    is_clipboard_duplicate, list_archive_with_store, list_captures_with_store,
+    list_deleted_destinations_with_store, list_destinations_with_store, mark_read_with_store,
+    restore_destination_with_store, route_capture_with_store, save_note_with_store,
+    search_archive_with_store, search_captures_with_store, soft_delete_destination_with_store,
+    star_capture_with_store, total_count_with_store, unread_count_with_store,
+    unroute_capture_with_store, update_destination_with_store,
 };
 use quick_capture_lib::store::{CaptureContext, CaptureInput, CaptureKind, Store};
 use tempfile::TempDir;
@@ -388,4 +392,200 @@ fn save_note_rejects_empty_text_and_writes_nothing() {
         listed.is_empty(),
         "no row must be written on empty-text rejection, got {listed:?}"
     );
+}
+
+// ── Destinations + routing (ADR-0010) ─────────────────────────────
+
+#[test]
+fn create_destination_command_returns_row_and_lists_it() {
+    let (_dir, store) = temp_store();
+    let created = create_destination_with_store(&store, "Todoist", Some("red")).expect("create");
+    assert_eq!(created.name, "Todoist");
+    assert_eq!(created.color.as_deref(), Some("red"));
+    assert!(created.deleted_at.is_none());
+
+    let listed = list_destinations_with_store(&store).expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, created.id);
+}
+
+#[test]
+fn create_destination_command_surfaces_blank_name_error() {
+    let (_dir, store) = temp_store();
+    let err = create_destination_with_store(&store, "   ", None)
+        .expect_err("blank name should error");
+    assert!(
+        err.to_lowercase().contains("blank")
+            || err.to_lowercase().contains("invalid"),
+        "expected blank-name error, got: {err}"
+    );
+}
+
+#[test]
+fn create_destination_command_surfaces_name_conflict() {
+    let (_dir, store) = temp_store();
+    create_destination_with_store(&store, "Todoist", None).expect("first");
+    let err = create_destination_with_store(&store, "Todoist", None)
+        .expect_err("dup must error");
+    assert!(
+        err.to_lowercase().contains("already in use")
+            || err.to_lowercase().contains("conflict"),
+        "expected conflict error, got: {err}"
+    );
+}
+
+#[test]
+fn update_destination_command_renames_and_recolors() {
+    let (_dir, store) = temp_store();
+    let created = create_destination_with_store(&store, "Old", Some("red")).expect("create");
+    update_destination_with_store(&store, &created.id, "New", Some("blue")).expect("update");
+
+    let listed = list_destinations_with_store(&store).expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "New");
+    assert_eq!(listed[0].color.as_deref(), Some("blue"));
+}
+
+#[test]
+fn soft_delete_destination_command_hides_live_and_surfaces_in_deleted_list() {
+    let (_dir, store) = temp_store();
+    let created = create_destination_with_store(&store, "Old", None).expect("create");
+    soft_delete_destination_with_store(&store, &created.id).expect("soft delete");
+
+    let live = list_destinations_with_store(&store).expect("live");
+    assert!(live.is_empty());
+    let deleted = list_deleted_destinations_with_store(&store).expect("deleted");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].id, created.id);
+}
+
+#[test]
+fn restore_destination_command_brings_back_when_no_conflict() {
+    let (_dir, store) = temp_store();
+    let created = create_destination_with_store(&store, "Ref", None).expect("create");
+    soft_delete_destination_with_store(&store, &created.id).expect("soft delete");
+    restore_destination_with_store(&store, &created.id).expect("restore");
+
+    let live = list_destinations_with_store(&store).expect("live");
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].id, created.id);
+}
+
+#[test]
+fn restore_destination_command_surfaces_conflict_when_name_taken() {
+    let (_dir, store) = temp_store();
+    let old = create_destination_with_store(&store, "Reading", None).expect("create old");
+    soft_delete_destination_with_store(&store, &old.id).expect("soft delete");
+    create_destination_with_store(&store, "Reading", None).expect("re-create");
+
+    let err = restore_destination_with_store(&store, &old.id)
+        .expect_err("restore must conflict");
+    assert!(
+        err.to_lowercase().contains("already in use"),
+        "expected conflict error, got: {err}"
+    );
+}
+
+#[test]
+fn route_capture_command_moves_capture_out_of_inbox_and_into_archive() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "to route", CaptureContext::default()).expect("save");
+    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+
+    route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
+
+    let inbox = list_captures_with_store(&store, None, 10).expect("inbox");
+    assert!(inbox.is_empty(), "routed row must leave inbox");
+    let archive = list_archive_with_store(&store, None, 10).expect("archive");
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive[0].id, saved.id);
+    assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
+    assert!(archive[0].routed_at.is_some());
+    // Routing implies read.
+    assert!(archive[0].read_at.is_some());
+}
+
+#[test]
+fn route_capture_command_rejects_invalid_capture_id() {
+    let (_dir, store) = temp_store();
+    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+    let err = route_capture_with_store(&store, "not-a-ulid", &dest.id)
+        .expect_err("invalid id must error");
+    assert!(err.to_lowercase().contains("invalid id"));
+}
+
+#[test]
+fn route_capture_command_rejects_soft_deleted_destination() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "x", CaptureContext::default()).expect("save");
+    let dest = create_destination_with_store(&store, "Old", None).expect("create dest");
+    soft_delete_destination_with_store(&store, &dest.id).expect("soft delete dest");
+
+    let err = route_capture_with_store(&store, &saved.id, &dest.id)
+        .expect_err("must reject soft-deleted dest");
+    assert!(
+        err.to_lowercase().contains("soft-deleted")
+            || err.to_lowercase().contains("invalid argument"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn unroute_capture_command_returns_capture_to_inbox() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "y", CaptureContext::default()).expect("save");
+    let dest = create_destination_with_store(&store, "Readwise", None).expect("create dest");
+    route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
+    unroute_capture_with_store(&store, &saved.id).expect("unroute");
+
+    let inbox = list_captures_with_store(&store, None, 10).expect("inbox");
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].id, saved.id);
+    assert!(inbox[0].destination_id.is_none());
+    assert!(inbox[0].routed_at.is_none());
+}
+
+#[test]
+fn search_archive_command_excludes_inbox_results() {
+    let (_dir, store) = temp_store();
+    let kept = save_note_with_store(&store, "alpha kept", CaptureContext::default()).expect("kept");
+    let routed = save_note_with_store(&store, "alpha routed", CaptureContext::default()).expect("routed");
+    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+    route_capture_with_store(&store, &routed.id, &dest.id).expect("route");
+
+    let hits = search_archive_with_store(&store, "alpha", None, 10).expect("search");
+    let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, vec![routed.id.as_str()]);
+    let _ = kept; // referenced for clarity above
+}
+
+#[test]
+fn list_archive_command_filters_by_destination() {
+    let (_dir, store) = temp_store();
+    let dest_a = create_destination_with_store(&store, "A", None).expect("a");
+    let dest_b = create_destination_with_store(&store, "B", None).expect("b");
+    let a = save_note_with_store(&store, "a", CaptureContext::default()).expect("a save");
+    let b = save_note_with_store(&store, "b", CaptureContext::default()).expect("b save");
+    route_capture_with_store(&store, &a.id, &dest_a.id).expect("route a");
+    route_capture_with_store(&store, &b.id, &dest_b.id).expect("route b");
+
+    let only_a = list_archive_with_store(&store, Some(&dest_a.id), 10).expect("filter a");
+    assert_eq!(only_a.len(), 1);
+    assert_eq!(only_a[0].id, a.id);
+    let only_b = list_archive_with_store(&store, Some(&dest_b.id), 10).expect("filter b");
+    assert_eq!(only_b.len(), 1);
+    assert_eq!(only_b[0].id, b.id);
+}
+
+#[test]
+fn inbox_count_command_excludes_routed_and_deleted_rows() {
+    let (_dir, store) = temp_store();
+    save_note_with_store(&store, "stays", CaptureContext::default()).expect("a");
+    let routed = save_note_with_store(&store, "routed", CaptureContext::default()).expect("b");
+    let dropped = save_note_with_store(&store, "dropped", CaptureContext::default()).expect("c");
+    let dest = create_destination_with_store(&store, "Todoist", None).expect("dest");
+    route_capture_with_store(&store, &routed.id, &dest.id).expect("route");
+    delete_capture_with_store(&store, &dropped.id).expect("delete");
+
+    assert_eq!(inbox_count_with_store(&store).expect("inbox count"), 1);
 }
