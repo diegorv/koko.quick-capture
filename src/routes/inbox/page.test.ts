@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, waitFor } from "@testing-library/svelte";
 import { describe, it, expect, vi } from "vitest";
 import Page from "./+page.svelte";
 import type { Capture } from "$lib/captures/types";
@@ -126,6 +126,56 @@ describe("inbox page", () => {
     });
 
     expect(await findByText("No captures yet")).toBeTruthy();
+  });
+
+  it("clicking a [[Name]] chip swaps the list to a mention-filtered fetch", async () => {
+    // Initial unfiltered page has one Note that mentions Diego.
+    const initial: Capture[] = [note("01H000000000000000000000M1", "[[Diego]] hi")];
+    const filtered: Capture[] = [note("01H000000000000000000000M2", "[[Diego]] also")];
+    const listFn = vi.fn(async () => initial);
+    const listenFn = vi.fn(
+      async (
+        _event: string,
+        _handler: (...args: never[]) => void,
+      ): Promise<UnlistenFn> => () => {},
+    );
+    const invokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_captures" && args?.mention === "Diego") {
+        return filtered;
+      }
+      if (cmd === "list_captures") {
+        return [];
+      }
+      return 0;
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(Page, {
+      props: { listFn, listenFn, invokeFn },
+    });
+
+    // The mention chip rendered in the detail pane only appears once
+    // the user selects a capture. Select the first row first.
+    const rows = await findAllByRole("option");
+    await fireEvent.click(rows[0]);
+
+    const chip = await findByTestId("mention-chip");
+    await fireEvent.click(chip);
+
+    // The mention pill appears with the picked name.
+    const pill = await findByTestId("mention-pill-clear");
+    expect(pill.textContent).toContain("[[Diego]]");
+    // list_captures was called with mention=Diego at some point.
+    await waitFor(() =>
+      expect(invokeFn).toHaveBeenCalledWith(
+        "list_captures",
+        expect.objectContaining({ mention: "Diego" }),
+      ),
+    );
+
+    // Clicking the pill clears the filter (listFn called again with
+    // no mention).
+    await fireEvent.click(pill);
+    await waitFor(() => expect(queryByTestId("mention-pill-clear")).toBeNull());
   });
 
   it("navigates to /archive when view:open_archive fires (ADR-0010)", async () => {

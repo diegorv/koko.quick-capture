@@ -354,4 +354,58 @@ describe("InboxDetail", () => {
       expect(onUnroute).toHaveBeenCalledWith("01H000000000000000000000U3");
     });
   });
+
+  describe("mentions inside Note / Clip payloads", () => {
+    it("renders [[Name]] tokens as clickable chips when onMentionClick is provided", async () => {
+      const cap = note(
+        "01H000000000000000000000M1",
+        "ping [[Diego]] and [[Ana]] later",
+      );
+      const onMentionClick = vi.fn();
+      const { getAllByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onMentionClick,
+        },
+      });
+      const chips = getAllByTestId("mention-chip");
+      expect(chips.map((c) => c.getAttribute("data-mention"))).toEqual([
+        "Diego",
+        "Ana",
+      ]);
+
+      await fireEvent.click(chips[0]);
+      expect(onMentionClick).toHaveBeenCalledTimes(1);
+      expect(onMentionClick).toHaveBeenCalledWith("Diego");
+    });
+
+    it("renders mentions as plain text when onMentionClick is omitted", () => {
+      const cap = note("01H000000000000000000000M2", "see [[Diego]]");
+      const { getByTestId, queryAllByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+        },
+      });
+      expect(queryAllByTestId("mention-chip")).toHaveLength(0);
+      // The literal `[[Diego]]` still appears in the pre.
+      expect(getByTestId("payload-text").textContent).toContain("[[Diego]]");
+    });
+
+    it("does not render mention chips for Link kind", () => {
+      const cap = link("01H000000000000000000000M3", "https://example.com/[[Diego]]");
+      const { queryAllByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+          onMentionClick: vi.fn(),
+        },
+      });
+      expect(queryAllByTestId("mention-chip")).toHaveLength(0);
+    });
+  });
 });

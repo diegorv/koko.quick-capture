@@ -10,6 +10,7 @@
   // `Shot` uses the persisted `blob_path`).
   import { convertFileSrc } from "@tauri-apps/api/core";
   import type { Capture } from "$lib/captures/types";
+  import { parseMentionSegments } from "$lib/mentions/parse-mention-segments";
   import {
     Link,
     Clipboard,
@@ -43,6 +44,11 @@
      * button when this is provided — drives the Archive's reverse
      * flow per ADR-0010. */
     onUnroute?: (id: string) => void;
+    /** Optional [[Name]] click handler. When provided, mentions
+     * inside Note / Clip text render as clickable spans that
+     * surface the picked name to the parent (which sets the list's
+     * mention filter). When omitted, mentions render as plain text. */
+    onMentionClick?: (name: string) => void;
   }
 
   const {
@@ -52,6 +58,7 @@
     onStarToggle,
     onRoute,
     onUnroute,
+    onMentionClick,
   }: Props = $props();
 
   function str(value: unknown): string | null {
@@ -214,8 +221,15 @@
       </footer>
     {:else if capture.kind === "Clip" || capture.kind === "Note"}
       {@const text = str(capture.payload.text) ?? ""}
+      {@const segments = parseMentionSegments(text)}
       <section class="body">
-        <pre class="payload-text">{text}</pre>
+        <pre class="payload-text" data-testid="payload-text">{#each segments as segment, i (i)}{#if segment.kind === "mention" && onMentionClick}<button
+              type="button"
+              class="mention"
+              data-testid="mention-chip"
+              data-mention={segment.value}
+              onclick={() => onMentionClick(segment.value)}
+            >[[{segment.value}]]</button>{:else if segment.kind === "mention"}[[{segment.value}]]{:else}{segment.value}{/if}{/each}</pre>
       </section>
     {:else if capture.kind === "Shot"}
       {@const sourcePath = str(capture.payload.source_path)}
@@ -562,6 +576,35 @@
       monospace;
     font-size: 0.88rem;
     line-height: 1.5;
+  }
+
+  /* Mention chips inside the Note/Clip payload pre. Rendered as
+     inline buttons so the user can click to set the list filter
+     without disturbing the surrounding monospace layout. */
+  .mention {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: rgba(79, 70, 229, 0.95);
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  .mention:hover,
+  .mention:focus-visible {
+    background: rgba(79, 70, 229, 0.12);
+    outline: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    .mention {
+      color: rgba(165, 180, 252, 0.95);
+    }
+    .mention:hover,
+    .mention:focus-visible {
+      background: rgba(165, 180, 252, 0.18);
+    }
   }
 
   .actions {

@@ -77,6 +77,13 @@
   let now = $state(Date.now());
   let nowTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Active [[Name]] mention filter. Null = no filter; the page uses
+  // the injected listFn / search path. Non-null = bypass listFn and
+  // go through invokeFn directly so the Rust mention param can be
+  // threaded without changing the ListFn signature (and the existing
+  // tests' listFn mocks).
+  let activeMention = $state<string | null>(null);
+
   // Search state. `searchResults === null` means "not searching, show
   // the paginated `captures` list". Non-null means search is active
   // and InboxList renders the results array. The debounce timer
@@ -182,12 +189,30 @@
     unreadCount && unreadCount > 0 ? `${unreadCount} new` : null,
   );
 
+  async function fetchPage(
+    cursor: string | null,
+    limit: number,
+  ): Promise<Capture[]> {
+    // When a mention filter is active we bypass the injected listFn
+    // and call list_captures directly with the mention param. Tests
+    // that exercise the no-mention path keep working with the
+    // existing 2-arg listFn mock.
+    if (activeMention !== null) {
+      return (await invokeFn("list_captures", {
+        cursor,
+        mention: activeMention,
+        limit,
+      })) as Capture[];
+    }
+    return listFn(cursor, limit);
+  }
+
   async function loadNext() {
     if (loading || exhausted || searching) return;
     loading = true;
     try {
       const cursor = captures.length > 0 ? captures[captures.length - 1].id : null;
-      const page = await listFn(cursor, PAGE_SIZE);
+      const page = await fetchPage(cursor, PAGE_SIZE);
       if (page.length === 0) {
         exhausted = true;
       } else {
@@ -205,7 +230,7 @@
 
   async function refetchFirstPage() {
     try {
-      const page = await listFn(null, PAGE_SIZE);
+      const page = await fetchPage(null, PAGE_SIZE);
       captures = page;
       exhausted = page.length < PAGE_SIZE;
       if (selectedId !== null && !page.some((c) => c.id === selectedId)) {
@@ -213,6 +238,22 @@
       }
     } catch (err) {
       console.error("refetch first page failed", err);
+    }
+  }
+
+  async function setMention(name: string | null) {
+    if (activeMention === name) return;
+    activeMention = name;
+    // Reset list and selection; the next fetchPage call carries
+    // the new filter.
+    captures = [];
+    selectedId = null;
+    exhausted = false;
+    await refetchFirstPage();
+    if (searching) {
+      // Re-run the active search so it intersects with the new
+      // mention filter.
+      void runSearch();
     }
   }
 
@@ -249,6 +290,7 @@
     try {
       const results = (await invokeFn("search_captures", {
         query: q,
+        mention: activeMention,
         limit: PAGE_SIZE,
       })) as Capture[];
       searchResults = results;
@@ -502,6 +544,20 @@
           </button>
         {/if}
       </div>
+      {#if activeMention !== null}
+        <div class="mention-bar" data-testid="mention-bar">
+          <button
+            type="button"
+            class="mention-pill"
+            data-testid="mention-pill-clear"
+            onclick={() => void setMention(null)}
+            aria-label={`Clear mention filter: ${activeMention}`}
+          >
+            <span class="mention-pill-label">[[{activeMention}]]</span>
+            <span class="mention-pill-close" aria-hidden="true">×</span>
+          </button>
+        </div>
+      {/if}
       <div class="filterbar" role="toolbar" aria-label="Inbox filters">
         {#each KIND_OPTIONS as option}
           <button
@@ -576,6 +632,7 @@
         {onReveal}
         {onStarToggle}
         {onRoute}
+        onMentionClick={(name) => void setMention(name)}
       />
     </section>
   </div>
@@ -683,6 +740,56 @@
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
     overflow-x: auto;
     scrollbar-width: none;
+  }
+
+  .mention-bar {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .mention-pill {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid rgba(79, 70, 229, 0.45);
+    background: rgba(79, 70, 229, 0.12);
+    color: rgba(79, 70, 229, 0.95);
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition:
+      background 80ms ease,
+      border-color 80ms ease;
+  }
+  .mention-pill:hover {
+    background: rgba(79, 70, 229, 0.2);
+    border-color: rgba(79, 70, 229, 0.65);
+  }
+  .mention-pill-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .mention-pill-close {
+    opacity: 0.7;
+    font-size: 0.95em;
+    line-height: 1;
+  }
+  @media (prefers-color-scheme: dark) {
+    .mention-bar {
+      border-bottom-color: rgba(255, 255, 255, 0.06);
+    }
+    .mention-pill {
+      border-color: rgba(165, 180, 252, 0.55);
+      background: rgba(165, 180, 252, 0.18);
+      color: rgba(165, 180, 252, 0.95);
+    }
+    .mention-pill:hover {
+      background: rgba(165, 180, 252, 0.28);
+      border-color: rgba(165, 180, 252, 0.75);
+    }
   }
   .filterbar::-webkit-scrollbar {
     display: none;

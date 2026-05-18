@@ -54,6 +54,10 @@
   let destinations = $state<Destination[]>([]);
   let destinationFilter = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
+  // Active [[Name]] mention filter. Closures inside the pager + the
+  // search invocation read this reactively so toggling the filter +
+  // calling refetchFirst() picks up the new value on the next IPC.
+  let activeMention = $state<string | null>(null);
 
   let unlistenCaptures: UnlistenFn | null = null;
   let unlistenDestinations: UnlistenFn | null = null;
@@ -69,6 +73,7 @@
     pageFn: (cursor, limit) =>
       invokeFn("list_archive", {
         destinationId: null,
+        mention: activeMention,
         cursor,
         limit,
       }) as Promise<Capture[]>,
@@ -104,6 +109,7 @@
       const results = (await invokeFn("search_archive", {
         query: trimmed,
         destinationId: null,
+        mention: activeMention,
         limit: 100,
       })) as Capture[];
       searchResults = results;
@@ -202,6 +208,14 @@
     ) {
       selectedId = null;
     }
+  }
+
+  async function setMention(name: string | null) {
+    if (activeMention === name) return;
+    activeMention = name;
+    selectedId = null;
+    await pager.refetchFirst();
+    if (searching) void runSearch(searchQuery);
   }
 
   function onSelect(id: string) {
@@ -355,6 +369,20 @@
           </button>
         {/if}
       </div>
+      {#if activeMention !== null}
+        <div class="mention-bar" data-testid="mention-bar">
+          <button
+            type="button"
+            class="mention-pill"
+            data-testid="mention-pill-clear"
+            onclick={() => void setMention(null)}
+            aria-label={`Clear mention filter: ${activeMention}`}
+          >
+            <span class="mention-pill-label">[[{activeMention}]]</span>
+            <span class="mention-pill-close" aria-hidden="true">×</span>
+          </button>
+        </div>
+      {/if}
       <div class="filterbar" role="toolbar" aria-label="Archive filters" data-testid="archive-filter-bar">
         <button
           type="button"
@@ -432,6 +460,7 @@
         {onStarToggle}
         {onRoute}
         {onUnroute}
+        onMentionClick={(name) => void setMention(name)}
       />
     </section>
   </div>
@@ -563,6 +592,52 @@
     gap: 0.35rem;
     overflow-x: auto;
     padding: 0 0.75rem 0.55rem;
+  }
+
+  .mention-bar {
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem 0.5rem;
+  }
+  .mention-pill {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid rgba(79, 70, 229, 0.45);
+    background: rgba(79, 70, 229, 0.12);
+    color: rgba(79, 70, 229, 0.95);
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition:
+      background 80ms ease,
+      border-color 80ms ease;
+  }
+  .mention-pill:hover {
+    background: rgba(79, 70, 229, 0.2);
+    border-color: rgba(79, 70, 229, 0.65);
+  }
+  .mention-pill-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .mention-pill-close {
+    opacity: 0.7;
+    font-size: 0.95em;
+    line-height: 1;
+  }
+  @media (prefers-color-scheme: dark) {
+    .mention-pill {
+      border-color: rgba(165, 180, 252, 0.55);
+      background: rgba(165, 180, 252, 0.18);
+      color: rgba(165, 180, 252, 0.95);
+    }
+    .mention-pill:hover {
+      background: rgba(165, 180, 252, 0.28);
+      border-color: rgba(165, 180, 252, 0.75);
+    }
   }
 
   .chip {
