@@ -102,11 +102,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
-          PREV_TAG=$(git tag --list --sort=-version:refname | grep -v "^${TAG}$" | head -n 1)
+          PREV_TAG=$(git tag --list --sort=-version:refname | { grep -v "^${TAG}$" || true; } | head -n 1)
           if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s (%h)" "$TAG" | grep -v "^- chore: bump version")
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "$TAG" | { grep -v "^- chore: bump version" || true; })
           else
-            COMMITS=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${TAG}" | grep -v "^- chore: bump version")
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${TAG}" | { grep -v "^- chore: bump version" || true; })
           fi
           {
             echo "commits<<CHANGELOG_EOF"
