@@ -496,7 +496,7 @@ fn route_capture_command_moves_capture_out_of_inbox_and_into_archive() {
 
     let inbox = list_captures_with_store(&store, None, 10).expect("inbox");
     assert!(inbox.is_empty(), "routed row must leave inbox");
-    let archive = list_archive_with_store(&store, None, 10).expect("archive");
+    let archive = list_archive_with_store(&store, None, None, 10).expect("archive");
     assert_eq!(archive.len(), 1);
     assert_eq!(archive[0].id, saved.id);
     assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
@@ -569,10 +569,10 @@ fn list_archive_command_filters_by_destination() {
     route_capture_with_store(&store, &a.id, &dest_a.id).expect("route a");
     route_capture_with_store(&store, &b.id, &dest_b.id).expect("route b");
 
-    let only_a = list_archive_with_store(&store, Some(&dest_a.id), 10).expect("filter a");
+    let only_a = list_archive_with_store(&store, Some(&dest_a.id), None, 10).expect("filter a");
     assert_eq!(only_a.len(), 1);
     assert_eq!(only_a[0].id, a.id);
-    let only_b = list_archive_with_store(&store, Some(&dest_b.id), 10).expect("filter b");
+    let only_b = list_archive_with_store(&store, Some(&dest_b.id), None, 10).expect("filter b");
     assert_eq!(only_b.len(), 1);
     assert_eq!(only_b[0].id, b.id);
 }

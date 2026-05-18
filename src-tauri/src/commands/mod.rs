@@ -1068,20 +1068,22 @@ pub fn unroute_capture(
 pub fn list_archive_with_store(
     store: &Store,
     destination_id: Option<&str>,
+    cursor: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Capture>, String> {
     store
-        .list_archive(destination_id, limit)
+        .list_archive(destination_id, cursor, limit)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn list_archive(
     destination_id: Option<String>,
+    cursor: Option<String>,
     limit: u32,
     store: State<'_, Store>,
 ) -> Result<Vec<Capture>, String> {
-    list_archive_with_store(&store, destination_id.as_deref(), limit)
+    list_archive_with_store(&store, destination_id.as_deref(), cursor.as_deref(), limit)
 }
 
 /// Archive FTS search. Mirrors `search_captures` but scopes results

@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use quick_capture_lib::store::{
-    CaptureInput, CaptureKind, ShotSource, Store, StoreError, SETTING_LAST_INBOX_OPEN_ID,
+    cursor_for_archive, CaptureInput, CaptureKind, ShotSource, Store, StoreError,
+    SETTING_LAST_INBOX_OPEN_ID,
 };
 use tempfile::TempDir;
 use ulid::Ulid;
@@ -578,7 +579,7 @@ fn capture_route_moves_capture_from_inbox_to_archive() {
         inbox.is_empty(),
         "routed capture must leave the Inbox: {inbox:?}"
     );
-    let archive = store.list_archive(None, 10).expect("archive list");
+    let archive = store.list_archive(None, None, 10).expect("archive list");
     assert_eq!(archive.len(), 1);
     assert_eq!(archive[0].id, saved.id);
     assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
@@ -605,7 +606,7 @@ fn capture_unroute_returns_capture_to_inbox() {
 
     let inbox = store.list(10).expect("inbox");
     assert_eq!(inbox.len(), 1);
-    let archive = store.list_archive(None, 10).expect("archive");
+    let archive = store.list_archive(None, None, 10).expect("archive");
     assert!(archive.is_empty());
     let row = &inbox[0];
     assert!(row.destination_id.is_none());
@@ -628,7 +629,7 @@ fn capture_reroute_updates_destination_and_routed_at() {
         .destination_create("Readwise", None)
         .expect("create second");
     store.capture_route(&id, &first.id).expect("route first");
-    let after_first = store.list_archive(None, 10).expect("archive")[0]
+    let after_first = store.list_archive(None, None, 10).expect("archive")[0]
         .routed_at
         .clone()
         .expect("routed_at");
@@ -636,7 +637,7 @@ fn capture_reroute_updates_destination_and_routed_at() {
     std::thread::sleep(std::time::Duration::from_millis(5));
     store.capture_route(&id, &second.id).expect("route second");
 
-    let archive = store.list_archive(None, 10).expect("archive");
+    let archive = store.list_archive(None, None, 10).expect("archive");
     assert_eq!(archive.len(), 1);
     assert_eq!(
         archive[0].destination_id.as_deref(),
@@ -694,7 +695,7 @@ fn routed_capture_keeps_destination_reference_after_soft_delete() {
     store.destination_soft_delete(&dest.id).expect("soft delete");
 
     // Orphan still surfaces in the Archive with its original ref.
-    let archive = store.list_archive(None, 10).expect("archive");
+    let archive = store.list_archive(None, None, 10).expect("archive");
     assert_eq!(archive.len(), 1);
     assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
 }
@@ -774,19 +775,76 @@ fn list_archive_filters_by_destination() {
         .expect("route b1");
 
     let only_a = store
-        .list_archive(Some(&dest_a.id), 10)
+        .list_archive(Some(&dest_a.id), None, 10)
         .expect("filter a");
     assert_eq!(only_a.len(), 1);
     assert_eq!(only_a[0].id, a1.id);
 
     let only_b = store
-        .list_archive(Some(&dest_b.id), 10)
+        .list_archive(Some(&dest_b.id), None, 10)
         .expect("filter b");
     assert_eq!(only_b.len(), 1);
     assert_eq!(only_b[0].id, b1.id);
 
-    let all = store.list_archive(None, 10).expect("all archive");
+    let all = store.list_archive(None, None, 10).expect("all archive");
     assert_eq!(all.len(), 2);
+}
+
+#[test]
+fn list_archive_paginates_through_routed_at_id_cursor() {
+    let (_dir, store) = temp_store();
+    let dest = store.destination_create("D", None).expect("dest");
+
+    // Seed 12 captures, route each with a 2ms gap so routed_at strictly
+    // increases — same trick as the inbox cursor test.
+    let mut ids = Vec::with_capacity(12);
+    for i in 0..12 {
+        let saved = store
+            .save(CaptureInput::Note { text: format!("n{i}") })
+            .expect("save");
+        let ulid = Ulid::from_string(&saved.id).expect("ulid");
+        store.capture_route(&ulid, &dest.id).expect("route");
+        ids.push(saved.id);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    ids.reverse(); // newest-routed first
+
+    let first = store.list_archive(None, None, 5).expect("page 1");
+    assert_eq!(first.len(), 5);
+    assert_eq!(
+        first.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+        ids[..5].iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+
+    let cursor = cursor_for_archive(first.last().unwrap()).expect("cursor");
+    let second = store
+        .list_archive(None, Some(&cursor), 5)
+        .expect("page 2");
+    assert_eq!(second.len(), 5);
+    assert_eq!(
+        second.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+        ids[5..10].iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+
+    let cursor2 = cursor_for_archive(second.last().unwrap()).expect("cursor2");
+    let third = store
+        .list_archive(None, Some(&cursor2), 5)
+        .expect("page 3");
+    // Only 2 left.
+    assert_eq!(third.len(), 2);
+    assert_eq!(
+        third.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+        ids[10..].iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn list_archive_rejects_malformed_cursor() {
+    let (_dir, store) = temp_store();
+    let err = store
+        .list_archive(None, Some("no-pipe-here"), 10)
+        .expect_err("bad cursor");
+    assert!(matches!(err, StoreError::Decode(_)));
 }
 
 #[test]

@@ -23,8 +23,9 @@
   import MainNav from "$lib/main/MainNav.svelte";
   import DestinationPicker from "$lib/destinations/DestinationPicker.svelte";
   import DestinationDot from "$lib/destinations/DestinationDot.svelte";
+  import { createPaginatedList } from "$lib/captures/paginated-list.svelte";
 
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 50;
 
   type InvokeFn = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
   type ListenFn = (
@@ -50,15 +51,37 @@
     hideFn = defaultHide,
   }: Props = $props();
 
-  let captures = $state<Capture[]>([]);
   let destinations = $state<Destination[]>([]);
   let destinationFilter = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
-  let loading = $state(false);
 
   let unlistenCaptures: UnlistenFn | null = null;
   let unlistenDestinations: UnlistenFn | null = null;
   let unlistenNavigate: UnlistenFn | null = null;
+
+  // Cursor-paginated row store. The pager fetches the whole Archive
+  // chronologically; the destination filter is applied client-side
+  // over the loaded rows so chip counts (which reflect the loaded
+  // subset) keep their meaning across filter switches. Server-side
+  // filtering + per-destination totals can move down a future slice
+  // when archives grow past a few pages.
+  const pager = createPaginatedList({
+    pageFn: (cursor, limit) =>
+      invokeFn("list_archive", {
+        destinationId: null,
+        cursor,
+        limit,
+      }) as Promise<Capture[]>,
+    cursorOf: (last) =>
+      last.routed_at ? `${last.routed_at}|${last.id}` : null,
+    pageSize: PAGE_SIZE,
+  });
+
+  const visibleCaptures = $derived(
+    destinationFilter === null
+      ? pager.items
+      : pager.items.filter((c) => c.destination_id === destinationFilter),
+  );
 
   const destinationsById = $derived.by(() => {
     const map = new Map<string, Destination>();
@@ -66,32 +89,28 @@
     return map;
   });
 
-  // Count of routed Captures per destination — drives the chip badges.
+  // Count of routed Captures per destination on the loaded page —
+  // drives the chip badges. (May undercount very long destinations
+  // until the user scrolls further; acceptable for v1 since chips
+  // exist primarily to surface which buckets contain anything.)
   const countsByDestination = $derived.by(() => {
     const counts = new Map<string, number>();
-    for (const c of captures) {
+    for (const c of pager.items) {
       if (!c.destination_id) continue;
       counts.set(c.destination_id, (counts.get(c.destination_id) ?? 0) + 1);
     }
     return counts;
   });
 
-  // Set of destination ids present in the current Archive page that
-  // are NOT in the live destinations list — i.e. soft-deleted
-  // destinations whose Captures still surface here.
+  // Whether any loaded Capture references a destination that isn't in
+  // the live list (i.e. soft-deleted destination still holding orphans).
   const hasDeletedDestinations = $derived.by(() => {
-    for (const c of captures) {
+    for (const c of pager.items) {
       if (!c.destination_id) continue;
       if (!destinationsById.has(c.destination_id)) return true;
     }
     return false;
   });
-
-  const visibleCaptures = $derived(
-    destinationFilter === null
-      ? captures
-      : captures.filter((c) => c.destination_id === destinationFilter),
-  );
 
   const selectedCapture = $derived(
     selectedId === null
@@ -100,16 +119,11 @@
   );
 
   async function refresh() {
-    loading = true;
     try {
-      const [archiveRows, liveDests] = await Promise.all([
-        invokeFn("list_archive", {
-          destinationId: null,
-          limit: PAGE_SIZE,
-        }) as Promise<Capture[]>,
+      const [, liveDests] = await Promise.all([
+        pager.refetchFirst(),
         invokeFn("list_destinations", {}) as Promise<Destination[]>,
       ]);
-      captures = archiveRows;
       destinations = liveDests;
       // Drop the filter if it now points at a soft-deleted destination
       // whose chip just disappeared.
@@ -118,14 +132,11 @@
       }
     } catch (err) {
       console.error("archive refresh failed", err);
-    } finally {
-      loading = false;
     }
   }
 
   function selectFilter(id: string | null) {
     destinationFilter = id;
-    // Clear selection if it was filtered out.
     if (
       selectedId !== null &&
       !visibleCaptures.find((c) => c.id === selectedId)
@@ -147,7 +158,7 @@
   }
 
   async function onDelete(id: string) {
-    captures = captures.filter((c) => c.id !== id);
+    pager.remove(id);
     if (selectedId === id) selectedId = null;
     try {
       await invokeFn("delete_capture", { id });
@@ -192,7 +203,7 @@
   let pickerCurrentDest = $state<string | null>(null);
 
   function onRoute(id: string) {
-    const capture = captures.find((c) => c.id === id);
+    const capture = pager.items.find((c) => c.id === id);
     pickerCaptureId = id;
     pickerCurrentDest = capture?.destination_id ?? null;
     pickerOpen = true;
@@ -218,7 +229,7 @@
   async function onUnroute(id: string) {
     // Optimistic: yank the row from the Archive view. The Inbox
     // surfaces it again when the user switches tabs.
-    captures = captures.filter((c) => c.id !== id);
+    pager.remove(id);
     if (selectedId === id) selectedId = null;
     try {
       await invokeFn("unroute_capture", { id });
@@ -268,7 +279,7 @@
       onclick={() => selectFilter(null)}
       data-testid="filter-all"
     >
-      All <span class="chip-count">{captures.length}</span>
+      All <span class="chip-count">{pager.items.length}</span>
     </button>
     {#each destinations as dest (dest.id)}
       <button
@@ -291,8 +302,8 @@
   </div>
 
   <div class="panes">
-    <section class="list-pane">
-      {#if !loading && captures.length === 0}
+    <section class="list-pane" onscroll={pager.onScroll}>
+      {#if !pager.loading && pager.items.length === 0}
         <div class="empty">
           <div class="empty-glyph" aria-hidden="true">📤</div>
           <h2 class="empty-title">Nothing routed yet</h2>
@@ -300,7 +311,7 @@
             Press <kbd>R</kbd> in the Inbox to send a Capture here.
           </p>
         </div>
-      {:else if !loading && visibleCaptures.length === 0}
+      {:else if visibleCaptures.length === 0}
         <div class="empty">
           <h2 class="empty-title">No matches</h2>
           <p class="empty-hint">No Captures routed to this destination.</p>
@@ -317,6 +328,9 @@
           {onRoute}
           {onUnroute}
         />
+        {#if pager.loading}
+          <div class="spinner" aria-live="polite">Loading…</div>
+        {/if}
       {/if}
     </section>
     <section class="detail-pane">
@@ -491,6 +505,17 @@
   .empty-hint {
     margin: 0.3rem 0 0;
     font-size: 0.85rem;
+  }
+  .spinner {
+    text-align: center;
+    padding: 0.75rem;
+    font-size: 0.78rem;
+    color: rgba(0, 0, 0, 0.5);
+  }
+  @media (prefers-color-scheme: dark) {
+    .spinner {
+      color: rgba(255, 255, 255, 0.5);
+    }
   }
   .empty kbd {
     display: inline-block;

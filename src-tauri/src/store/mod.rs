@@ -971,16 +971,21 @@ impl Store {
     /// List Archive captures (non-deleted, Routed) newest-routed
     /// first, with optional filter by Destination id. `limit` caps
     /// the result. Sort is `routed_at DESC, id DESC` so re-routing a
-    /// Capture surfaces it at the top.
+    /// Capture surfaces it at the top. `cursor` paginates: pass the
+    /// `cursor_for_archive(last_row)` opaque string of the last row
+    /// from the previous page to fetch the next.
     pub fn list_archive(
         &self,
         destination_filter: Option<&str>,
+        cursor: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Capture>, StoreError> {
-        // Single statement with an `IFNULL(?, destination_id) =
-        // destination_id` clause that becomes a no-op when the filter
-        // is None — saves a second prepared statement per call and
-        // keeps the SQL in one place.
+        let parsed = parse_archive_cursor(cursor)?;
+        let (cursor_routed_at, cursor_id) = parsed
+            .as_ref()
+            .map(|(r, i)| (Some(r.as_str()), Some(i.as_str())))
+            .unwrap_or((None, None));
+
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, kind, created_at, payload, source_app, starred, deleted_at, read_at, source_title, source_url, destination_id, routed_at
@@ -988,10 +993,16 @@ impl Store {
              WHERE deleted_at IS NULL
                AND destination_id IS NOT NULL
                AND destination_id = COALESCE(?1, destination_id)
+               AND (?2 IS NULL
+                    OR routed_at < ?2
+                    OR (routed_at = ?2 AND id < ?3))
              ORDER BY routed_at DESC, id DESC
-             LIMIT ?2",
+             LIMIT ?4",
         )?;
-        let rows = stmt.query_map(params![destination_filter, limit], row_to_capture)?;
+        let rows = stmt.query_map(
+            params![destination_filter, cursor_routed_at, cursor_id, limit],
+            row_to_capture,
+        )?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row??);
@@ -1028,6 +1039,9 @@ impl Store {
             params![&match_expr, destination_filter, limit],
             row_to_capture,
         )?;
+        // (Search is rank-ordered, not chronological, so it doesn't
+        // share Archive's tuple cursor — search results are short
+        // lists and the caller can re-issue with a tighter query.)
         let mut out = Vec::new();
         for row in rows {
             out.push(row??);
@@ -1118,6 +1132,29 @@ fn normalize_color(color: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|c| !c.is_empty())
         .map(String::from)
+}
+
+/// Encode the (routed_at, id) tuple cursor used by `list_archive`.
+/// Frontend hands the result back as an opaque string in the next
+/// page request. Format: `<routed_at>|<id>`. The id portion never
+/// contains `|` (ULIDs are alphanumeric), and `routed_at` is RFC3339
+/// which also never contains `|`, so a single-byte split is safe.
+pub fn cursor_for_archive(capture: &Capture) -> Option<String> {
+    let routed_at = capture.routed_at.as_deref()?;
+    Some(format!("{routed_at}|{}", capture.id))
+}
+
+/// Inverse of `cursor_for_archive`. None → returns Ok(None). An
+/// invalid cursor (missing `|`) surfaces as Decode so the command
+/// layer can return it as a string error.
+fn parse_archive_cursor(cursor: Option<&str>) -> Result<Option<(String, String)>, StoreError> {
+    let Some(s) = cursor else {
+        return Ok(None);
+    };
+    let (routed_at, id) = s.split_once('|').ok_or_else(|| {
+        StoreError::Decode(format!("invalid archive cursor: {s}"))
+    })?;
+    Ok(Some((routed_at.to_string(), id.to_string())))
 }
 
 /// Detects a SQLite UNIQUE-constraint violation. Used to map a failed
