@@ -344,7 +344,7 @@
     <MainNav active="archive" />
   </header>
   <div class="panes">
-    <div class="list-column">
+    <div class="list-column" class:has-mention={activeMention !== null}>
       <div class="searchbar">
         <input
           bind:this={searchInputEl}
@@ -533,6 +533,12 @@
     grid-template-rows: auto auto 1fr;
     min-height: 0;
     border-right: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  /* When the mention pill is active, expand to a 4-row grid so the
+     pill takes its own auto row without pushing list-pane out of
+     the 1fr cell. See the Inbox page for the same fix + rationale. */
+  .list-column.has-mention {
+    grid-template-rows: auto auto auto 1fr;
   }
   @media (prefers-color-scheme: dark) {
     .list-column {

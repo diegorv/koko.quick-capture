@@ -519,7 +519,7 @@
     <MainNav active="inbox" />
   </div>
   <div class="panes">
-    <div class="list-column">
+    <div class="list-column" class:has-mention={activeMention !== null}>
       <div class="searchbar">
         <input
           bind:this={searchInputEl}
@@ -716,6 +716,14 @@
     grid-template-rows: auto auto 1fr;
     min-height: 0;
     border-right: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  /* When the mention pill is active a fourth auto row is inserted
+     between filterbar and list-pane so the 1fr track stays attached
+     to list-pane. Without this override the new DOM element shoves
+     filterbar into the 1fr cell (it stretches) and list-pane drops
+     into an implicit auto row (it collapses). */
+  .list-column.has-mention {
+    grid-template-rows: auto auto auto 1fr;
   }
 
   .list-pane {
