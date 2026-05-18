@@ -259,7 +259,11 @@
   </header>
 
   <div class="callout">
-    Start the app first: <kbd>pnpm tauri dev</kbd>. The checklist below covers every entry point shipped in v0.2.0. Drag-drop, Cmd+Tab integration, and window persistence are the paths most likely never exercised — they sit near the bottom.
+    Start the app first: <kbd>pnpm tauri dev</kbd>. The checklist below covers every entry point shipped through ADR-0010 (Routed Captures + Destinations). Drag-drop, Cmd+Tab integration, and window persistence are the paths most likely never exercised — they sit near the bottom.
+  </div>
+
+  <div class="callout" style="background:#fee2e2;border-color:#fca5a5;color:#7f1d1d;">
+    <strong>One-time DB wipe required:</strong> the ADR-0010 schema rebuilds from scratch (no migration). Delete <code>~/Library/Application Support/com.koko.quick-capture/captures.db</code> before the first launch on v0.5+; existing rows in the old layout will fail to open.
   </div>
 
   <div class="toolbar">
@@ -271,7 +275,7 @@
   <main id="groups"></main>
 
   <p class="footnote">
-    Persistence key: <code>quick-capture-manual-smoke-v1</code>.
+    Persistence key: <code>quick-capture-manual-smoke-v2-adr0010</code>.
     Clear via the Reset button or DevTools → Application → Local Storage.
   </p>
 
@@ -305,6 +309,7 @@
       title: "Inbox window",
       items: [
         { id: "inbox-open", desc: "<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Cmd</kbd>+<kbd>I</kbd> opens the window.", hint: "Arrow keys move the selection immediately, no extra Tab needed." },
+        { id: "inbox-mainnav", desc: "Top of the window shows the Inbox / Archive switcher with an inbox count badge (ADR-0010 slice 5).", hint: "Badge equals the count of un-routed Captures; updates live as you save / route / delete rows." },
         { id: "inbox-rows", desc: "Each kind (Note / Clip / Link / Shot / File) renders the correct row icon + a sensible payload preview.", hint: "Save one of each first to see them side by side." },
         { id: "inbox-detail", desc: "Click rows or arrow through them.", hint: "Detail pane updates live; the Open button label matches the kind (Open in Browser / Reveal in Finder / Open Image)." },
         { id: "inbox-open-link", desc: "Press <kbd>Enter</kbd> on a Link row.", hint: "Default browser launches at the URL." },
@@ -313,7 +318,55 @@
         { id: "inbox-delete", desc: "Press <kbd>Cmd</kbd>+<kbd>Delete</kbd> on a row.", hint: "Row vanishes from the list, total count drops by one. (It's soft-deleted — still in the DB.)" },
         { id: "inbox-pagination", desc: "Scroll past row 50.", hint: "Next page loads transparently. Save 51+ captures first, or seed via <code>cargo run --bin dev_list</code>." },
         { id: "inbox-live", desc: "With the Inbox open, capture something via Composer or clipboard.", hint: "New row prepends live; status bar total bumps; Dock badge increments." },
-        { id: "inbox-statusbar", desc: "Status bar at the bottom shows totals.", hint: "Format: <code>N captures · last Xm ago · K new</code>. The \"K new\" segment hides at zero." }
+        { id: "inbox-statusbar", desc: "Status bar at the bottom shows totals.", hint: "Format: <code>N captures · last Xm ago · K new</code>. The \"K new\" segment hides at zero." },
+        { id: "inbox-empty-cold", desc: "Fresh install with no Captures.", hint: "Empty state copy reads \"No captures yet\" + shortcut hints (cold-start branch from slice 8)." },
+        { id: "inbox-empty-zero", desc: "Save 1+ Capture, then route or delete every row.", hint: "Empty state copy switches to \"Inbox zero. Nice.\" with a link to the Archive." }
+      ]
+    },
+    {
+      id: "destinations",
+      title: "Destinations — Settings panel (ADR-0010 slice 3)",
+      items: [
+        { id: "dest-open-settings", desc: "Tray → Settings…", hint: "Settings window opens with a Destinations section above Storage." },
+        { id: "dest-create", desc: "Click <strong>+ New destination</strong>, type a name (e.g. \"Todoist\"), pick a color swatch, press <kbd>Enter</kbd>.", hint: "Row appears in the live list, alpha-sorted, with the color dot rendered." },
+        { id: "dest-create-blank", desc: "Open the form, leave the name blank, click Save.", hint: "Inline error: \"Name required.\" Form stays open." },
+        { id: "dest-create-dup", desc: "Try creating a second destination with the same name as a live one.", hint: "Inline error mentions \"already in use\". Form stays open for retry." },
+        { id: "dest-edit", desc: "Click <strong>Edit</strong> on a row, change name + color, Save.", hint: "Row updates in place. Picker + Archive chips also pick up the change (event bus refresh)." },
+        { id: "dest-delete-confirm", desc: "Click <strong>Delete</strong> on a row.", hint: "Inline confirm bar appears with a danger-styled Delete button. Cancel closes it without mutating." },
+        { id: "dest-delete", desc: "Confirm the delete.", hint: "Row leaves the live list. Soft-deleted section appears (or row count bumps if it already existed)." },
+        { id: "dest-restore", desc: "Expand <em>Soft-deleted</em>, click <strong>Restore</strong>.", hint: "Row returns to the live list. Conflict (same name as a live destination) blocks restore with an error message." }
+      ]
+    },
+    {
+      id: "triage",
+      title: "Inbox triage — R picker (ADR-0010 slice 4)",
+      items: [
+        { id: "triage-empty-create", desc: "With zero live destinations + at least one Inbox row, press <kbd>R</kbd> on the selected row.", hint: "Picker opens directly in create-mode (input focused, no list). Type a name, Enter creates + routes in one go." },
+        { id: "triage-open", desc: "Press <kbd>R</kbd> on an Inbox row with destinations existing.", hint: "Raycast-style overlay shows the search input + alpha-sorted destinations with color dots." },
+        { id: "triage-filter", desc: "Type a few letters in the picker.", hint: "List narrows by case-insensitive substring." },
+        { id: "triage-nav", desc: "Arrow Up / Down move the highlight.", hint: "Active row visibly highlighted; wraps clamped at ends, not cyclic." },
+        { id: "triage-assign", desc: "Press <kbd>Enter</kbd> on a highlighted destination.", hint: "Row leaves the Inbox immediately; next row auto-selected so you can keep pressing R." },
+        { id: "triage-create-flow", desc: "From the list view, press <kbd>Cmd</kbd>+<kbd>N</kbd>.", hint: "Switches to inline create form (pre-fills with your current filter text). Save routes in one motion." },
+        { id: "triage-cancel", desc: "Open the picker, press <kbd>Esc</kbd>.", hint: "Picker closes, row stays in Inbox, no route_capture call fired." },
+        { id: "triage-mouse", desc: "In the detail pane, click the <strong>Route</strong> button.", hint: "Same picker opens — mouse parity for the R keyboard shortcut." }
+      ]
+    },
+    {
+      id: "archive",
+      title: "Archive view (ADR-0010 slices 5 + 6)",
+      items: [
+        { id: "archive-nav-click", desc: "Click the <strong>Archive</strong> tab in the top switcher.", hint: "View swaps to /archive inside the same window; tab highlight moves; URL updates." },
+        { id: "archive-nav-keys", desc: "Use <kbd>Cmd</kbd>+<kbd>2</kbd> / <kbd>Cmd</kbd>+<kbd>1</kbd> to switch tabs.", hint: "Cmd+2 → Archive, Cmd+1 → Inbox. Same state preserved between switches." },
+        { id: "archive-tray-shortcut", desc: "From any state, press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Cmd</kbd>+<kbd>A</kbd>.", hint: "Window comes to screen on the Archive view (slice 7 global shortcut)." },
+        { id: "archive-empty", desc: "Open the Archive with zero routed Captures.", hint: "Empty state: \"Nothing routed yet. Press R in the Inbox to start.\"" },
+        { id: "archive-list", desc: "After routing a few captures, open the Archive.", hint: "List shows routed Captures, newest routed first (sort = routed_at DESC, id DESC tiebreak)." },
+        { id: "archive-chips", desc: "Filter chip bar above the list shows All + each live destination with a per-bucket count.", hint: "Counts add up to the All total. Color dot matches the destination's swatch." },
+        { id: "archive-chip-filter", desc: "Click a destination chip.", hint: "List narrows to just that destination's Captures. \"All\" chip reverts." },
+        { id: "archive-deleted-hint", desc: "Soft-delete a destination that still has routed Captures pointing at it. Reopen the Archive.", hint: "An italic hint chip appears noting that some Captures reference soft-deleted destinations." },
+        { id: "archive-reroute", desc: "Select a row, press <kbd>R</kbd>.", hint: "Picker opens with the current destination pre-selected. Pick a different one → routed_at bumps + chip counts update." },
+        { id: "archive-unroute-key", desc: "Select a row, press <kbd>Shift</kbd>+<kbd>R</kbd>.", hint: "Row leaves the Archive; switch to Inbox and confirm it resurfaces there with its read_at preserved." },
+        { id: "archive-unroute-button", desc: "Click <strong>Move to Inbox</strong> in the detail pane.", hint: "Same effect as Shift+R. The Route button in the detail header reads \"Re-route\" while onUnroute is wired." },
+        { id: "archive-delete", desc: "Press <kbd>Cmd</kbd>+<kbd>Delete</kbd> on a row in the Archive.", hint: "Row soft-deletes from the Archive (won't resurface anywhere)." }
       ]
     },
     {
@@ -344,8 +397,9 @@
       title: "Tray (menubar)",
       items: [
         { id: "tray-icon", desc: "Brain-circuit icon visible in the menubar.", hint: "Recolours with the menubar theme (dark menubar → white; light menubar → black). Stroke colour is detected once at app launch." },
-        { id: "tray-menu", desc: "Click the icon to open the menu.", hint: "Three items: Open Composer, Open Inbox, Quit. Each has its Lucide glyph + accelerator hint on the right." },
-        { id: "tray-actions", desc: "Click each item.", hint: "Open Composer / Open Inbox behave exactly like their global shortcuts. Quit exits the app cleanly." }
+        { id: "tray-menu", desc: "Click the icon to open the menu.", hint: "Five items in order: Open Composer, Open Inbox, Open Archive…, Settings…, Quit. Each has its Lucide glyph + accelerator hint on the right." },
+        { id: "tray-actions", desc: "Click each item.", hint: "Open Composer / Open Inbox / Open Archive behave exactly like their global shortcuts. Settings opens the Settings window. Quit exits cleanly." },
+        { id: "tray-archive-nav", desc: "While on /archive, click Tray → Open Inbox.", hint: "Main window navigates to /inbox (view:open_inbox event). Same in reverse: from /inbox, Tray → Open Archive lands on /archive." }
       ]
     },
     {
@@ -367,7 +421,7 @@
     }
   ];
 
-  const STORAGE_KEY = "quick-capture-manual-smoke-v1";
+  const STORAGE_KEY = "quick-capture-manual-smoke-v2-adr0010";
 
   function loadState() {
     try {
