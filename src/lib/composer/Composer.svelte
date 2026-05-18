@@ -204,6 +204,41 @@
     color: inherit;
   }
 
+  /* CM autocomplete popup. Default theme is a white card with black
+     text and a near-white selection background, which leaves the
+     non-selected row invisible against the Composer's light-grey
+     surface and unreadable against the dark surface. Re-style it to
+     match the Composer's palette: light card on light mode, dark
+     card on dark mode, indigo selection in both. */
+  :global(.composer .cm-tooltip.cm-tooltip-autocomplete) {
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    font-family: inherit;
+    font-size: 0.9rem;
+    overflow: hidden;
+  }
+  :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul) {
+    max-height: 14rem;
+    font-family: inherit;
+  }
+  :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li) {
+    padding: 0.25rem 0.6rem;
+    color: #0f0f0f;
+  }
+  :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]) {
+    background: rgba(79, 70, 229, 0.85);
+    color: #ffffff;
+  }
+  :global(.composer .cm-completionIcon) {
+    opacity: 0.55;
+    padding-right: 0.4em;
+  }
+  :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon) {
+    opacity: 0.9;
+  }
+
   .hint {
     margin-top: 0.5rem;
     font-size: 0.75rem;
@@ -216,6 +251,18 @@
     .composer {
       background: rgba(30, 30, 30, 0.98);
       color: #f4f4f4;
+    }
+    :global(.composer .cm-tooltip.cm-tooltip-autocomplete) {
+      background: #2a2a2e;
+      border-color: rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    }
+    :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li) {
+      color: #f4f4f4;
+    }
+    :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]) {
+      background: rgba(99, 91, 255, 0.85);
+      color: #ffffff;
     }
   }
 </style>
