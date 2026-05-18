@@ -59,7 +59,10 @@ export function wikilinkCompletion(
 
     const completions: Completion[] = filtered.map((person) => ({
       label: person.name,
-      type: "file",
+      // The `type` string drives CM's icon class
+      // (`.cm-completionIcon-person`) — themed in Composer.svelte to
+      // a Lucide user glyph rather than CM's "?" fallback.
+      type: "person",
       apply: (view, _completion, from, to) => {
         const after = view.state.doc.sliceString(
           to,

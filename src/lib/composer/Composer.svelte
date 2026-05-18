@@ -231,12 +231,30 @@
     background: rgba(79, 70, 229, 0.85);
     color: #ffffff;
   }
+  /* Lucide `user` glyph in place of CM's "?" fallback. mask-image +
+     currentColor lets the icon tint to the row's text colour, so it
+     stays visible against both the unselected and selected (indigo)
+     backgrounds. */
   :global(.composer .cm-completionIcon) {
+    width: 1em;
+    padding-right: 0.45em;
     opacity: 0.55;
-    padding-right: 0.4em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :global(.composer .cm-completionIcon::after) {
+    content: "";
+    display: block;
+    width: 1em;
+    height: 1em;
+    background-color: currentColor;
+    --wikilink-user-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'/><circle cx='12' cy='7' r='4'/></svg>");
+    mask: var(--wikilink-user-icon) center / contain no-repeat;
+    -webkit-mask: var(--wikilink-user-icon) center / contain no-repeat;
   }
   :global(.composer .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon) {
-    opacity: 0.9;
+    opacity: 0.95;
   }
 
   .hint {
