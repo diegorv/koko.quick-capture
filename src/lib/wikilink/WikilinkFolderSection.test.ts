@@ -13,7 +13,7 @@ function makeInvoke(
 }
 
 describe("WikilinkFolderSection", () => {
-  it("renders 'Not set' when the folder is unset", async () => {
+  it("renders an empty-state CTA when the folder is unset", async () => {
     const invokeFn = makeInvoke({
       get_wikilink_source_folder: () => null,
     });
@@ -23,9 +23,9 @@ describe("WikilinkFolderSection", () => {
     });
 
     await waitFor(() => {
-      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-        "Not set",
-      );
+      const text = getByTestId("wikilink-folder-path").textContent ?? "";
+      expect(text).toContain("Pick a folder");
+      expect(text).toContain("[[");
     });
     // No Clear button when the value is unset.
     expect(() => getByTestId("wikilink-clear-btn")).toThrow();
@@ -64,8 +64,8 @@ describe("WikilinkFolderSection", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-        "Not set",
+      expect(getByTestId("wikilink-folder-path").textContent).toContain(
+        "Pick a folder",
       ),
     );
 
@@ -137,8 +137,8 @@ describe("WikilinkFolderSection", () => {
     await fireEvent.click(getByTestId("wikilink-clear-btn"));
 
     await waitFor(() =>
-      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-        "Not set",
+      expect(getByTestId("wikilink-folder-path").textContent).toContain(
+        "Pick a folder",
       ),
     );
     expect(invokeFn).toHaveBeenCalledWith("set_wikilink_source_folder", {
@@ -180,8 +180,8 @@ describe("WikilinkFolderSection", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-        "Not set",
+      expect(getByTestId("wikilink-folder-path").textContent).toContain(
+        "Pick a folder",
       ),
     );
     expect(() => getByTestId("wikilink-reveal-btn")).toThrow();
@@ -202,8 +202,8 @@ describe("WikilinkFolderSection", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-        "Not set",
+      expect(getByTestId("wikilink-folder-path").textContent).toContain(
+        "Pick a folder",
       ),
     );
 
@@ -215,8 +215,8 @@ describe("WikilinkFolderSection", () => {
       ),
     );
     // Path remained unset.
-    expect(getByTestId("wikilink-folder-path").textContent?.trim()).toBe(
-      "Not set",
+    expect(getByTestId("wikilink-folder-path").textContent).toContain(
+      "Pick a folder",
     );
   });
 });

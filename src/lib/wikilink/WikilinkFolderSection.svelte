@@ -91,17 +91,20 @@
 
   <p class="lede">
     Folder whose top-level <code>.md</code> filenames feed the Composer's
-    <code>[[</code> autocomplete. Leave unset to disable the feature.
+    <code>[[</code> autocomplete. Leave unset to keep the feature off.
   </p>
 
   <div class="row">
-    <span
-      class="path"
-      data-testid="wikilink-folder-path"
-      class:unset={folder === null}
-    >
-      {folder ?? "Not set"}
-    </span>
+    {#if folder === null}
+      <span
+        class="path unset"
+        data-testid="wikilink-folder-path"
+      >
+        Pick a folder to enable <code>[[</code> autocomplete &rarr;
+      </span>
+    {:else}
+      <span class="path" data-testid="wikilink-folder-path">{folder}</span>
+    {/if}
     <span class="row-actions">
       <button
         type="button"
@@ -218,9 +221,13 @@
     min-width: 0;
   }
   .path.unset {
-    opacity: 0.5;
+    opacity: 0.7;
     font-family: inherit;
     font-style: italic;
+    font-size: 0.82rem;
+  }
+  .path.unset code {
+    font-style: normal;
   }
 
   .row-actions {
