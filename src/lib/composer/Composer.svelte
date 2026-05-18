@@ -19,6 +19,7 @@
   } from "@codemirror/view";
   import { EditorState, Prec } from "@codemirror/state";
   import { defaultKeymap } from "@codemirror/commands";
+  import { wikilinkCompletion } from "$lib/wikilink/completion";
 
   interface Props {
     save: (text: string) => void | Promise<void>;
@@ -86,12 +87,13 @@
       doc: "",
       extensions: [
         cmPlaceholder("Capture a note..."),
-        // High-priority keymap so ESC + Cmd+Enter beat the default
-        // bindings. When the wikilink completion source lands the
-        // autocompletion extension installs its own completionKeymap
-        // at an even higher precedence; ESC closing the popup will
-        // therefore consume the key before this handler sees it,
-        // which is the wanted ordering.
+        // `[[ ` autocomplete against the configured Wikilink source
+        // folder (ADR-0011). Installed *before* our composer keymap
+        // so the autocompletion extension's own completionKeymap
+        // (Enter, ESC, ↑↓, Tab) takes precedence when its popup is
+        // open — ESC closes the popup first; the next ESC reaches
+        // our handler and closes the Composer.
+        wikilinkCompletion(),
         Prec.high(
           keymap.of([
             { key: "Escape", run: () => handleEscape() },
