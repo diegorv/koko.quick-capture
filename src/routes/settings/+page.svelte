@@ -7,12 +7,14 @@
   import { getVersion } from "@tauri-apps/api/app";
   import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
   import WikilinkFolderSection from "$lib/wikilink/WikilinkFolderSection.svelte";
+  import UpdatesSection from "$lib/settings/UpdatesSection.svelte";
 
   type SectionId =
     | "shortcuts"
     | "destinations"
     | "wikilink"
     | "storage"
+    | "updates"
     | "about";
 
   const SECTIONS: Array<{ id: SectionId; label: string; group: string }> = [
@@ -20,6 +22,7 @@
     { id: "destinations", label: "Destinations", group: "Capture" },
     { id: "wikilink", label: "Wikilink folder", group: "Capture" },
     { id: "storage", label: "Storage", group: "Advanced" },
+    { id: "updates", label: "Updates", group: "Advanced" },
     { id: "about", label: "About", group: "Advanced" },
   ];
 
@@ -150,6 +153,8 @@
           </dd>
         </dl>
       </section>
+    {:else if activeSection === "updates"}
+      <UpdatesSection />
     {:else if activeSection === "about"}
       <section class="section">
         <h2>About</h2>
