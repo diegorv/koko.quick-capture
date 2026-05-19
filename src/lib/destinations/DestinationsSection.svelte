@@ -11,7 +11,7 @@
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import type { Destination } from "$lib/captures/types";
+  import type { Destination, DestinationKind } from "$lib/captures/types";
   import { DESTINATIONS_CHANGED } from "$lib/events";
   import { formatError } from "$lib/utils/format-error";
   import type { PaletteKey } from "./palette";
@@ -37,8 +37,31 @@
   let showDeleted = $state(false);
 
   // Draft state for the inline "+ New" form. `null` = form hidden.
-  type Draft = { name: string; color: PaletteKey | null };
+  // `vault` is only consulted when `kind === "kokobrain"`; the field is
+  // kept in the shape regardless so the kind toggle does not destroy
+  // the string the user already typed.
+  type Draft = {
+    name: string;
+    color: PaletteKey | null;
+    kind: DestinationKind;
+    vault: string;
+  };
   let createDraft = $state<Draft | null>(null);
+
+  function parseVault(config: string | null): string {
+    if (!config) return "";
+    try {
+      const parsed = JSON.parse(config) as { vault?: unknown };
+      return typeof parsed.vault === "string" ? parsed.vault : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function configForKind(kind: DestinationKind, vault: string): string | null {
+    if (kind !== "kokobrain") return null;
+    return JSON.stringify({ vault: vault.trim() });
+  }
 
   // Map of destination id -> in-progress edit draft. Multiple rows could
   // in theory be edited at once; the UI keeps it to one at a time but
@@ -103,7 +126,7 @@
   }
 
   function startCreate() {
-    createDraft = { name: "", color: null };
+    createDraft = { name: "", color: null, kind: "label", vault: "" };
     errorMessage = null;
   }
 
@@ -119,10 +142,16 @@
       errorMessage = "Name required.";
       return;
     }
+    if (createDraft.kind === "kokobrain" && !createDraft.vault.trim()) {
+      errorMessage = "Vault required for KokoBrain destinations.";
+      return;
+    }
     try {
       await invokeFn("create_destination", {
         name,
         color: createDraft.color,
+        kind: createDraft.kind,
+        config: configForKind(createDraft.kind, createDraft.vault),
       });
       createDraft = null;
       errorMessage = null;
@@ -138,6 +167,8 @@
       [dest.id]: {
         name: dest.name,
         color: (dest.color as PaletteKey | null) ?? null,
+        kind: dest.kind,
+        vault: parseVault(dest.config),
       },
     };
     errorMessage = null;
@@ -157,11 +188,17 @@
       errorMessage = "Name required.";
       return;
     }
+    if (draft.kind === "kokobrain" && !draft.vault.trim()) {
+      errorMessage = "Vault required for KokoBrain destinations.";
+      return;
+    }
     try {
       await invokeFn("update_destination", {
         id,
         name,
         color: draft.color,
+        kind: draft.kind,
+        config: configForKind(draft.kind, draft.vault),
       });
       cancelEdit(id);
       await refresh({ includeDeleted: showDeleted });
@@ -228,6 +265,46 @@
         }}
         data-testid="create-name-input"
       />
+      <div class="kind-row" role="radiogroup" aria-label="Destination kind">
+        <label class="kind-option" class:active={createDraft.kind === "label"}>
+          <input
+            type="radio"
+            name="create-kind"
+            value="label"
+            bind:group={createDraft.kind}
+            data-testid="create-kind-label"
+          />
+          Label
+        </label>
+        <label class="kind-option" class:active={createDraft.kind === "kokobrain"}>
+          <input
+            type="radio"
+            name="create-kind"
+            value="kokobrain"
+            bind:group={createDraft.kind}
+            data-testid="create-kind-kokobrain"
+          />
+          KokoBrain
+        </label>
+      </div>
+      {#if createDraft.kind === "kokobrain"}
+        <input
+          type="text"
+          class="name-input"
+          placeholder="Vault name (as shown in KokoBrain)"
+          bind:value={createDraft.vault}
+          onkeydown={(e) => {
+            if (e.key === "Enter") submitCreate();
+            if (e.key === "Escape") cancelCreate();
+          }}
+          data-testid="create-vault-input"
+        />
+        <p class="hint">
+          Routes capture content to the named vault via a
+          <code>kokobrain://</code> deep link. The vault must already
+          exist in KokoBrain.
+        </p>
+      {/if}
       <PaletteSwatches
         selected={createDraft.color}
         onSelect={(c) => createDraft && (createDraft.color = c)}
@@ -261,6 +338,41 @@
                 if (e.key === "Escape") cancelEdit(dest.id);
               }}
             />
+            <div class="kind-row" role="radiogroup" aria-label="Destination kind">
+              <label class="kind-option" class:active={editDrafts[dest.id].kind === "label"}>
+                <input
+                  type="radio"
+                  name={`edit-kind-${dest.id}`}
+                  value="label"
+                  bind:group={editDrafts[dest.id].kind}
+                  data-testid="edit-kind-label"
+                />
+                Label
+              </label>
+              <label class="kind-option" class:active={editDrafts[dest.id].kind === "kokobrain"}>
+                <input
+                  type="radio"
+                  name={`edit-kind-${dest.id}`}
+                  value="kokobrain"
+                  bind:group={editDrafts[dest.id].kind}
+                  data-testid="edit-kind-kokobrain"
+                />
+                KokoBrain
+              </label>
+            </div>
+            {#if editDrafts[dest.id].kind === "kokobrain"}
+              <input
+                type="text"
+                class="name-input"
+                placeholder="Vault name (as shown in KokoBrain)"
+                bind:value={editDrafts[dest.id].vault}
+                onkeydown={(e) => {
+                  if (e.key === "Enter") submitEdit(dest.id);
+                  if (e.key === "Escape") cancelEdit(dest.id);
+                }}
+                data-testid="edit-vault-input"
+              />
+            {/if}
             <PaletteSwatches
               selected={editDrafts[dest.id].color}
               onSelect={(c) => (editDrafts[dest.id].color = c)}
@@ -519,6 +631,65 @@
   .form-actions {
     display: flex;
     gap: 0.4rem;
+  }
+
+  .kind-row {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .kind-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+    user-select: none;
+  }
+  .kind-option.active {
+    background: rgba(76, 29, 149, 0.12);
+    border-color: rgba(76, 29, 149, 0.5);
+    color: rgba(76, 29, 149, 1);
+  }
+  .kind-option input {
+    appearance: none;
+    width: 0;
+    height: 0;
+    margin: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .kind-option {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .kind-option.active {
+      background: rgba(167, 139, 250, 0.15);
+      border-color: rgba(167, 139, 250, 0.5);
+      color: rgba(167, 139, 250, 1);
+    }
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 0.78rem;
+    color: rgba(0, 0, 0, 0.55);
+  }
+  .hint code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.74rem;
+    padding: 0 0.2rem;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    .hint {
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .hint code {
+      background: rgba(255, 255, 255, 0.08);
+    }
   }
 
   .rows {

@@ -99,6 +99,8 @@ describe("DestinationsSection", () => {
     expect(invokeFn).toHaveBeenCalledWith("create_destination", {
       name: "Todoist",
       color: "red",
+      kind: "label",
+      config: null,
     });
   });
 
@@ -199,6 +201,8 @@ describe("DestinationsSection", () => {
       id: "01H0001",
       name: "New",
       color: "red",
+      kind: "label",
+      config: null,
     });
   });
 
@@ -260,5 +264,84 @@ describe("DestinationsSection", () => {
 
     const rows = await findAllByTestId("destination-row");
     expect(rows.length).toBe(1);
+  });
+
+  it("creates a KokoBrain destination with a vault config", async () => {
+    const created: Destination[] = [];
+    const invokeFn = makeInvoke({
+      list_destinations: () => created,
+      list_deleted_destinations: () => [],
+      create_destination: (args) => {
+        const row: Destination = {
+          id: "01H0002",
+          name: args.name as string,
+          color: (args.color as string | null) ?? null,
+          created_at: new Date().toISOString(),
+          deleted_at: null,
+          kind: args.kind as Destination["kind"],
+          config: (args.config as string | null) ?? null,
+        };
+        created.push(row);
+        return row;
+      },
+    });
+
+    const { getByTestId, findAllByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    await fireEvent.click(getByTestId("new-destination-btn"));
+    const form = getByTestId("create-form");
+    const name = within(form).getByTestId("create-name-input") as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: "Personal Brain" } });
+
+    // Vault input only shows after switching kind.
+    expect(within(form).queryByTestId("create-vault-input")).toBeNull();
+    const kokoRadio = within(form).getByTestId("create-kind-kokobrain") as HTMLInputElement;
+    await fireEvent.click(kokoRadio);
+    const vault = within(form).getByTestId("create-vault-input") as HTMLInputElement;
+    await fireEvent.input(vault, { target: { value: "Personal" } });
+
+    await fireEvent.click(within(form).getByText("Save"));
+
+    expect(invokeFn).toHaveBeenCalledWith("create_destination", {
+      name: "Personal Brain",
+      color: null,
+      kind: "kokobrain",
+      config: JSON.stringify({ vault: "Personal" }),
+    });
+    const rows = await findAllByTestId("destination-row");
+    expect(rows.length).toBe(1);
+  });
+
+  it("blocks KokoBrain submit when the vault field is blank", async () => {
+    const invokeFn = makeInvoke({
+      list_destinations: () => [],
+      list_deleted_destinations: () => [],
+      create_destination: () => {
+        throw "should not be called";
+      },
+    });
+
+    const { getByTestId, findByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    await fireEvent.click(getByTestId("new-destination-btn"));
+    const form = getByTestId("create-form");
+    const name = within(form).getByTestId("create-name-input") as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: "Personal Brain" } });
+    const kokoRadio = within(form).getByTestId("create-kind-kokobrain") as HTMLInputElement;
+    await fireEvent.click(kokoRadio);
+
+    // Leave the vault field empty and submit.
+    await fireEvent.click(within(form).getByText("Save"));
+
+    const errorBox = await findByTestId("destinations-error");
+    expect(errorBox.textContent?.toLowerCase()).toContain("vault");
+    expect(invokeFn).not.toHaveBeenCalledWith(
+      "create_destination",
+      expect.anything(),
+    );
   });
 });
