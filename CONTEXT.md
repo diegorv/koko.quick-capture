@@ -101,9 +101,43 @@ Closed set. Adding a kind is an explicit change everywhere kinds are handled (AD
 | Kind        | Routing side-effect                                                                                              | Config                          |
 | ----------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | `label`     | None beyond setting `destination_id` + `routed_at` on the Capture.                                               | None (always `null`).           |
-| `kokobrain` | Same as `label`, plus dispatches `kokobrain://capture?vault=...&content=...&tags=<destName-kebab>` via the OS.   | `{ "vault": string }` required. |
+| `kokobrain` | Same as `label`, plus dispatches a typed `kokobrain://capture?v=2&kind=...&vault=...` deep link via the OS (see [Kokobrain capture URI](#kokobrain-capture-uri)). | `{ "vault": string }` required. |
 
-KokoBrain destinations only accept Capture kinds whose payload can be rendered as text: `Note` and `Clip` send raw text, `Link` sends `[title](url)`. `Shot` and `File` cannot be routed to a KokoBrain destination — the picker disables those rows with an inline reason. The handoff is fire-and-forget: quick-capture does not know whether the brain side wrote the note successfully, so a missing vault or a crashed brain leaves an optimistically-Routed Capture without a corresponding note. The user resolves divergence by un-routing the Capture or fixing the destination's vault.
+KokoBrain destinations only accept Capture kinds whose payload can be rendered as text: `Note` and `Clip` send their raw `text`, `Link` sends `url` (with an optional `title` resolved from the captured window title or `payload.title`). `Shot` and `File` cannot be routed to a KokoBrain destination — the picker disables those rows with an inline reason. The handoff is fire-and-forget: quick-capture does not know whether the brain side wrote the note successfully, so a missing vault or a crashed brain leaves an optimistically-Routed Capture without a corresponding note. The user resolves divergence by un-routing the Capture or fixing the destination's vault.
+
+## Kokobrain capture URI
+
+The wire contract between a `kokobrain` Destination and the brain app. Defined by ADR-0013; built by `src-tauri/src/kokobrain/mod.rs::build_capture_uri`. Schema version is **v2**; the brain side rejects URIs without `v=2` after its own v2 release.
+
+Every URI is of the form `kokobrain://capture?v=2&kind=<k>&vault=<v>&...&captured_at=<iso>[&tags=<csv>]`. Parameter order is stable for log readability but the brain parser treats the query as unordered.
+
+Always present:
+
+| Param         | Source                                                                                | Notes                                                                       |
+| ------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `v`           | Literal `2`.                                                                          | Schema version. Bump on any breaking change.                                |
+| `kind`        | `Capture.kind` lower-cased (`note`, `clip`, `link`, `shot`, `file`).                  | Brain dispatches per kind.                                                  |
+| `vault`       | Destination config `vault` string.                                                    | Required and validated non-blank at config-parse time.                      |
+| `captured_at` | `Capture.created_at` (ISO 8601).                                                      | Brain may use this for the note's `created` frontmatter or filename prefix. |
+| `tags`        | Kebab-cased destination name plus user-configured tags, deduped, in original order.   | Omitted entirely when the merged list is empty.                             |
+
+Per-kind required fields:
+
+| `kind`         | Required params         | Notes                                                                                             |
+| -------------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `note`, `clip` | `text`                  | Raw payload text. The brain may wrap it in a Source footer if `source_url` is also present.       |
+| `link`         | `url` (+ optional `title`) | `title` resolves through `source_title` -> `payload.title`; omitted when neither is non-blank.    |
+| `shot`, `file` | `path` (when emitted)   | Not emitted by quick-capture today — `build_capture_uri` returns `UnsupportedKind` for these.     |
+
+Source context (optional, emitted only when non-blank):
+
+| Param          | Source                | Emitted for                                                                                                          |
+| -------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `source_app`   | `Capture.source_app`  | All kinds. macOS bundle id of the foreground app at capture time (e.g. `com.google.Chrome`).                         |
+| `source_title` | `Capture.source_title`| `Note` and `Clip` only. **Stripped for `Link`** because it duplicates the canonical `title` param.                   |
+| `source_url`   | `Capture.source_url`  | `Note` and `Clip` only. **Stripped for `Link`** because it duplicates the canonical `url` param.                     |
+
+Whitespace-only values for any optional field are treated as absent. The URI never carries an empty-string param.
 
 ## Wikilink
 

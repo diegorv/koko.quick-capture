@@ -2,12 +2,28 @@
 //! integration (ADR-0012). Pure functions only — emission of the URI
 //! through `tauri-plugin-opener` lives in the command layer.
 //!
-//! Per ADR-0012:
-//! - quick-capture sends `vault`, `content`, and a single `tags` value
-//!   (the destination name in kebab-case).
-//! - `Note` / `Clip` send raw payload text, `Link` sends a markdown
-//!   `[title](url)` line, and `Shot` / `File` are not routable to a
-//!   kokobrain destination in v1.
+//! Schema v2 (current). The brain side owns markdown rendering; this
+//! module emits each capture field as its own query parameter so the
+//! brain can build the note (YAML title, source footer, link card,
+//! attachments) without re-parsing a pre-rendered body. Hard cut from
+//! the v1 `content=<md>&title=` shape — coordinate the rollout with
+//! the matching brain release.
+//!
+//! Common params on every URI: `v=2`, `kind`, `vault`, `captured_at`,
+//! and `tags` (omitted when the merged list is empty). `source_app`,
+//! `source_title`, `source_url` ride along whenever the capture has
+//! them — except on `Link`, which omits `source_title` / `source_url`
+//! because they are redundant with the canonical `url` + `title` from
+//! the payload.
+//!
+//! Per-kind required params:
+//! - `Note` / `Clip` send `text` (the raw payload).
+//! - `Link` sends `url` plus an optional `title` (resolved from
+//!   `source_title` -> `payload.title`; omitted when neither exists so
+//!   the brain can fall back on its own).
+//! - `Shot` / `File` are still rejected here; the brain parser accepts
+//!   `kind=shot|file` with `path=`, but quick-capture will wire that in
+//!   a later change.
 
 use crate::store::{Capture, CaptureKind, Destination, DestinationKind};
 
@@ -63,9 +79,9 @@ struct KokobrainConfig {
     tags: Vec<String>,
 }
 
-/// Build the `kokobrain://capture?vault=...&content=...&tags=...` URI
-/// for the given Capture + Destination pair. See module docs for
-/// payload mapping per kind.
+/// Build the v2 `kokobrain://capture?v=2&kind=...&vault=...&...` URI
+/// for the given Capture + Destination pair. See module docs for the
+/// schema and per-kind field mapping.
 ///
 /// The `tags` query parameter is the kebab-cased destination name
 /// followed by every user-supplied tag from the destination config
@@ -81,22 +97,73 @@ pub fn build_capture_uri(
         return Err(BuildError::WrongDestinationKind);
     }
     let cfg = parse_kokobrain_config(destination.config.as_deref())?;
-    let content = content_for_capture(capture)?;
     let tags = merge_tags(&destination.name, &cfg.tags);
-    let title = title_for_capture(capture);
 
-    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-    serializer
-        .append_pair("vault", &cfg.vault)
-        .append_pair("content", &content);
+    let mut s = url::form_urlencoded::Serializer::new(String::new());
+    s.append_pair("v", "2");
+    s.append_pair("kind", capture_kind_param(capture.kind));
+    s.append_pair("vault", &cfg.vault);
+
+    match capture.kind {
+        CaptureKind::Note | CaptureKind::Clip => {
+            let text = capture
+                .payload
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or(BuildError::MalformedPayload("text"))?;
+            s.append_pair("text", text);
+            if let Some(v) = non_blank(capture.source_app.as_deref()) {
+                s.append_pair("source_app", v);
+            }
+            if let Some(v) = non_blank(capture.source_title.as_deref()) {
+                s.append_pair("source_title", v);
+            }
+            if let Some(v) = non_blank(capture.source_url.as_deref()) {
+                s.append_pair("source_url", v);
+            }
+        }
+        CaptureKind::Link => {
+            let url = capture
+                .payload
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or(BuildError::MalformedPayload("url"))?;
+            s.append_pair("url", url);
+            if let Some(t) = link_title(capture) {
+                s.append_pair("title", &t);
+            }
+            if let Some(v) = non_blank(capture.source_app.as_deref()) {
+                s.append_pair("source_app", v);
+            }
+            // source_title / source_url intentionally omitted: for Link
+            // captures they duplicate `url` / `title` from the payload,
+            // which the brain treats as authoritative.
+        }
+        CaptureKind::Shot | CaptureKind::File => {
+            return Err(BuildError::UnsupportedKind(capture.kind));
+        }
+    }
+
+    s.append_pair("captured_at", &capture.created_at);
     if !tags.is_empty() {
-        serializer.append_pair("tags", &tags.join(","));
+        s.append_pair("tags", &tags.join(","));
     }
-    if let Some(t) = title {
-        serializer.append_pair("title", &t);
+
+    Ok(format!("kokobrain://capture?{}", s.finish()))
+}
+
+fn capture_kind_param(kind: CaptureKind) -> &'static str {
+    match kind {
+        CaptureKind::Note => "note",
+        CaptureKind::Clip => "clip",
+        CaptureKind::Link => "link",
+        CaptureKind::Shot => "shot",
+        CaptureKind::File => "file",
     }
-    let query = serializer.finish();
-    Ok(format!("kokobrain://capture?{query}"))
+}
+
+fn non_blank(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|t| !t.is_empty())
 }
 
 /// Extract `vault` + `tags` from a Destination's config blob. The
@@ -160,23 +227,13 @@ fn merge_tags(destination_name: &str, user_tags: &[String]) -> Vec<String> {
     out
 }
 
-/// Best-effort structured title for the capture. Only `Link` captures
-/// carry a meaningful standalone title; for every other kind the
-/// "title" is just the content itself, so emitting it would be
-/// redundant. Falls back through `source_title` -> `payload.title`;
-/// returns `None` when neither is populated rather than sending the
-/// raw URL as a title (the URL already appears in the markdown body
-/// produced by `content_for_capture`).
-fn title_for_capture(capture: &Capture) -> Option<String> {
-    if capture.kind != CaptureKind::Link {
-        return None;
-    }
-    if let Some(t) = capture
-        .source_title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    {
+/// Resolve the optional `title` param for a Link capture. Prefers the
+/// browser's window/tab title (`source_title`) captured at click time,
+/// falls back to `payload.title` when the source title is absent or
+/// blank. Returns `None` when neither is populated so the brain can
+/// fall back on its own (e.g. deriving from the URL).
+fn link_title(capture: &Capture) -> Option<String> {
+    if let Some(t) = non_blank(capture.source_title.as_deref()) {
         return Some(t.to_string());
     }
     capture
@@ -186,38 +243,6 @@ fn title_for_capture(capture: &Capture) -> Option<String> {
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(str::to_string)
-}
-
-/// Map a Capture to the markdown body that should land in kokobrain.
-fn content_for_capture(capture: &Capture) -> Result<String, BuildError> {
-    match capture.kind {
-        CaptureKind::Note | CaptureKind::Clip => {
-            let text = capture
-                .payload
-                .get("text")
-                .and_then(|v| v.as_str())
-                .ok_or(BuildError::MalformedPayload("text"))?;
-            Ok(text.to_string())
-        }
-        CaptureKind::Link => {
-            let url = capture
-                .payload
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or(BuildError::MalformedPayload("url"))?;
-            let title = capture
-                .source_title
-                .as_deref()
-                .or_else(|| capture.payload.get("title").and_then(|v| v.as_str()))
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .unwrap_or(url);
-            Ok(format!("[{title}]({url})"))
-        }
-        CaptureKind::Shot | CaptureKind::File => {
-            Err(BuildError::UnsupportedKind(capture.kind))
-        }
-    }
 }
 
 /// Kebab-case a destination name for use as a single brain tag.
@@ -348,19 +373,77 @@ mod tests {
         assert_eq!(kebab_case("---"), "");
     }
 
+    fn parse_pairs(uri: &str) -> Vec<(String, String)> {
+        url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+            .into_owned()
+            .collect()
+    }
+
+    fn get_pair<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    fn clip_capture_with_context(
+        text: &str,
+        source_app: Option<&str>,
+        source_title: Option<&str>,
+        source_url: Option<&str>,
+    ) -> Capture {
+        Capture {
+            id: "01H000000000000000000000CLIP".into(),
+            kind: CaptureKind::Clip,
+            created_at: "2026-05-18T12:00:00Z".into(),
+            payload: serde_json::json!({ "text": text }),
+            source_app: source_app.map(String::from),
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: source_title.map(String::from),
+            source_url: source_url.map(String::from),
+            destination_id: None,
+            routed_at: None,
+        }
+    }
+
+    fn note_capture_with_context(
+        text: &str,
+        source_app: Option<&str>,
+        source_title: Option<&str>,
+        source_url: Option<&str>,
+    ) -> Capture {
+        Capture {
+            id: "01H000000000000000000000NOTE".into(),
+            kind: CaptureKind::Note,
+            created_at: "2026-05-18T12:00:00Z".into(),
+            payload: serde_json::json!({ "text": text }),
+            source_app: source_app.map(String::from),
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: source_title.map(String::from),
+            source_url: source_url.map(String::from),
+            destination_id: None,
+            routed_at: None,
+        }
+    }
+
     #[test]
-    fn note_payload_becomes_raw_content() {
+    fn note_payload_becomes_text_param() {
         let cap = note_capture("hello world");
         let dest = kokobrain_dest("Reading List", "Personal");
         let uri = build_capture_uri(&cap, &dest).expect("build");
         assert!(uri.starts_with("kokobrain://capture?"));
-        assert!(uri.contains("vault=Personal"));
-        assert!(uri.contains("content=hello+world"));
-        assert!(uri.contains("tags=reading-list"));
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "v"), Some("2"));
+        assert_eq!(get_pair(&pairs, "kind"), Some("note"));
+        assert_eq!(get_pair(&pairs, "vault"), Some("Personal"));
+        assert_eq!(get_pair(&pairs, "text"), Some("hello world"));
+        assert_eq!(get_pair(&pairs, "tags"), Some("reading-list"));
+        assert_eq!(get_pair(&pairs, "captured_at"), Some("2026-05-18T12:00:00Z"));
     }
 
     #[test]
-    fn link_uses_source_title_when_present() {
+    fn link_emits_url_and_source_title_as_title() {
         let cap = link_capture(
             "https://example.com/post",
             Some("Payload Title"),
@@ -368,47 +451,30 @@ mod tests {
         );
         let dest = kokobrain_dest("Brain", "Personal");
         let uri = build_capture_uri(&cap, &dest).expect("build");
-        // source_title wins over payload.title; markdown link wrapper.
-        let content_part = uri
-            .split("&content=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .expect("content param");
-        let decoded = url::form_urlencoded::parse(format!("content={content_part}").as_bytes())
-            .find(|(k, _)| k == "content")
-            .map(|(_, v)| v.to_string())
-            .expect("decoded");
-        assert_eq!(decoded, "[Window Title](https://example.com/post)");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "kind"), Some("link"));
+        assert_eq!(get_pair(&pairs, "url"), Some("https://example.com/post"));
+        assert_eq!(get_pair(&pairs, "title"), Some("Window Title"));
     }
 
     #[test]
-    fn link_falls_back_to_payload_title_then_url() {
-        let cap = link_capture("https://example.com/post", Some("Payload Title"), None);
+    fn link_falls_back_to_payload_title_then_omits_title() {
         let dest = kokobrain_dest("Brain", "Personal");
-        let uri = build_capture_uri(&cap, &dest).expect("build");
-        let pairs: Vec<(String, String)> =
-            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
-                .into_owned()
-                .collect();
-        let content = pairs
-            .iter()
-            .find(|(k, _)| k == "content")
-            .map(|(_, v)| v.clone())
-            .unwrap();
-        assert_eq!(content, "[Payload Title](https://example.com/post)");
 
+        // payload.title used when source_title is absent
+        let cap = link_capture("https://example.com/post", Some("Payload Title"), None);
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "url"), Some("https://example.com/post"));
+        assert_eq!(get_pair(&pairs, "title"), Some("Payload Title"));
+
+        // neither source_title nor payload.title -> title param omitted
+        // entirely (the brain derives its own fallback from `url`).
         let cap = link_capture("https://example.com/post", None, None);
         let uri = build_capture_uri(&cap, &dest).expect("build");
-        let pairs: Vec<(String, String)> =
-            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
-                .into_owned()
-                .collect();
-        let content = pairs
-            .iter()
-            .find(|(k, _)| k == "content")
-            .map(|(_, v)| v.clone())
-            .unwrap();
-        assert_eq!(content, "[https://example.com/post](https://example.com/post)");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "url"), Some("https://example.com/post"));
+        assert_eq!(get_pair(&pairs, "title"), None);
     }
 
     #[test]
@@ -629,21 +695,123 @@ mod tests {
     }
 
     #[test]
-    fn special_chars_in_content_are_percent_encoded() {
+    fn special_chars_in_text_are_percent_encoded() {
         let cap = note_capture("a & b = c #tag");
         let dest = kokobrain_dest("Brain", "Personal");
         let uri = build_capture_uri(&cap, &dest).expect("build");
         // The literal `&`, `=`, `#` must not survive in the query
         // (they would break parsing on the brain side).
-        let query = uri.split('?').nth(1).unwrap();
-        let pairs: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
-            .into_owned()
-            .collect();
-        let content = pairs
-            .iter()
-            .find(|(k, _)| k == "content")
-            .map(|(_, v)| v.clone())
-            .unwrap();
-        assert_eq!(content, "a & b = c #tag");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "text"), Some("a & b = c #tag"));
+    }
+
+    #[test]
+    fn note_with_source_context_emits_source_params() {
+        let cap = note_capture_with_context(
+            "remember XYZ",
+            Some("com.google.Chrome"),
+            Some("Some Page"),
+            Some("https://example.com"),
+        );
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "source_app"), Some("com.google.Chrome"));
+        assert_eq!(get_pair(&pairs, "source_title"), Some("Some Page"));
+        assert_eq!(get_pair(&pairs, "source_url"), Some("https://example.com"));
+    }
+
+    #[test]
+    fn clip_with_source_context_emits_text_and_source_params() {
+        let cap = clip_capture_with_context(
+            "Whether I will remain open-minded...",
+            Some("com.google.Chrome"),
+            Some("Four Notes to My Future Self"),
+            Some("https://medium.com/post"),
+        );
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "kind"), Some("clip"));
+        assert_eq!(
+            get_pair(&pairs, "text"),
+            Some("Whether I will remain open-minded...")
+        );
+        assert_eq!(get_pair(&pairs, "source_app"), Some("com.google.Chrome"));
+        assert_eq!(
+            get_pair(&pairs, "source_title"),
+            Some("Four Notes to My Future Self")
+        );
+        assert_eq!(
+            get_pair(&pairs, "source_url"),
+            Some("https://medium.com/post")
+        );
+    }
+
+    #[test]
+    fn link_omits_source_title_and_source_url() {
+        // Even when the Capture carries source_title / source_url, Link
+        // URIs strip them because the payload's `url` / `title` are
+        // canonical. `source_app` still rides along for provenance.
+        let mut cap = link_capture(
+            "https://example.com/post",
+            Some("Payload Title"),
+            Some("Window Title"),
+        );
+        cap.source_app = Some("com.google.Chrome".into());
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "source_app"), Some("com.google.Chrome"));
+        assert_eq!(get_pair(&pairs, "source_title"), None);
+        assert_eq!(get_pair(&pairs, "source_url"), None);
+    }
+
+    #[test]
+    fn blank_source_fields_are_omitted() {
+        // Whitespace-only source fields must not leak into the URI as
+        // empty values; the brain treats `source_*` presence as "we
+        // know this", so blanks would be misleading.
+        let cap = note_capture_with_context("hi", Some("  "), Some(""), Some("   "));
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "source_app"), None);
+        assert_eq!(get_pair(&pairs, "source_title"), None);
+        assert_eq!(get_pair(&pairs, "source_url"), None);
+    }
+
+    #[test]
+    fn captured_at_passes_through_from_capture_created_at() {
+        let cap = note_capture("hi");
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "captured_at"), Some("2026-05-18T12:00:00Z"));
+    }
+
+    #[test]
+    fn all_supported_kinds_carry_v2_and_kind_params() {
+        let dest = kokobrain_dest("Brain", "Personal");
+
+        let note = build_capture_uri(&note_capture("x"), &dest).expect("note");
+        let np = parse_pairs(&note);
+        assert_eq!(get_pair(&np, "v"), Some("2"));
+        assert_eq!(get_pair(&np, "kind"), Some("note"));
+
+        let clip = build_capture_uri(
+            &clip_capture_with_context("x", None, None, None),
+            &dest,
+        )
+        .expect("clip");
+        let cp = parse_pairs(&clip);
+        assert_eq!(get_pair(&cp, "v"), Some("2"));
+        assert_eq!(get_pair(&cp, "kind"), Some("clip"));
+
+        let link =
+            build_capture_uri(&link_capture("https://x.test", None, None), &dest).expect("link");
+        let lp = parse_pairs(&link);
+        assert_eq!(get_pair(&lp, "v"), Some("2"));
+        assert_eq!(get_pair(&lp, "kind"), Some("link"));
     }
 }
