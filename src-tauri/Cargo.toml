@@ -28,6 +28,14 @@ tauri-plugin-window-state = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 url = "2"
+# Auto-update plugin + helpers. `updater` ships the Updater builder used
+# by `check_for_update_on_channel` to swap endpoints per release channel
+# (stable vs nightly). `process` exposes `relaunch()` so the
+# UpdatesSection can restart after install. `store` persists update
+# preferences across launches.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
