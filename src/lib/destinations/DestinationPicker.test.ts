@@ -287,13 +287,18 @@ describe("DestinationPicker", () => {
     );
   });
 
-  it("allows KokoBrain destinations for Note captures", async () => {
+  it("routes Note captures to KokoBrain via route_to_kokobrain", async () => {
     const live = [mkKokoDest("01HKB", "Personal Brain", "Personal")];
+    const kokobrainSpy = vi.fn();
     const routeSpy = vi.fn();
     const invokeFn = makeInvoke({
       list_destinations: () => live,
       route_capture: (args) => {
         routeSpy(args);
+        return null;
+      },
+      route_to_kokobrain: (args) => {
+        kokobrainSpy(args);
         return null;
       },
     });
@@ -313,10 +318,49 @@ describe("DestinationPicker", () => {
     expect(rows[0].getAttribute("data-disabled")).toBeNull();
     await fireEvent.click(rows[0]);
     await waitFor(() =>
-      expect(routeSpy).toHaveBeenCalledWith({
+      expect(kokobrainSpy).toHaveBeenCalledWith({
         id: "01HCAP",
         destinationId: "01HKB",
       }),
     );
+    expect(routeSpy).not.toHaveBeenCalled();
+  });
+
+  it("routes to a label destination via route_capture", async () => {
+    const live = [mkDest("01HLBL", "Todoist", "red")];
+    const kokobrainSpy = vi.fn();
+    const routeSpy = vi.fn();
+    const invokeFn = makeInvoke({
+      list_destinations: () => live,
+      route_capture: (args) => {
+        routeSpy(args);
+        return null;
+      },
+      route_to_kokobrain: (args) => {
+        kokobrainSpy(args);
+        return null;
+      },
+    });
+
+    const { findAllByTestId } = render(DestinationPicker, {
+      props: {
+        open: true,
+        captureId: "01HCAP",
+        captureKind: "Note",
+        invokeFn,
+        onClose: () => {},
+        onAssigned: () => {},
+      },
+    });
+
+    const rows = await findAllByTestId("picker-result");
+    await fireEvent.click(rows[0]);
+    await waitFor(() =>
+      expect(routeSpy).toHaveBeenCalledWith({
+        id: "01HCAP",
+        destinationId: "01HLBL",
+      }),
+    );
+    expect(kokobrainSpy).not.toHaveBeenCalled();
   });
 });

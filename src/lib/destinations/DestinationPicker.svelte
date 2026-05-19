@@ -222,8 +222,13 @@
       errorMessage = disabledReason(target);
       return;
     }
+    // KokoBrain destinations fire the deep-link side-effect via the
+    // dedicated command; everything else goes through the plain
+    // route_capture path. See ADR-0012.
+    const command =
+      target?.kind === "kokobrain" ? "route_to_kokobrain" : "route_capture";
     try {
-      await invokeFn("route_capture", {
+      await invokeFn(command, {
         id: captureId,
         destinationId,
       });
