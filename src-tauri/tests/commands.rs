@@ -628,7 +628,7 @@ fn route_to_kokobrain_fires_uri_and_marks_routed() {
     assert_eq!(observed[0], uri);
     assert!(uri.starts_with("kokobrain://capture?"));
     assert!(uri.contains("vault=Personal"));
-    assert!(uri.contains("content=hello+brain"));
+    assert!(uri.contains("text=hello+brain"));
     assert!(uri.contains("tags=reading-list"));
 
     let archive = list_archive_with_store(&store, None, None, None, 10).expect("archive");
