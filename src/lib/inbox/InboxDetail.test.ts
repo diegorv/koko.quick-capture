@@ -1,7 +1,24 @@
 import { render, fireEvent } from "@testing-library/svelte";
 import { describe, it, expect, vi } from "vitest";
 import InboxDetail from "./InboxDetail.svelte";
-import type { Capture } from "$lib/captures/types";
+import type { Capture, Destination } from "$lib/captures/types";
+
+function destination(
+  id: string,
+  name: string,
+  overrides: Partial<Destination> = {},
+): Destination {
+  return {
+    id,
+    name,
+    color: null,
+    created_at: new Date().toISOString(),
+    deleted_at: null,
+    kind: "label",
+    config: null,
+    ...overrides,
+  };
+}
 
 // `convertFileSrc` is a thin path -> webview URL helper provided by
 // Tauri's runtime; in jsdom we just need it to return something so the
@@ -406,6 +423,75 @@ describe("InboxDetail", () => {
         },
       });
       expect(queryAllByTestId("mention-chip")).toHaveLength(0);
+    });
+  });
+
+  describe("destination chip", () => {
+    function routedClip(destId: string | null): Capture {
+      const cap = clip("01H000000000000000000000D1", "routed text");
+      cap.destination_id = destId;
+      cap.routed_at = "2026-05-18T12:00:00Z";
+      return cap;
+    }
+
+    it("renders a To row with the destination name when supplied", () => {
+      const cap = routedClip("01H000000000000000000000DEST");
+      const dest = destination("01H000000000000000000000DEST", "Personal Brain");
+      const { getByTestId, getByText } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          destination: dest,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+        },
+      });
+      // Label "To" lives in the <dt>; the value sits in the
+      // <dd data-testid="detail-destination"> sibling.
+      expect(getByText("To")).toBeTruthy();
+      expect(getByTestId("detail-destination").textContent).toContain(
+        "Personal Brain",
+      );
+    });
+
+    it("hides the chip when destination is null even if routed_at is set", () => {
+      // Covers the soft-deleted-destination case: the Archive page
+      // passes `null` because the dest dropped out of the live map.
+      const cap = routedClip("01H000000000000000000000DEST");
+      const { queryByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          destination: null,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+        },
+      });
+      expect(queryByTestId("detail-destination")).toBeNull();
+    });
+
+    it("hides the chip on un-routed captures", () => {
+      // Inbox path: capture has no destination_id; the prop default
+      // (`null`) suppresses the chip.
+      const cap = clip("01H000000000000000000000D2", "unrouted text");
+      const { queryByTestId } = render(InboxDetail, {
+        props: { capture: cap, onOpenLink: vi.fn(), onReveal: vi.fn() },
+      });
+      expect(queryByTestId("detail-destination")).toBeNull();
+    });
+
+    it("annotates soft-deleted destinations", () => {
+      const cap = routedClip("01H000000000000000000000DEST");
+      const dest = destination("01H000000000000000000000DEST", "Old Brain", {
+        deleted_at: "2026-05-18T12:00:00Z",
+      });
+      const { getByTestId } = render(InboxDetail, {
+        props: {
+          capture: cap,
+          destination: dest,
+          onOpenLink: vi.fn(),
+          onReveal: vi.fn(),
+        },
+      });
+      expect(getByTestId("detail-destination").textContent).toContain("(deleted)");
     });
   });
 });

@@ -9,8 +9,9 @@
   // local files (path-flavor `Shot` uses `source_path`, bytes-flavor
   // `Shot` uses the persisted `blob_path`).
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import type { Capture } from "$lib/captures/types";
+  import type { Capture, Destination } from "$lib/captures/types";
   import { parseMentionSegments } from "$lib/mentions/parse-mention-segments";
+  import DestinationDot from "$lib/destinations/DestinationDot.svelte";
   import {
     Link,
     Clipboard,
@@ -49,6 +50,13 @@
      * surface the picked name to the parent (which sets the list's
      * mention filter). When omitted, mentions render as plain text. */
     onMentionClick?: (name: string) => void;
+    /** Destination this Capture was Routed to, when applicable. The
+     * Archive page resolves it from `capture.destination_id` against
+     * its live destinations map; the Inbox page omits the prop. Pass
+     * `null` to hide the chip — also what the Archive does when the
+     * routed destination has been soft-deleted and dropped out of
+     * the live map (orphans surface via the filter-bar hint instead). */
+    destination?: Destination | null;
   }
 
   const {
@@ -59,6 +67,7 @@
     onRoute,
     onUnroute,
     onMentionClick,
+    destination = null,
   }: Props = $props();
 
   function str(value: unknown): string | null {
@@ -75,6 +84,10 @@
     } catch {
       return url;
     }
+  }
+
+  function hasSource(c: Capture): boolean {
+    return Boolean(c.source_app || c.source_title || c.source_url);
   }
 
   function formatTimestamp(iso: string): string {
@@ -159,38 +172,74 @@
           </button>
         {/if}
       </div>
-      <p class="meta-line">
+      <p class="meta-time" data-testid="detail-timestamps">
         {#if capture.routed_at}
-          <span class="timestamp" title="Routed">
-            routed {formatTimestamp(capture.routed_at)}
-          </span>
-          <span class="timestamp captured" title="Captured">
-            · captured {formatTimestamp(capture.created_at)}
+          <span title="Routed">routed {formatTimestamp(capture.routed_at)}</span>
+          <span class="meta-sep" aria-hidden="true">·</span>
+          <span title="Captured">
+            captured {formatTimestamp(capture.created_at)}
           </span>
         {:else}
-          <span class="timestamp">{formatTimestamp(capture.created_at)}</span>
-        {/if}
-        {#if capture.source_app}
-          <span class="source-app" title={capture.source_app}>
-            from {capture.source_app}
-          </span>
-        {/if}
-        {#if capture.source_title}
-          <span class="source-title" title={capture.source_title}>
-            “{capture.source_title}”
-          </span>
-        {/if}
-        {#if capture.source_url}
-          <button
-            type="button"
-            class="source-url"
-            title={capture.source_url}
-            onclick={() => onOpenLink(capture.source_url!)}
-          >
-            ↗ {hostnameOf(capture.source_url)}
-          </button>
+          <span title="Captured">captured {formatTimestamp(capture.created_at)}</span>
         {/if}
       </p>
+
+      {#if hasSource(capture) || (destination && capture.destination_id)}
+        <dl class="meta-rel">
+          {#if hasSource(capture)}
+            <dt>From</dt>
+            <dd data-testid="detail-source">
+              {#if capture.source_app}
+                <span class="rel-app" title={capture.source_app}>
+                  {capture.source_app}
+                </span>
+              {/if}
+              {#if capture.source_app && (capture.source_title || capture.source_url)}
+                <span class="rel-sep" aria-hidden="true">·</span>
+              {/if}
+              {#if capture.source_title && capture.source_url}
+                <!-- Title doubles as the link to source_url so the user
+                     does not have to scan a separate hostname token to
+                     follow the source. -->
+                <button
+                  type="button"
+                  class="rel-link"
+                  title={capture.source_url}
+                  onclick={() => onOpenLink(capture.source_url!)}
+                >
+                  “{capture.source_title}” ↗
+                </button>
+              {:else if capture.source_title}
+                <span class="rel-title" title={capture.source_title}>
+                  “{capture.source_title}”
+                </span>
+              {:else if capture.source_url}
+                <button
+                  type="button"
+                  class="rel-link"
+                  title={capture.source_url}
+                  onclick={() => onOpenLink(capture.source_url!)}
+                >
+                  {hostnameOf(capture.source_url)} ↗
+                </button>
+              {/if}
+            </dd>
+          {/if}
+          {#if destination && capture.destination_id}
+            <dt>To</dt>
+            <dd
+              data-testid="detail-destination"
+              title={destination.deleted_at ? `${destination.name} (deleted)` : destination.name}
+            >
+              <DestinationDot color={destination.color} size="0.55rem" />
+              <span class="rel-dest-name">{destination.name}</span>
+              {#if destination.deleted_at}
+                <span class="rel-dest-deleted">(deleted)</span>
+              {/if}
+            </dd>
+          {/if}
+        </dl>
+      {/if}
     </header>
 
     {#if capture.kind === "Link"}
@@ -288,6 +337,14 @@
 </div>
 
 <style>
+  /* Type scale — keep all rem sizes on this ladder so the detail
+     pane reads as one piece of typography instead of a patchwork.
+       0.7rem  — uppercase labels (dt) only
+       0.8rem  — meta / secondary body / secondary buttons
+       0.9rem  — primary body text + primary action button
+       1.05rem — header title (`.kind`)
+     The `.star-btn` glyph and the `.placeholder-hint kbd` use em
+     units intentionally (they scale with their containing line). */
   .detail {
     display: flex;
     flex-direction: column;
@@ -318,14 +375,14 @@
   }
 
   .placeholder-text {
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     margin: 0;
     opacity: 0.55;
   }
 
   .placeholder-hint {
     margin: 0;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     line-height: 1.55;
     opacity: 0.45;
   }
@@ -362,7 +419,7 @@
 
   .kind {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 600;
     letter-spacing: -0.01em;
   }
@@ -395,8 +452,9 @@
   .unroute-btn {
     appearance: none;
     font: inherit;
-    font-size: 0.72rem;
-    padding: 0.18rem 0.55rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.22rem 0.65rem;
     border-radius: 6px;
     cursor: pointer;
     transition: background 80ms ease;
@@ -437,71 +495,108 @@
     }
   }
 
-  .meta-line {
-    margin: 0.35rem 0 0;
+  /* Timestamps sit on their own muted line so "when" reads as one
+     fact, separate from the relational "where" metadata below. */
+  .meta-time {
+    margin: 0.4rem 0 0;
+    font-size: 0.8rem;
+    opacity: 0.6;
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-wrap: wrap;
     gap: 0.35rem;
-    /* Without min-width:0 the chip max-width:100% rule resolves
-       against the meta-line's content-based width, so a long title
-       widens the column past the pane edge instead of clipping. */
+    align-items: baseline;
     min-width: 0;
     max-width: 100%;
   }
-
-  .timestamp {
-    font-size: 0.78rem;
-    opacity: 0.55;
-  }
-  .timestamp.captured {
-    opacity: 0.4;
+  .meta-sep,
+  .rel-sep {
+    opacity: 0.35;
   }
 
-  .source-app,
-  .source-title,
-  .source-url {
-    font-size: 0.72rem;
-    padding: 0.12rem 0.55rem;
-    border-radius: 999px;
-    background: rgba(76, 29, 149, 0.1);
-    color: rgba(76, 29, 149, 0.95);
-    border: 1px solid rgba(76, 29, 149, 0.3);
-    white-space: nowrap;
+  /* Definition-list grid for relational metadata (From / To). Left
+     column is an aligned uppercase label, right column is the dense
+     value. Sharing one grid keeps both rows' labels aligned even
+     when only one of them is present. */
+  .meta-rel {
+    margin: 0.5rem 0 0;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 0.7rem;
+    row-gap: 0.3rem;
+    font-size: 0.8rem;
+    align-items: baseline;
+    min-width: 0;
     max-width: 100%;
+  }
+  .meta-rel dt {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    opacity: 0.45;
+    padding-top: 0.05rem;
+  }
+  .meta-rel dd {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .rel-app {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    opacity: 0.85;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .rel-title {
+    font-style: italic;
+    opacity: 0.85;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
-
-  .source-app {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-
-  .source-url {
+  .rel-link {
     appearance: none;
-    font-family: inherit;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    color: rgba(76, 29, 149, 0.95);
+    font: inherit;
+    font-style: italic;
     cursor: pointer;
-    transition:
-      background 80ms ease,
-      border-color 80ms ease;
+    text-align: left;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .source-url:hover {
-    background: rgba(76, 29, 149, 0.18);
-    border-color: rgba(76, 29, 149, 0.55);
+  .rel-link:hover {
+    text-decoration: underline;
+  }
+  @media (prefers-color-scheme: dark) {
+    .rel-link {
+      color: rgba(167, 139, 250, 0.95);
+    }
   }
 
-  @media (prefers-color-scheme: dark) {
-    .source-app,
-    .source-title,
-    .source-url {
-      background: rgba(167, 139, 250, 0.15);
-      color: rgba(167, 139, 250, 0.95);
-      border-color: rgba(167, 139, 250, 0.35);
-    }
-    .source-url:hover {
-      background: rgba(167, 139, 250, 0.25);
-      border-color: rgba(167, 139, 250, 0.55);
-    }
+  .rel-dest-name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .rel-dest-deleted {
+    opacity: 0.5;
+    font-style: italic;
+    font-size: 0.8rem;
+    flex-shrink: 0;
   }
 
   .body {
@@ -516,14 +611,14 @@
 
   .url {
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     word-break: break-all;
     color: #2563eb;
   }
 
   .filename {
     margin: 0;
-    font-size: 1.05rem;
+    font-size: 0.9rem;
     font-weight: 500;
     word-break: break-word;
   }
@@ -533,14 +628,15 @@
     grid-template-columns: max-content 1fr;
     gap: 0.35rem 1rem;
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
   }
 
   .meta dt {
     opacity: 0.5;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
     font-size: 0.7rem;
+    font-weight: 600;
     padding-top: 0.15rem;
   }
 
@@ -585,7 +681,7 @@
       SFMono-Regular,
       Menlo,
       monospace;
-    font-size: 0.88rem;
+    font-size: 0.9rem;
     line-height: 1.5;
   }
 

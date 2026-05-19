@@ -183,6 +183,17 @@
       : (visibleCaptures.find((c) => c.id === selectedId) ?? null),
   );
 
+  // Destination row that the selected Capture is currently routed to.
+  // `null` covers three cases — no selection, selection not yet routed
+  // (e.g. transient state during un-route), and selection pointing at
+  // a soft-deleted destination that no longer appears in `destinations`.
+  // The detail pane treats `null` as "hide the destination chip".
+  const selectedDestination = $derived(
+    selectedCapture?.destination_id
+      ? (destinationsById.get(selectedCapture.destination_id) ?? null)
+      : null,
+  );
+
   async function refresh() {
     try {
       const [, liveDests] = await Promise.all([
@@ -458,6 +469,7 @@
     <section class="detail-pane">
       <InboxDetail
         capture={selectedCapture}
+        destination={selectedDestination}
         {onOpenLink}
         {onReveal}
         {onStarToggle}
