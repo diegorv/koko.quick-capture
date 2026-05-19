@@ -4,7 +4,6 @@
   // SettingsDialog shape (sidebar + details).
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { getVersion } from "@tauri-apps/api/app";
   import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
   import WikilinkFolderSection from "$lib/wikilink/WikilinkFolderSection.svelte";
   import UpdatesSection from "$lib/settings/UpdatesSection.svelte";
@@ -14,8 +13,7 @@
     | "destinations"
     | "wikilink"
     | "storage"
-    | "updates"
-    | "about";
+    | "updates";
 
   const SECTIONS: Array<{ id: SectionId; label: string; group: string }> = [
     { id: "shortcuts", label: "Shortcuts", group: "General" },
@@ -23,7 +21,6 @@
     { id: "wikilink", label: "Wikilink folder", group: "Capture" },
     { id: "storage", label: "Storage", group: "Advanced" },
     { id: "updates", label: "Updates", group: "Advanced" },
-    { id: "about", label: "About", group: "Advanced" },
   ];
 
   const GROUPED = SECTIONS.reduce<Array<{ group: string; items: typeof SECTIONS }>>(
@@ -38,7 +35,6 @@
 
   let activeSection = $state<SectionId>("shortcuts");
 
-  let version = $state("…");
   let totalCount = $state<number | null>(null);
   let unreadCount = $state<number | null>(null);
   let dbPath = $state<string | null>(null);
@@ -62,11 +58,6 @@
   ];
 
   onMount(async () => {
-    try {
-      version = await getVersion();
-    } catch (err) {
-      console.error("read version failed", err);
-    }
     try {
       const [total, unread, path] = await Promise.all([
         invoke<number>("total_count"),
@@ -155,16 +146,6 @@
       </section>
     {:else if activeSection === "updates"}
       <UpdatesSection />
-    {:else if activeSection === "about"}
-      <section class="section">
-        <h2>About</h2>
-        <dl class="kv">
-          <dt>Version</dt>
-          <dd>{version}</dd>
-          <dt>Source</dt>
-          <dd>Frictionless macOS capture inbox · Tauri 2 + SvelteKit + Rust</dd>
-        </dl>
-      </section>
     {/if}
   </div>
 </div>
