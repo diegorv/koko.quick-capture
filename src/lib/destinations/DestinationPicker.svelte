@@ -16,7 +16,7 @@
 
   import { tick } from "svelte";
   import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-  import type { Destination } from "$lib/captures/types";
+  import type { CaptureKind, Destination } from "$lib/captures/types";
   import { formatError } from "$lib/utils/format-error";
   import type { PaletteKey } from "./palette";
   import DestinationDot from "./DestinationDot.svelte";
@@ -27,6 +27,10 @@
   interface Props {
     open: boolean;
     captureId: string | null;
+    /** Kind of the Capture being routed. Drives per-kind picker behavior
+     * (e.g. KokoBrain destinations are not selectable for `Shot` / `File`
+     * because the deep-link carries text only — see ADR-0012). */
+    captureKind?: CaptureKind | null;
     /** When set, the picker pre-selects this destination on open so the
      * user can ESC out of an accidental press. Drives the re-route UX
      * from the Archive. */
@@ -41,11 +45,25 @@
   const {
     open,
     captureId,
+    captureKind = null,
     currentDestinationId = null,
     invokeFn = defaultInvoke,
     onClose,
     onAssigned,
   }: Props = $props();
+
+  /** True when assigning `dest` to the current Capture is not allowed.
+   * v1 rule: KokoBrain destinations cannot receive `Shot` / `File`
+   * captures (no deep-link payload carries binary or file paths). */
+  function isDisabledForCapture(dest: Destination): boolean {
+    if (dest.kind !== "kokobrain") return false;
+    return captureKind === "Shot" || captureKind === "File";
+  }
+
+  function disabledReason(dest: Destination): string {
+    if (!isDisabledForCapture(dest)) return "";
+    return "KokoBrain handoff supports text only";
+  }
 
   let destinations = $state<Destination[]>([]);
   let query = $state("");
@@ -199,6 +217,11 @@
       onClose();
       return;
     }
+    const target = destinations.find((d) => d.id === destinationId);
+    if (target && isDisabledForCapture(target)) {
+      errorMessage = disabledReason(target);
+      return;
+    }
     try {
       await invokeFn("route_capture", {
         id: captureId,
@@ -248,12 +271,16 @@
           </li>
         {:else}
           {#each filtered as dest, idx (dest.id)}
+            {@const disabled = isDisabledForCapture(dest)}
             <li
               class="result"
               class:active={idx === highlightIdx}
+              class:disabled
               role="option"
               aria-selected={idx === highlightIdx}
+              aria-disabled={disabled}
               data-testid="picker-result"
+              data-disabled={disabled ? "true" : null}
               onclick={() => assign(dest.id)}
               onkeydown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -265,6 +292,11 @@
             >
               <DestinationDot color={dest.color} />
               <span class="name">{dest.name}</span>
+              {#if disabled}
+                <span class="reason" data-testid="picker-result-reason">
+                  {disabledReason(dest)}
+                </span>
+              {/if}
             </li>
           {/each}
         {/if}
@@ -391,8 +423,26 @@
       background: rgba(167, 139, 250, 0.18);
     }
   }
+  .result.disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .result.disabled .name {
+    text-decoration: line-through;
+  }
   .name {
     font-size: 0.9rem;
+  }
+  .reason {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: rgba(0, 0, 0, 0.55);
+    font-style: italic;
+  }
+  @media (prefers-color-scheme: dark) {
+    .reason {
+      color: rgba(255, 255, 255, 0.55);
+    }
   }
   .hint {
     padding: 0.6rem 0.9rem;

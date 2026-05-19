@@ -398,15 +398,20 @@
   // ── Triage picker (ADR-0010) ─────────────────────────────────────
   let pickerOpen = $state(false);
   let pickerCaptureId = $state<string | null>(null);
+  let pickerCaptureKind = $state<Capture["kind"] | null>(null);
 
   function onRoute(id: string) {
+    const list = searchResults ?? captures;
+    const target = list.find((c) => c.id === id);
     pickerCaptureId = id;
+    pickerCaptureKind = target?.kind ?? null;
     pickerOpen = true;
   }
 
   function onPickerClose() {
     pickerOpen = false;
     pickerCaptureId = null;
+    pickerCaptureKind = null;
   }
 
   function onPickerAssigned(_destinationId: string) {
@@ -639,6 +644,7 @@
   <DestinationPicker
     open={pickerOpen}
     captureId={pickerCaptureId}
+    captureKind={pickerCaptureKind}
     invokeFn={(cmd, args) => invokeFn(cmd, args ?? {})}
     onClose={onPickerClose}
     onAssigned={onPickerAssigned}

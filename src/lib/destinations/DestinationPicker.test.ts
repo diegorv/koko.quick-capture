@@ -15,6 +15,18 @@ function mkDest(id: string, name: string, color: string | null = null): Destinat
   };
 }
 
+function mkKokoDest(id: string, name: string, vault: string): Destination {
+  return {
+    id,
+    name,
+    color: null,
+    created_at: new Date().toISOString(),
+    deleted_at: null,
+    kind: "kokobrain",
+    config: JSON.stringify({ vault }),
+  };
+}
+
 function makeInvoke(handlers: Record<string, (args: Record<string, unknown>) => unknown>) {
   return vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
     const handler = handlers[cmd];
@@ -237,6 +249,73 @@ describe("DestinationPicker", () => {
       expect(routeSpy).toHaveBeenCalledWith({
         id: "01HCAP",
         destinationId: "01H002",
+      }),
+    );
+  });
+
+  it("disables KokoBrain destinations when the Capture is a Shot", async () => {
+    const live = [mkKokoDest("01HKB", "Personal Brain", "Personal")];
+    const routeSpy = vi.fn();
+    const invokeFn = makeInvoke({
+      list_destinations: () => live,
+      route_capture: (args) => {
+        routeSpy(args);
+        return null;
+      },
+    });
+
+    const { findAllByTestId, getByTestId } = render(DestinationPicker, {
+      props: {
+        open: true,
+        captureId: "01HCAP",
+        captureKind: "Shot",
+        invokeFn,
+        onClose: () => {},
+        onAssigned: () => {},
+      },
+    });
+
+    const rows = await findAllByTestId("picker-result");
+    expect(rows[0].getAttribute("data-disabled")).toBe("true");
+    expect(rows[0].textContent).toContain("KokoBrain handoff supports text only");
+
+    // Click does not fire route_capture; an inline reason replaces it.
+    await fireEvent.click(rows[0]);
+    expect(routeSpy).not.toHaveBeenCalled();
+    expect(getByTestId("picker-error").textContent).toContain(
+      "KokoBrain handoff supports text only",
+    );
+  });
+
+  it("allows KokoBrain destinations for Note captures", async () => {
+    const live = [mkKokoDest("01HKB", "Personal Brain", "Personal")];
+    const routeSpy = vi.fn();
+    const invokeFn = makeInvoke({
+      list_destinations: () => live,
+      route_capture: (args) => {
+        routeSpy(args);
+        return null;
+      },
+    });
+
+    const { findAllByTestId } = render(DestinationPicker, {
+      props: {
+        open: true,
+        captureId: "01HCAP",
+        captureKind: "Note",
+        invokeFn,
+        onClose: () => {},
+        onAssigned: () => {},
+      },
+    });
+
+    const rows = await findAllByTestId("picker-result");
+    expect(rows[0].getAttribute("data-disabled")).toBeNull();
+    await fireEvent.click(rows[0]);
+    await waitFor(() =>
+      expect(routeSpy).toHaveBeenCalledWith({
+        id: "01HCAP",
+        destinationId: "01HKB",
       }),
     );
   });
