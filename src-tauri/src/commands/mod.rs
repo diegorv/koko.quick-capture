@@ -461,9 +461,9 @@ pub fn show_archive(app: &AppHandle) {
 /// Shared with `lib::run` (initial builder) and `show_settings`
 /// (post-restore clamp) so a single source of truth governs both.
 pub const SETTINGS_DEFAULT_W: f64 = 960.0;
-pub const SETTINGS_DEFAULT_H: f64 = 640.0;
+pub const SETTINGS_DEFAULT_H: f64 = 414.0;
 pub const SETTINGS_MIN_W: f64 = 720.0;
-pub const SETTINGS_MIN_H: f64 = 480.0;
+pub const SETTINGS_MIN_H: f64 = 324.0;
 
 /// One place that knows how to bring the Settings window to screen.
 /// Mirrors `show_inbox` but does not touch the activation policy
