@@ -174,13 +174,20 @@
       </div>
       <p class="meta-time" data-testid="detail-timestamps">
         {#if capture.routed_at}
-          <span title="Routed">routed {formatTimestamp(capture.routed_at)}</span>
+          <span class="meta-label">routed</span>
+          <span class="meta-value" title="Routed">
+            {formatTimestamp(capture.routed_at)}
+          </span>
           <span class="meta-sep" aria-hidden="true">·</span>
-          <span title="Captured">
-            captured {formatTimestamp(capture.created_at)}
+          <span class="meta-label">captured</span>
+          <span class="meta-value" title="Captured">
+            {formatTimestamp(capture.created_at)}
           </span>
         {:else}
-          <span title="Captured">captured {formatTimestamp(capture.created_at)}</span>
+          <span class="meta-label">captured</span>
+          <span class="meta-value" title="Captured">
+            {formatTimestamp(capture.created_at)}
+          </span>
         {/if}
       </p>
 
@@ -344,7 +351,15 @@
        0.9rem  — primary body text + primary action button
        1.05rem — header title (`.kind`)
      The `.star-btn` glyph and the `.placeholder-hint kbd` use em
-     units intentionally (they scale with their containing line). */
+     units intentionally (they scale with their containing line).
+
+     Color/contrast scale — every field name (timestamp labels,
+     uppercase dt) renders at one muted opacity; every value (the
+     timestamp itself, source app, source title, destination name,
+     mime, path) renders at full foreground. The single shared rule
+     for each tier sits a few blocks below this header — search for
+     `.meta-label`. Separators (`·`) sit further down still and
+     keep their own lighter weight so they read as gaps, not data. */
   .detail {
     display: flex;
     flex-direction: column;
@@ -495,22 +510,47 @@
     }
   }
 
-  /* Timestamps sit on their own muted line so "when" reads as one
-     fact, separate from the relational "where" metadata below. */
+  /* Timestamps sit on their own line so "when" reads as one fact,
+     separate from the relational "where" metadata below. Per-span
+     `.meta-label` / `.meta-value` opacities create the label/value
+     contrast — see the type-and-color scale comment at the top. */
   .meta-time {
     margin: 0.4rem 0 0;
     font-size: 0.8rem;
-    opacity: 0.6;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0 0.35rem;
     align-items: baseline;
     min-width: 0;
     max-width: 100%;
   }
+
+  /* Every field name (inline timestamp labels + `dt` labels in the
+     two definition lists) renders with the same case, size, weight,
+     letter-spacing, and opacity so they read as a single visual
+     layer. Per-context overrides below stick to non-label concerns
+     (column padding for `.meta dt`, etc.). */
+  .meta-label,
+  .meta-rel dt,
+  .meta dt {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    opacity: 0.55;
+  }
+  /* Value-side text inherits the pane's foreground at full strength
+     so timestamps, source app, destination name, mime and path all
+     read at the same brightness. Italic or mono variants tweak the
+     family/style without touching opacity. */
+  .meta-value,
+  .meta-rel dd,
+  .meta dd {
+    opacity: 1;
+  }
   .meta-sep,
   .rel-sep {
-    opacity: 0.35;
+    opacity: 0.3;
   }
 
   /* Definition-list grid for relational metadata (From / To). Left
@@ -529,11 +569,6 @@
     max-width: 100%;
   }
   .meta-rel dt {
-    text-transform: uppercase;
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    font-weight: 600;
-    opacity: 0.45;
     padding-top: 0.05rem;
   }
   .meta-rel dd {
@@ -548,13 +583,11 @@
   .rel-app {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.8rem;
-    opacity: 0.85;
     white-space: nowrap;
     flex-shrink: 0;
   }
   .rel-title {
     font-style: italic;
-    opacity: 0.85;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -593,7 +626,7 @@
     min-width: 0;
   }
   .rel-dest-deleted {
-    opacity: 0.5;
+    opacity: 0.55;
     font-style: italic;
     font-size: 0.8rem;
     flex-shrink: 0;
@@ -632,11 +665,6 @@
   }
 
   .meta dt {
-    opacity: 0.5;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.7rem;
-    font-weight: 600;
     padding-top: 0.15rem;
   }
 
@@ -648,7 +676,6 @@
   .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.8rem;
-    opacity: 0.85;
   }
 
   .preview {
