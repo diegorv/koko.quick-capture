@@ -2,6 +2,11 @@ name: CI
 
 permissions:
   contents: read
+  # dorny/paths-filter calls the PR Files API on pull_request runs to
+  # diff changed paths. Dependabot PRs receive a token scoped strictly
+  # to the workflow's `permissions:` block, so without this grant the
+  # filter step fails with "Resource not accessible by integration".
+  pull-requests: read
 
 # Triggers:
 #   - pull_request: gate every PR against main before merge.
