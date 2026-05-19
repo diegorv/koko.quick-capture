@@ -429,19 +429,40 @@ pub fn run() {
             // column plus chrome without horizontal crowding; the
             // minimum keeps the layout legible if the user resizes
             // down.
+            const SETTINGS_DEFAULT_W: f64 = 960.0;
+            const SETTINGS_DEFAULT_H: f64 = 640.0;
+            const SETTINGS_MIN_W: f64 = 720.0;
+            const SETTINGS_MIN_H: f64 = 480.0;
             let settings_window = WebviewWindowBuilder::new(
                 app,
                 "settings",
                 WebviewUrl::App("/settings".into()),
             )
             .title("Settings")
-            .inner_size(960.0, 640.0)
-            .min_inner_size(720.0, 480.0)
+            .inner_size(SETTINGS_DEFAULT_W, SETTINGS_DEFAULT_H)
+            .min_inner_size(SETTINGS_MIN_W, SETTINGS_MIN_H)
             .visible(false)
             .focused(true)
             .center()
             .resizable(true)
             .build()?;
+            // The window-state plugin restores a previously-saved size
+            // bypassing `min_inner_size` (the OS-level min only kicks
+            // in for user-driven resize). Existing installs from before
+            // the size bump have a tiny restored size persisted; clamp
+            // it up to the new default if it falls below the minimum.
+            if let Ok(physical) = settings_window.inner_size() {
+                let scale = settings_window.scale_factor().unwrap_or(1.0);
+                let logical_w = (physical.width as f64) / scale;
+                let logical_h = (physical.height as f64) / scale;
+                if logical_w < SETTINGS_MIN_W || logical_h < SETTINGS_MIN_H {
+                    let _ = settings_window.set_size(tauri::LogicalSize::new(
+                        SETTINGS_DEFAULT_W,
+                        SETTINGS_DEFAULT_H,
+                    ));
+                    let _ = settings_window.center();
+                }
+            }
             intercept_close_as_hide(&settings_window, || {});
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
