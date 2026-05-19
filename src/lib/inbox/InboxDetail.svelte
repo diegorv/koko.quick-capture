@@ -293,7 +293,12 @@
     flex-direction: column;
     height: 100%;
     box-sizing: border-box;
-    overflow-y: auto;
+    /* Header and footer stay pinned; only the body scrolls. Without
+       this the whole pane scrolls together, so a tall Shot preview
+       can push the Reveal / Open button off-screen or overlap it on
+       short windows. */
+    overflow: hidden;
+    min-height: 0;
   }
 
   .placeholder {
@@ -501,8 +506,9 @@
 
   .body {
     padding: 1rem 1.5rem;
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
@@ -551,9 +557,14 @@
 
   .preview {
     max-width: 100%;
-    max-height: 55vh;
+    /* Cap to a fraction of the viewport so a vertical screenshot on
+       a tall window does not consume the entire body and collide with
+       the Reveal in Finder button. The body scrolls if the image plus
+       metadata exceeds the available space. */
+    max-height: 40vh;
     object-fit: contain;
     align-self: center;
+    flex-shrink: 0;
     border-radius: 6px;
     border: 1px solid rgba(0, 0, 0, 0.08);
     background: rgba(0, 0, 0, 0.02);
@@ -611,6 +622,12 @@
     padding: 0.75rem 1.5rem 1.25rem;
     display: flex;
     gap: 0.5rem;
+    flex-shrink: 0;
+    /* Top border separates the pinned footer from the scrolling
+       body so a tall preview that scrolled into the footer area is
+       visually distinct from the action buttons. */
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    background: inherit;
   }
 
   .action {
@@ -643,6 +660,9 @@
   @media (prefers-color-scheme: dark) {
     .header {
       border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+    .actions {
+      border-top-color: rgba(255, 255, 255, 0.08);
     }
     .url {
       color: #93c5fd;
