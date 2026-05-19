@@ -425,13 +425,18 @@ pub fn run() {
             // startup, summoned by the tray menu "Settings…" item.
             // Lives for the life of the app so subsequent opens just
             // show the existing window instead of recreating it.
+            // Default size fits the 200px sidebar + 640px detail
+            // column plus chrome without horizontal crowding; the
+            // minimum keeps the layout legible if the user resizes
+            // down.
             let settings_window = WebviewWindowBuilder::new(
                 app,
                 "settings",
                 WebviewUrl::App("/settings".into()),
             )
             .title("Settings")
-            .inner_size(560.0, 420.0)
+            .inner_size(960.0, 640.0)
+            .min_inner_size(720.0, 480.0)
             .visible(false)
             .focused(true)
             .center()
