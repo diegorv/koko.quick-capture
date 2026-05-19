@@ -8,8 +8,8 @@ import Composer from "./Composer.svelte";
 // the same path the user does.
 
 async function renderWithView(props: {
-  save: ReturnType<typeof vi.fn>;
-  onclose?: ReturnType<typeof vi.fn>;
+  save: (text: string) => void | Promise<void>;
+  onclose?: () => void;
   focusKey?: number;
 }) {
   let captured: EditorView | undefined;
