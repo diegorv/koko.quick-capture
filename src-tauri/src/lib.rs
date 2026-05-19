@@ -4,6 +4,7 @@ pub mod dock;
 pub mod drag_drop;
 pub mod events;
 pub mod kind_detect;
+pub mod kokobrain;
 pub mod mentions;
 pub mod shell;
 pub mod shortcuts;
@@ -652,6 +653,7 @@ pub fn run() {
             commands::soft_delete_destination,
             commands::restore_destination,
             commands::route_capture,
+            commands::route_to_kokobrain,
             commands::unroute_capture,
             commands::list_archive,
             commands::search_archive,

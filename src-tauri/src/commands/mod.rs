@@ -1083,6 +1083,71 @@ pub fn route_capture(
     Ok(())
 }
 
+/// Route a Capture to a kokobrain Destination. Loads the Capture +
+/// Destination, builds the `kokobrain://capture` URI, fires it through
+/// the injected `opener` callable, and only then marks the Capture
+/// routed. If the URI dispatch fails, the Capture stays in the Inbox
+/// (the route is aborted). See ADR-0012.
+///
+/// `opener` is injected so tests can drive the helper without a Tauri
+/// runtime; the real command below passes `OpenerExt::open_url`.
+pub fn route_to_kokobrain_with_store(
+    store: &Store,
+    opener: &dyn Fn(&str) -> Result<(), String>,
+    capture_id: &str,
+    destination_id: &str,
+) -> Result<String, String> {
+    let parsed = Ulid::from_str(capture_id).map_err(|e| format!("invalid id: {e}"))?;
+    let capture = store
+        .find_with_deleted(&parsed)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("capture not found: {capture_id}"))?;
+    if capture.deleted_at.is_some() {
+        return Err(format!("capture is deleted: {capture_id}"));
+    }
+    let destination = store
+        .destination_find(destination_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("destination not found: {destination_id}"))?;
+    let uri = crate::kokobrain::build_capture_uri(&capture, &destination)
+        .map_err(|e| e.to_string())?;
+    opener(&uri)?;
+    store
+        .capture_route(&parsed, destination_id)
+        .map_err(|e| e.to_string())?;
+    Ok(uri)
+}
+
+#[tauri::command]
+pub fn route_to_kokobrain(
+    id: String,
+    destination_id: String,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let opener_app = app.clone();
+    let opener = move |uri: &str| -> Result<(), String> {
+        opener_app
+            .opener()
+            .open_url(uri, None::<&str>)
+            .map_err(|e| e.to_string())
+    };
+    route_to_kokobrain_with_store(&store, &opener, &id, &destination_id)?;
+    let _ = app.emit(
+        CAPTURES_CHANGED_EVENT,
+        MutationNotice {
+            id: &id,
+            kind: "routed",
+        },
+    );
+    if let Ok(unread) = store.count_unread() {
+        let _ = app.emit(DOCK_UNREAD_CHANGED_EVENT, unread);
+    }
+    Ok(())
+}
+
 /// Un-route a Capture back to the Inbox. Read-state survives, so the
 /// Dock unread count does not change; we still emit
 /// `captures:changed` so both list views re-fetch.
