@@ -35,8 +35,17 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/diegorv/koko.quick-capture/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4ODU0NTVDNzlBNjRDMjEKUldRaFRLWjVYRVdGeUdVY242SGxXak5ReXNILy9nUFJudEJtNjhtUnJIZGdoME10Yk9POWlrQXkK"
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
