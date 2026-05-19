@@ -206,6 +206,82 @@ where
     });
 }
 
+/// Make a window summon onto whichever Space is currently active rather
+/// than yanking the user back to the Space where the window last lived.
+/// Sets `NSWindowCollectionBehaviorMoveToActiveSpace` on the underlying
+/// NSWindow. Without this, summoning Composer/Inbox/Settings via a
+/// global shortcut from a different Space triggers a macOS Space
+/// transition instead of bringing the window to the user.
+///
+/// Distinct from the dock window's `visible_on_all_workspaces(true)`,
+/// which sets `CanJoinAllSpaces` — appropriate for an always-pinned
+/// widget but wrong for transient app surfaces that should still live
+/// on one Space (the active one) at a time.
+#[cfg(target_os = "macos")]
+fn apply_move_to_active_space(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    // NSWindowCollectionBehaviorMoveToActiveSpace = 1 << 1.
+    const MOVE_TO_ACTIVE_SPACE: usize = 1 << 1;
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as *mut AnyObject;
+    if ns_window.is_null() {
+        return;
+    }
+    unsafe {
+        let current: usize = msg_send![ns_window, collectionBehavior];
+        let _: () = msg_send![ns_window, setCollectionBehavior: current | MOVE_TO_ACTIVE_SPACE];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_move_to_active_space(_window: &tauri::WebviewWindow) {}
+
+/// Pin a window to every Space and prevent macOS from re-positioning
+/// or hiding it during Spaces / Mission Control transitions. Sets
+/// `NSWindowCollectionBehaviorCanJoinAllSpaces | Stationary |
+/// IgnoresCycle` on the underlying NSWindow.
+///
+/// The builder's `visible_on_all_workspaces(true)` only sets
+/// `CanJoinAllSpaces`. In practice that bit alone is not enough on
+/// recent macOS versions: switching to another Space can drop the
+/// window from view until the next show(). Adding `Stationary` keeps
+/// it pinned during the Space transition; `IgnoresCycle` keeps it out
+/// of Cmd+` window cycling so it cannot steal cycle focus on the
+/// active Space.
+#[cfg(target_os = "macos")]
+fn apply_pin_to_all_spaces(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    const CAN_JOIN_ALL_SPACES: usize = 1 << 0;
+    const STATIONARY: usize = 1 << 4;
+    const IGNORES_CYCLE: usize = 1 << 6;
+    const MOVE_TO_ACTIVE_SPACE: usize = 1 << 1;
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as *mut AnyObject;
+    if ns_window.is_null() {
+        return;
+    }
+    unsafe {
+        let current: usize = msg_send![ns_window, collectionBehavior];
+        // CanJoinAllSpaces is mutually exclusive with MoveToActiveSpace
+        // per AppKit docs. Strip MoveToActiveSpace just in case the
+        // builder ever flips it on, then OR in the all-spaces bits.
+        let next = (current & !MOVE_TO_ACTIVE_SPACE)
+            | CAN_JOIN_ALL_SPACES
+            | STATIONARY
+            | IGNORES_CYCLE;
+        let _: () = msg_send![ns_window, setCollectionBehavior: next];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_pin_to_all_spaces(_window: &tauri::WebviewWindow) {}
+
 /// Hide the Inbox window and revert the macOS activation policy to
 /// `.Accessory`. Mirrors the `CloseRequested` handler so the JS
 /// "Esc / Cmd+W" path produces the same end state as clicking the
@@ -398,6 +474,7 @@ pub fn run() {
                     // longer on screen.
                     set_inbox_activation_policy(&close_app, false);
                 });
+                apply_move_to_active_space(&inbox_window);
             }
 
             // Composer popover window: small, hidden at startup,
@@ -420,6 +497,7 @@ pub fn run() {
             .center()
             .build()?;
             intercept_close_as_hide(&composer_window, || {});
+            apply_move_to_active_space(&composer_window);
 
             // Settings window. Standard decorated window, hidden at
             // startup, summoned by the tray menu "Settings…" item.
@@ -453,6 +531,7 @@ pub fn run() {
             .resizable(true)
             .build()?;
             intercept_close_as_hide(&settings_window, || {});
+            apply_move_to_active_space(&settings_window);
 
             // Tray "Open Inbox" emits `tray.open_inbox` (see
             // `tray::default_menu`). Show + focus the Inbox window on
@@ -544,6 +623,12 @@ pub fn run() {
             .accept_first_mouse(true)
             .visible(true)
             .build()?;
+            // Belt-and-braces over the builder's
+            // `visible_on_all_workspaces(true)`: explicitly OR in
+            // `Stationary` + `IgnoresCycle` so the Dock stays pinned
+            // through Mission Control / Space transitions instead of
+            // dropping off-screen on the new Space.
+            apply_pin_to_all_spaces(&dock_window);
 
             // Position at bottom-left of the primary monitor with a
             // 16px margin from both edges. `primary_monitor()` returns

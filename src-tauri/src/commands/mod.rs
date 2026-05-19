@@ -406,6 +406,72 @@ pub fn capture_clipboard_and_broadcast(app: &AppHandle) {
     }
 }
 
+/// True iff the window is currently on the active macOS Space. Uses
+/// `NSWindow.isOnActiveSpace`, a public AppKit property available
+/// since 10.6. Returns false on non-macOS (no Space concept) and on
+/// ns_window lookup failure.
+///
+/// Used by `dismiss_composer` to decide whether to hand focus back
+/// to the Inbox window: refocusing an Inbox that lives on a different
+/// Space would trigger its `MoveToActiveSpace` collection behavior
+/// and yank the Inbox into the user's current Space — a surprise the
+/// user did not ask for. With this guard, the dismiss falls through
+/// to `activate_prev_app` instead, restoring whichever app the user
+/// was actually using on the current Space.
+#[cfg(target_os = "macos")]
+fn window_on_active_space(window: &tauri::WebviewWindow) -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let Ok(ns_window) = window.ns_window() else {
+        return false;
+    };
+    let ns_window = ns_window as *mut AnyObject;
+    if ns_window.is_null() {
+        return false;
+    }
+    unsafe { msg_send![ns_window, isOnActiveSpace] }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn window_on_active_space(_window: &tauri::WebviewWindow) -> bool {
+    false
+}
+
+/// Re-fire `set_focus` a couple of times after a show() to cover a
+/// macOS race between Tauri's `makeKeyAndOrderFront` and an in-flight
+/// `MoveToActiveSpace` transition. When a window is summoned from a
+/// Space different than the one it last lived on, AppKit animates
+/// the move to the active Space; the original `set_focus` (called
+/// synchronously after `show`) can fire before that animation
+/// completes, leaving the window visible but not key (gray traffic
+/// lights, keyboard input goes nowhere) until the user clicks it.
+/// A follow-up `set_focus` after the move settles claims key status
+/// reliably. Idempotent: if the window is already key by then, the
+/// re-fire is a no-op at the AppKit layer.
+///
+/// We schedule two retries because the move-animation duration is
+/// not constant: it varies with display refresh rate, system load,
+/// and how many windows AppKit is animating at once. A single 80ms
+/// retry covered most cases but missed enough of the long-tail
+/// (typically when other animation is in flight) that the
+/// user-visible "no focus until I click" symptom resurfaced. 150ms +
+/// 280ms gives the move a wide window to land in without
+/// compromising perceived latency — the window is already visible
+/// by then; only the focus indicator catches up.
+fn schedule_refocus_after_space_move(window: tauri::WebviewWindow) {
+    const RETRY_DELAYS_MS: [u64; 2] = [150, 280];
+    let app = window.app_handle().clone();
+    std::thread::spawn(move || {
+        for &delay in &RETRY_DELAYS_MS {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            let w = window.clone();
+            let _ = app.run_on_main_thread(move || {
+                let _ = w.set_focus();
+            });
+        }
+    });
+}
+
 /// One place that knows how to bring the Composer to screen. Used by
 /// the global shortcut, the tray menu, the Dock click invoke, and any
 /// future entry point. Records the prior frontmost macOS app FIRST
@@ -418,6 +484,7 @@ pub fn show_composer(app: &AppHandle) {
         if let Some(window) = handle.get_webview_window("composer") {
             let _ = window.show();
             let _ = window.set_focus();
+            schedule_refocus_after_space_move(window);
         }
         let _ = handle.emit(OPEN_COMPOSER, ());
     });
@@ -437,6 +504,7 @@ pub fn show_inbox(app: &AppHandle) {
         if let Some(window) = handle.get_webview_window("inbox") {
             let _ = window.show();
             let _ = window.set_focus();
+            schedule_refocus_after_space_move(window);
         }
         let _ = handle.emit(VIEW_OPEN_INBOX, ());
     });
@@ -452,6 +520,7 @@ pub fn show_archive(app: &AppHandle) {
         if let Some(window) = handle.get_webview_window("inbox") {
             let _ = window.show();
             let _ = window.set_focus();
+            schedule_refocus_after_space_move(window);
         }
         let _ = handle.emit(VIEW_OPEN_ARCHIVE, ());
     });
@@ -493,6 +562,7 @@ pub fn show_settings(app: &AppHandle) {
             }
             let _ = window.show();
             let _ = window.set_focus();
+            schedule_refocus_after_space_move(window);
         }
     });
 }
@@ -774,12 +844,23 @@ pub fn dismiss_composer(app: AppHandle) -> Result<(), String> {
         if let Some(composer) = app_handle.get_webview_window("composer") {
             let _ = composer.hide();
         }
-        let inbox_visible = app_handle
-            .get_webview_window("inbox")
-            .and_then(|w| w.is_visible().ok())
+        // Only refocus the Inbox when it is BOTH visible AND on the
+        // currently active macOS Space. The visibility check alone is
+        // not enough: an Inbox shown on Space 1 stays `is_visible() ==
+        // true` while the user is on Space 2, and refocusing it from
+        // there would trigger its `MoveToActiveSpace` collection
+        // behavior and yank the Inbox into Space 2 — surprising, since
+        // the user opened the Composer to save a note, not to summon
+        // the Inbox.
+        let inbox = app_handle.get_webview_window("inbox");
+        let refocus_inbox = inbox
+            .as_ref()
+            .map(|w| {
+                w.is_visible().unwrap_or(false) && window_on_active_space(w)
+            })
             .unwrap_or(false);
-        if inbox_visible {
-            if let Some(inbox) = app_handle.get_webview_window("inbox") {
+        if refocus_inbox {
+            if let Some(inbox) = inbox {
                 let _ = inbox.set_focus();
             }
         } else {

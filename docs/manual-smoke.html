@@ -393,7 +393,18 @@
         { id: "dock-pulse", desc: "Save any capture (Composer, clipboard, or drag).", hint: "Disc plays a one-shot pulse animation (~450ms violet ring expand)." },
         { id: "dock-badge", desc: "Save a capture, then check the Dock badge.", hint: "Red dot with the live count, capped at \"99+\"." },
         { id: "dock-badge-clear", desc: "Open the Inbox, interact with the unread row.", hint: "Badge count drops by one per interaction. Hides at zero." },
-        { id: "dock-fullscreen", desc: "Enter fullscreen in another app (e.g. Safari with Cmd+Ctrl+F).", hint: "Dock disappears. Exiting fullscreen restores it." }
+        { id: "dock-fullscreen", desc: "Enter fullscreen in another app (e.g. Safari with Cmd+Ctrl+F).", hint: "Dock disappears. Exiting fullscreen restores it." },
+        { id: "dock-space-swipe", desc: "Open the app, then swipe through 3 desktop Spaces (Ctrl+Right repeatedly).", hint: "Dock stays pinned on every Space, no flicker or disappear-then-reappear. Going back through the Spaces the disc stays put." }
+      ]
+    },
+    {
+      id: "spaces-focus",
+      title: "macOS Spaces and cross-Space focus (ADR-0014)",
+      items: [
+        { id: "spaces-composer-cross", desc: "Open the app on Space 1, swipe to Space 2, press the Composer shortcut.", hint: "Composer appears on Space 2 (not yanked back to Space 1). Textarea cursor is blinking immediately — typing works without clicking." },
+        { id: "spaces-inbox-cross", desc: "From Space 2, press the Inbox shortcut.", hint: "Inbox appears on Space 2 with focus — arrow keys move selection without clicking first. Traffic lights are colored, not gray." },
+        { id: "spaces-settings-cross", desc: "Tray menu -> Settings from Space 2.", hint: "Settings window appears on Space 2, fields are focusable immediately." },
+        { id: "spaces-dismiss-no-yank", desc: "Open Inbox on Space 1, swipe to Space 2, open Composer, save a note.", hint: "Composer dismisses, focus goes to whatever app was frontmost on Space 2. Inbox stays on Space 1 — it is NOT dragged into Space 2." }
       ]
     },
     {

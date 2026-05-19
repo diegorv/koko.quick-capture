@@ -113,6 +113,39 @@ mod macos {
     use std::sync::{Arc, Mutex};
     use tauri::{AppHandle, Emitter};
 
+    // Private CoreGraphics SkyLight API. Used by every menu-bar
+    // utility (Rectangle, Bartender, AltTab, etc.) to read the type
+    // of the active macOS Space. `CGSSpaceGetType` returns 4 for a
+    // fullscreen-tile space and 0 for a regular user desktop, which
+    // is the only signal that reliably distinguishes a swipe between
+    // desktops from a transition into another app's fullscreen
+    // window. The previously-shipped heuristic (alternating
+    // Entered/Exited on every active-space change) drifted out of
+    // sync as soon as the user swiped between two regular desktops,
+    // so the Dock would disappear on every other Space.
+    type CGSConnectionID = i32;
+    type CGSSpaceID = u64;
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGSMainConnectionID() -> CGSConnectionID;
+        fn CGSGetActiveSpace(cid: CGSConnectionID) -> CGSSpaceID;
+        fn CGSSpaceGetType(cid: CGSConnectionID, sid: CGSSpaceID) -> i32;
+    }
+    const CGS_SPACE_TYPE_FULLSCREEN: i32 = 4;
+
+    /// True iff the macOS Space that is currently active is a
+    /// fullscreen-tile space (i.e. some app is taking the whole
+    /// display). Returns false for regular desktops and for the
+    /// transient "system" space type that briefly shows during
+    /// transitions.
+    fn is_active_space_fullscreen() -> bool {
+        unsafe {
+            let cid = CGSMainConnectionID();
+            let space = CGSGetActiveSpace(cid);
+            CGSSpaceGetType(cid, space) == CGS_SPACE_TYPE_FULLSCREEN
+        }
+    }
+
     /// Adapter: a Tauri `AppHandle` is an `EventSink`.
     struct AppHandleSink(AppHandle);
 
@@ -143,18 +176,21 @@ mod macos {
             // Arcs) is retained for the lifetime of the observer token
             // by NSNotificationCenter.
             let sink: Arc<dyn EventSink> = Arc::new(AppHandleSink(app));
-            // Alternates Entered / Exited across active-space changes.
-            // macOS doesn't surface a dedicated "fullscreen entered"
-            // notification at the workspace layer; active-space change
-            // is the closest stable proxy that fires both on enter
-            // (into a fullscreen space) and exit (back to user space).
-            let last_entered = Arc::new(Mutex::new(false));
+            // Cache the last reported state so we only emit on a real
+            // user-desktop <-> fullscreen-tile transition. Without
+            // this, every regular swipe between desktops would emit
+            // a redundant `Exited` and JS would re-show the Dock on
+            // every swipe — harmless but noisy.
+            let last_was_fullscreen = Arc::new(Mutex::new(is_active_space_fullscreen()));
 
             let block = RcBlock::new(move |_note: *mut NSNotification| {
-                let mut g = last_entered.lock().unwrap();
-                let now_entered = !*g;
-                *g = now_entered;
-                let transition = if now_entered {
+                let now_fullscreen = is_active_space_fullscreen();
+                let mut g = last_was_fullscreen.lock().unwrap();
+                if *g == now_fullscreen {
+                    return;
+                }
+                *g = now_fullscreen;
+                let transition = if now_fullscreen {
                     FullscreenTransition::Entered
                 } else {
                     FullscreenTransition::Exited
