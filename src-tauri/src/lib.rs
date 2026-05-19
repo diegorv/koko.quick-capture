@@ -342,6 +342,11 @@ pub fn run() {
         // access is granted; the capability file does not surface
         // `dialog:*` to any window.
         .plugin(tauri_plugin_dialog::init())
+        // Opener plugin: used Rust-side from `route_to_kokobrain` to
+        // dispatch `kokobrain://` deep links to the kokobrain app
+        // (ADR-0012). The capability file scopes the JS-facing
+        // `opener:allow-open-url` permission to that scheme only.
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Accessory mode: no Dock icon, no system menu bar (see
             // ADR-0009). The app lives in the Tray and is summoned by
