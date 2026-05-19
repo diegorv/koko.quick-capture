@@ -183,12 +183,12 @@
 
   .lede {
     margin: 0 0 0.75rem;
-    color: rgba(0, 0, 0, 0.6);
-    font-size: 0.82rem;
+    color: rgba(0, 0, 0, 0.55);
+    font-size: 0.85rem;
   }
   @media (prefers-color-scheme: dark) {
     .lede {
-      color: rgba(255, 255, 255, 0.6);
+      color: rgba(255, 255, 255, 0.55);
     }
   }
   code {
@@ -214,8 +214,7 @@
 
   .path {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.78rem;
-    opacity: 0.85;
+    font-size: 0.8rem;
     word-break: break-all;
     flex: 1 1 16rem;
     min-width: 0;
@@ -224,7 +223,7 @@
     opacity: 0.7;
     font-family: inherit;
     font-style: italic;
-    font-size: 0.82rem;
+    font-size: 0.85rem;
   }
   .path.unset code {
     font-style: normal;
@@ -297,7 +296,7 @@
     border: 1px solid rgba(220, 38, 38, 0.25);
     border-radius: 6px;
     color: rgba(155, 28, 28, 1);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
   }
   @media (prefers-color-scheme: dark) {
     .error {

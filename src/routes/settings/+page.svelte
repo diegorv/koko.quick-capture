@@ -202,7 +202,7 @@
 
   .group-label {
     padding: 0.4rem 0.5rem 0.25rem;
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: rgba(0, 0, 0, 0.45);
@@ -293,20 +293,28 @@
     grid-template-columns: max-content 1fr;
     column-gap: 1rem;
     row-gap: 0.45rem;
-    font-size: 0.88rem;
+    font-size: 0.85rem;
   }
   dt {
-    color: rgba(0, 0, 0, 0.6);
     font-weight: 500;
-  }
-  @media (prefers-color-scheme: dark) {
-    dt {
-      color: rgba(255, 255, 255, 0.6);
-    }
   }
   dd {
     margin: 0;
     word-break: break-word;
+  }
+
+  /* Storage's name/value list shares the InboxDetail meta style:
+     uppercase muted `dt` labels paired with full-strength values so
+     "field name" and "value" read at one consistent color/size pair
+     across the whole app. Shortcuts keeps the default `dt` because
+     its dt slot holds <kbd> chips (the value) not a text label. */
+  .kv dt {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    opacity: 0.55;
+    align-self: center;
   }
 
   .shortcuts dt {
@@ -336,8 +344,7 @@
 
   .path {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.78rem;
-    opacity: 0.85;
+    font-size: 0.8rem;
     word-break: break-all;
   }
 
@@ -355,7 +362,7 @@
     background: rgba(76, 29, 149, 0.1);
     color: rgba(76, 29, 149, 1);
     font: inherit;
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     padding: 0.2rem 0.6rem;
     border-radius: 6px;
     cursor: pointer;

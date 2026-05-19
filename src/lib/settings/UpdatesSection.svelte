@@ -345,7 +345,7 @@
     min-width: 0;
   }
   .label-title {
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     font-weight: 500;
   }
   .label-desc {
@@ -362,7 +362,7 @@
   .control {
     flex: 0 0 auto;
     font: inherit;
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     padding: 0.25rem 0.4rem;
     border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 6px;
@@ -427,7 +427,7 @@
 
   .value,
   .status {
-    font-size: 0.82rem;
+    font-size: 0.85rem;
   }
   .status.ok {
     color: rgb(22, 163, 74);

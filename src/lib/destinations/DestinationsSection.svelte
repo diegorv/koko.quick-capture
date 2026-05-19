@@ -681,7 +681,7 @@
     background: transparent;
     padding: 0.35rem 0.55rem;
     font: inherit;
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     border-radius: 6px;
     color: inherit;
   }
@@ -745,7 +745,7 @@
   }
   .hint code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.74rem;
+    font-size: 0.78em;
     padding: 0 0.2rem;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.06);
@@ -789,7 +789,7 @@
     min-width: 0;
   }
   .name {
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -810,7 +810,7 @@
     border: 1px solid rgba(220, 38, 38, 0.25);
     border-radius: 6px;
     padding: 0.4rem 0.6rem;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     color: rgba(155, 28, 28, 1);
     margin-top: 0.35rem;
   }
@@ -825,7 +825,7 @@
   .empty {
     margin: 0.3rem 0 0;
     color: rgba(0, 0, 0, 0.45);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
   }
   @media (prefers-color-scheme: dark) {
     .empty {
@@ -840,7 +840,7 @@
     border: 1px solid rgba(220, 38, 38, 0.25);
     border-radius: 6px;
     color: rgba(155, 28, 28, 1);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
   }
   @media (prefers-color-scheme: dark) {
     .error {
