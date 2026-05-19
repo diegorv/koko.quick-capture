@@ -50,7 +50,7 @@ mime_guess = "2"
 # usvg) so we skip fontdb and its OS font-discovery cost.
 resvg = { version = "0.45", default-features = false }
 usvg = { version = "0.45", default-features = false }
-tiny-skia = "0.11"
+tiny-skia = "0.12"
 
 # Dock fullscreen observer (slice 05): NSWorkspace subscription via
 # closure-based `addObserverForName:...:usingBlock:`. `objc2` is the
