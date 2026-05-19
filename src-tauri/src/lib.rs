@@ -523,6 +523,7 @@ pub fn run() {
             .transparent(true)
             .shadow(false)
             .always_on_top(true)
+            .visible_on_all_workspaces(true)
             .skip_taskbar(true)
             .focused(false)
             .accept_first_mouse(true)
