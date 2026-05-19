@@ -86,13 +86,24 @@ The payload and kind of a Capture never change after creation. If the wrong thin
 
 ## Destination
 
-A named category the user assigns to a Capture to mark it as triaged. Examples: `Todoist`, `Readwise`, `Reference`. Destinations are user-managed in Settings.
+A named category the user assigns to a Capture to mark it as triaged. Examples: `Todoist`, `Readwise`, `Reference`, `Personal Brain`. Destinations are user-managed in Settings.
 
-At this stage a Destination is only a label — assigning one does not move the Capture's payload anywhere outside the app. Future integrations may turn assignment into a real handoff (API call, file move, etc.), but that is out of scope for the first cut.
+Every Destination has a **kind** drawn from a closed set (see [Destination kinds](#destination-kinds)). The kind decides what assigning a Destination *does* beyond the routing-state mutation: `label` is metadata-only, `kokobrain` additionally fires a `kokobrain://capture` deep link. The Routed lifecycle (Inbox → Archive, re-route, un-route) is identical for every kind.
 
 A Destination has an optional **color** chosen from a small preset palette. Color is decorative; it is rendered as a dot next to the Destination's name in the Archive list and in the Destination picker. Absent color renders no dot.
 
 A Destination can be soft-deleted from Settings. Soft-deleted Destinations are hidden from the assignment picker but Captures already pointing at them keep the reference; the Archive surfaces them with a "(deleted)" indicator so the user can re-route or restore.
+
+## Destination kinds
+
+Closed set. Adding a kind is an explicit change everywhere kinds are handled (ADR-0012).
+
+| Kind        | Routing side-effect                                                                                              | Config                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `label`     | None beyond setting `destination_id` + `routed_at` on the Capture.                                               | None (always `null`).           |
+| `kokobrain` | Same as `label`, plus dispatches `kokobrain://capture?vault=...&content=...&tags=<destName-kebab>` via the OS.   | `{ "vault": string }` required. |
+
+KokoBrain destinations only accept Capture kinds whose payload can be rendered as text: `Note` and `Clip` send raw text, `Link` sends `[title](url)`. `Shot` and `File` cannot be routed to a KokoBrain destination — the picker disables those rows with an inline reason. The handoff is fire-and-forget: quick-capture does not know whether the brain side wrote the note successfully, so a missing vault or a crashed brain leaves an optimistically-Routed Capture without a corresponding note. The user resolves divergence by un-routing the Capture or fixing the destination's vault.
 
 ## Wikilink
 
