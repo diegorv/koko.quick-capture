@@ -36,6 +36,8 @@ function mkDest(id: string, name: string, color: string | null = null): Destinat
     color,
     created_at: new Date().toISOString(),
     deleted_at: null,
+    kind: "label",
+    config: null,
   };
 }
 

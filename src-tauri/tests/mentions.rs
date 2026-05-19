@@ -10,7 +10,7 @@ use quick_capture_lib::commands::{
     list_captures_with_store, route_capture_with_store, search_archive_with_store,
     search_captures_with_store,
 };
-use quick_capture_lib::store::{CaptureInput, Store};
+use quick_capture_lib::store::{CaptureInput, DestinationKind, Store};
 use tempfile::{tempdir, TempDir};
 use ulid::Ulid;
 
@@ -178,7 +178,7 @@ fn inbox_search_filter_intersects_query_with_mention() {
 #[test]
 fn archive_list_filter_narrows_to_routed_captures_mentioning_a_person() {
     let (_dir, store) = temp_store();
-    let dest = create_destination_with_store(&store, "Todoist", None).unwrap();
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).unwrap();
 
     let routed_diego = save_note(&store, "follow up with [[Diego]]");
     let routed_no_one = save_note(&store, "follow up with nobody");
@@ -199,8 +199,8 @@ fn archive_list_filter_narrows_to_routed_captures_mentioning_a_person() {
 #[test]
 fn archive_search_filter_intersects_query_destination_and_mention() {
     let (_dir, store) = temp_store();
-    let dest_a = create_destination_with_store(&store, "A", None).unwrap();
-    let dest_b = create_destination_with_store(&store, "B", None).unwrap();
+    let dest_a = create_destination_with_store(&store, "A", None, DestinationKind::Label, None).unwrap();
+    let dest_b = create_destination_with_store(&store, "B", None, DestinationKind::Label, None).unwrap();
 
     let want = save_note(&store, "alpha review with [[Diego]]");
     let routed_b_alpha_diego =

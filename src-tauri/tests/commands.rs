@@ -11,7 +11,7 @@ use quick_capture_lib::commands::{
     star_capture_with_store, total_count_with_store, unread_count_with_store,
     unroute_capture_with_store, update_destination_with_store,
 };
-use quick_capture_lib::store::{CaptureContext, CaptureInput, CaptureKind, Store};
+use quick_capture_lib::store::{CaptureContext, CaptureInput, CaptureKind, DestinationKind, Store};
 use tempfile::TempDir;
 use ulid::Ulid;
 
@@ -401,7 +401,7 @@ fn save_note_rejects_empty_text_and_writes_nothing() {
 #[test]
 fn create_destination_command_returns_row_and_lists_it() {
     let (_dir, store) = temp_store();
-    let created = create_destination_with_store(&store, "Todoist", Some("red")).expect("create");
+    let created = create_destination_with_store(&store, "Todoist", Some("red"), DestinationKind::Label, None).expect("create");
     assert_eq!(created.name, "Todoist");
     assert_eq!(created.color.as_deref(), Some("red"));
     assert!(created.deleted_at.is_none());
@@ -414,7 +414,7 @@ fn create_destination_command_returns_row_and_lists_it() {
 #[test]
 fn create_destination_command_surfaces_blank_name_error() {
     let (_dir, store) = temp_store();
-    let err = create_destination_with_store(&store, "   ", None)
+    let err = create_destination_with_store(&store, "   ", None, DestinationKind::Label, None)
         .expect_err("blank name should error");
     assert!(
         err.to_lowercase().contains("blank")
@@ -426,8 +426,8 @@ fn create_destination_command_surfaces_blank_name_error() {
 #[test]
 fn create_destination_command_surfaces_name_conflict() {
     let (_dir, store) = temp_store();
-    create_destination_with_store(&store, "Todoist", None).expect("first");
-    let err = create_destination_with_store(&store, "Todoist", None)
+    create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).expect("first");
+    let err = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None)
         .expect_err("dup must error");
     assert!(
         err.to_lowercase().contains("already in use")
@@ -439,8 +439,8 @@ fn create_destination_command_surfaces_name_conflict() {
 #[test]
 fn update_destination_command_renames_and_recolors() {
     let (_dir, store) = temp_store();
-    let created = create_destination_with_store(&store, "Old", Some("red")).expect("create");
-    update_destination_with_store(&store, &created.id, "New", Some("blue")).expect("update");
+    let created = create_destination_with_store(&store, "Old", Some("red"), DestinationKind::Label, None).expect("create");
+    update_destination_with_store(&store, &created.id, "New", Some("blue"), DestinationKind::Label, None).expect("update");
 
     let listed = list_destinations_with_store(&store).expect("list");
     assert_eq!(listed.len(), 1);
@@ -451,7 +451,7 @@ fn update_destination_command_renames_and_recolors() {
 #[test]
 fn soft_delete_destination_command_hides_live_and_surfaces_in_deleted_list() {
     let (_dir, store) = temp_store();
-    let created = create_destination_with_store(&store, "Old", None).expect("create");
+    let created = create_destination_with_store(&store, "Old", None, DestinationKind::Label, None).expect("create");
     soft_delete_destination_with_store(&store, &created.id).expect("soft delete");
 
     let live = list_destinations_with_store(&store).expect("live");
@@ -464,7 +464,7 @@ fn soft_delete_destination_command_hides_live_and_surfaces_in_deleted_list() {
 #[test]
 fn restore_destination_command_brings_back_when_no_conflict() {
     let (_dir, store) = temp_store();
-    let created = create_destination_with_store(&store, "Ref", None).expect("create");
+    let created = create_destination_with_store(&store, "Ref", None, DestinationKind::Label, None).expect("create");
     soft_delete_destination_with_store(&store, &created.id).expect("soft delete");
     restore_destination_with_store(&store, &created.id).expect("restore");
 
@@ -476,9 +476,9 @@ fn restore_destination_command_brings_back_when_no_conflict() {
 #[test]
 fn restore_destination_command_surfaces_conflict_when_name_taken() {
     let (_dir, store) = temp_store();
-    let old = create_destination_with_store(&store, "Reading", None).expect("create old");
+    let old = create_destination_with_store(&store, "Reading", None, DestinationKind::Label, None).expect("create old");
     soft_delete_destination_with_store(&store, &old.id).expect("soft delete");
-    create_destination_with_store(&store, "Reading", None).expect("re-create");
+    create_destination_with_store(&store, "Reading", None, DestinationKind::Label, None).expect("re-create");
 
     let err = restore_destination_with_store(&store, &old.id)
         .expect_err("restore must conflict");
@@ -492,7 +492,7 @@ fn restore_destination_command_surfaces_conflict_when_name_taken() {
 fn route_capture_command_moves_capture_out_of_inbox_and_into_archive() {
     let (_dir, store) = temp_store();
     let saved = save_note_with_store(&store, "to route", CaptureContext::default()).expect("save");
-    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).expect("create dest");
 
     route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
 
@@ -510,7 +510,7 @@ fn route_capture_command_moves_capture_out_of_inbox_and_into_archive() {
 #[test]
 fn route_capture_command_rejects_invalid_capture_id() {
     let (_dir, store) = temp_store();
-    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).expect("create dest");
     let err = route_capture_with_store(&store, "not-a-ulid", &dest.id)
         .expect_err("invalid id must error");
     assert!(err.to_lowercase().contains("invalid id"));
@@ -520,7 +520,7 @@ fn route_capture_command_rejects_invalid_capture_id() {
 fn route_capture_command_rejects_soft_deleted_destination() {
     let (_dir, store) = temp_store();
     let saved = save_note_with_store(&store, "x", CaptureContext::default()).expect("save");
-    let dest = create_destination_with_store(&store, "Old", None).expect("create dest");
+    let dest = create_destination_with_store(&store, "Old", None, DestinationKind::Label, None).expect("create dest");
     soft_delete_destination_with_store(&store, &dest.id).expect("soft delete dest");
 
     let err = route_capture_with_store(&store, &saved.id, &dest.id)
@@ -536,7 +536,7 @@ fn route_capture_command_rejects_soft_deleted_destination() {
 fn unroute_capture_command_returns_capture_to_inbox() {
     let (_dir, store) = temp_store();
     let saved = save_note_with_store(&store, "y", CaptureContext::default()).expect("save");
-    let dest = create_destination_with_store(&store, "Readwise", None).expect("create dest");
+    let dest = create_destination_with_store(&store, "Readwise", None, DestinationKind::Label, None).expect("create dest");
     route_capture_with_store(&store, &saved.id, &dest.id).expect("route");
     unroute_capture_with_store(&store, &saved.id).expect("unroute");
 
@@ -552,7 +552,7 @@ fn search_archive_command_excludes_inbox_results() {
     let (_dir, store) = temp_store();
     let kept = save_note_with_store(&store, "alpha kept", CaptureContext::default()).expect("kept");
     let routed = save_note_with_store(&store, "alpha routed", CaptureContext::default()).expect("routed");
-    let dest = create_destination_with_store(&store, "Todoist", None).expect("create dest");
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).expect("create dest");
     route_capture_with_store(&store, &routed.id, &dest.id).expect("route");
 
     let hits = search_archive_with_store(&store, "alpha", None, None, 10).expect("search");
@@ -564,8 +564,8 @@ fn search_archive_command_excludes_inbox_results() {
 #[test]
 fn list_archive_command_filters_by_destination() {
     let (_dir, store) = temp_store();
-    let dest_a = create_destination_with_store(&store, "A", None).expect("a");
-    let dest_b = create_destination_with_store(&store, "B", None).expect("b");
+    let dest_a = create_destination_with_store(&store, "A", None, DestinationKind::Label, None).expect("a");
+    let dest_b = create_destination_with_store(&store, "B", None, DestinationKind::Label, None).expect("b");
     let a = save_note_with_store(&store, "a", CaptureContext::default()).expect("a save");
     let b = save_note_with_store(&store, "b", CaptureContext::default()).expect("b save");
     route_capture_with_store(&store, &a.id, &dest_a.id).expect("route a");
@@ -587,7 +587,7 @@ fn inbox_count_command_excludes_routed_and_deleted_rows() {
     save_note_with_store(&store, "stays", CaptureContext::default()).expect("a");
     let routed = save_note_with_store(&store, "routed", CaptureContext::default()).expect("b");
     let dropped = save_note_with_store(&store, "dropped", CaptureContext::default()).expect("c");
-    let dest = create_destination_with_store(&store, "Todoist", None).expect("dest");
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None).expect("dest");
     route_capture_with_store(&store, &routed.id, &dest.id).expect("route");
     delete_capture_with_store(&store, &dropped.id).expect("delete");
 

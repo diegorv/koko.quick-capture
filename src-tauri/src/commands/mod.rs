@@ -19,7 +19,7 @@ use crate::drag_drop::decide_dropped_files;
 use crate::kind_detect::decide;
 use crate::shell::{Shell, SystemShell};
 use crate::store::{
-    Capture, CaptureContext, CaptureInput, CaptureKind, Destination, Store,
+    Capture, CaptureContext, CaptureInput, CaptureKind, Destination, DestinationKind, Store,
     SETTING_WIKILINK_SOURCE_FOLDER,
 };
 use crate::wikilink::{read_people_dir, validate_folder, FolderError, PersonEntry};
@@ -930,6 +930,16 @@ pub fn list_deleted_destinations(store: State<'_, Store>) -> Result<Vec<Destinat
     list_deleted_destinations_with_store(&store)
 }
 
+/// Translate the optional `kind` string from JS into a `DestinationKind`.
+/// Defaults to `Label` when the field is absent so older callers keep
+/// working without passing a kind.
+pub fn parse_destination_kind(kind: Option<&str>) -> Result<DestinationKind, String> {
+    match kind {
+        None => Ok(DestinationKind::Label),
+        Some(value) => DestinationKind::parse(value).map_err(|e| e.to_string()),
+    }
+}
+
 /// Create a Destination. Returns the new row. Surfaces conflict +
 /// blank-name errors as string messages so the UI can prompt the
 /// user without parsing a typed error.
@@ -937,9 +947,11 @@ pub fn create_destination_with_store(
     store: &Store,
     name: &str,
     color: Option<&str>,
+    kind: DestinationKind,
+    config: Option<&str>,
 ) -> Result<Destination, String> {
     store
-        .destination_create(name, color)
+        .destination_create(name, color, kind, config)
         .map_err(|e| e.to_string())
 }
 
@@ -947,10 +959,19 @@ pub fn create_destination_with_store(
 pub fn create_destination(
     name: String,
     color: Option<String>,
+    kind: Option<String>,
+    config: Option<String>,
     app: AppHandle,
     store: State<'_, Store>,
 ) -> Result<Destination, String> {
-    let created = create_destination_with_store(&store, &name, color.as_deref())?;
+    let kind = parse_destination_kind(kind.as_deref())?;
+    let created = create_destination_with_store(
+        &store,
+        &name,
+        color.as_deref(),
+        kind,
+        config.as_deref(),
+    )?;
     let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
     Ok(created)
 }
@@ -960,9 +981,11 @@ pub fn update_destination_with_store(
     id: &str,
     name: &str,
     color: Option<&str>,
+    kind: DestinationKind,
+    config: Option<&str>,
 ) -> Result<(), String> {
     store
-        .destination_update(id, name, color)
+        .destination_update(id, name, color, kind, config)
         .map_err(|e| e.to_string())
 }
 
@@ -971,10 +994,20 @@ pub fn update_destination(
     id: String,
     name: String,
     color: Option<String>,
+    kind: Option<String>,
+    config: Option<String>,
     app: AppHandle,
     store: State<'_, Store>,
 ) -> Result<(), String> {
-    update_destination_with_store(&store, &id, &name, color.as_deref())?;
+    let kind = parse_destination_kind(kind.as_deref())?;
+    update_destination_with_store(
+        &store,
+        &id,
+        &name,
+        color.as_deref(),
+        kind,
+        config.as_deref(),
+    )?;
     let _ = app.emit(DESTINATIONS_CHANGED_EVENT, ());
     Ok(())
 }

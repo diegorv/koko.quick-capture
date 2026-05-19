@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use quick_capture_lib::store::{
-    cursor_for_archive, CaptureInput, CaptureKind, ShotSource, Store, StoreError,
+    cursor_for_archive, CaptureInput, CaptureKind, DestinationKind, ShotSource, Store, StoreError,
     SETTING_LAST_INBOX_OPEN_ID,
 };
 use tempfile::TempDir;
@@ -402,13 +402,13 @@ fn destination_create_then_list_round_trips_name_and_color() {
     let (_dir, store) = temp_store();
 
     let todoist = store
-        .destination_create("Todoist", Some("red"))
+        .destination_create("Todoist", Some("red"), DestinationKind::Label, None)
         .expect("create todoist");
     let readwise = store
-        .destination_create("Readwise", Some("teal"))
+        .destination_create("Readwise", Some("teal"), DestinationKind::Label, None)
         .expect("create readwise");
     let reference = store
-        .destination_create("Reference", None)
+        .destination_create("Reference", None, DestinationKind::Label, None)
         .expect("create reference");
 
     let listed = store.destinations_list_live().expect("list");
@@ -428,25 +428,119 @@ fn destination_create_trims_whitespace_and_rejects_blank_name() {
     let (_dir, store) = temp_store();
 
     let created = store
-        .destination_create("  Todoist  ", Some(" red "))
+        .destination_create("  Todoist  ", Some(" red "), DestinationKind::Label, None)
         .expect("create");
     assert_eq!(created.name, "Todoist");
     assert_eq!(created.color.as_deref(), Some("red"));
 
     let err = store
-        .destination_create("   ", None)
+        .destination_create("   ", None, DestinationKind::Label, None)
         .expect_err("blank name should fail");
     assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn destination_create_kokobrain_round_trips_vault_config() {
+    let (_dir, store) = temp_store();
+
+    let dest = store
+        .destination_create(
+            "Personal Brain",
+            Some("teal"),
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal"}"#),
+        )
+        .expect("create kokobrain dest");
+
+    assert_eq!(dest.kind, DestinationKind::Kokobrain);
+    let config = dest.config.as_deref().expect("config persisted");
+    let parsed: serde_json::Value = serde_json::from_str(config).expect("config is json");
+    assert_eq!(parsed["vault"], "Personal");
+
+    let listed = store.destinations_list_live().expect("list");
+    let round_trip = listed
+        .iter()
+        .find(|d| d.id == dest.id)
+        .expect("listed back");
+    assert_eq!(round_trip.kind, DestinationKind::Kokobrain);
+    assert_eq!(round_trip.config.as_deref(), dest.config.as_deref());
+}
+
+#[test]
+fn destination_create_kokobrain_requires_vault_config() {
+    let (_dir, store) = temp_store();
+
+    let err = store
+        .destination_create("Brain", None, DestinationKind::Kokobrain, None)
+        .expect_err("missing config should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+
+    let err = store
+        .destination_create(
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":""}"#),
+        )
+        .expect_err("blank vault should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+
+    let err = store
+        .destination_create("Brain", None, DestinationKind::Kokobrain, Some("not json"))
+        .expect_err("bad json should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn destination_create_label_rejects_config() {
+    let (_dir, store) = temp_store();
+
+    let err = store
+        .destination_create(
+            "Todoist",
+            None,
+            DestinationKind::Label,
+            Some(r#"{"vault":"Personal"}"#),
+        )
+        .expect_err("label with config should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn destination_update_can_swap_kind_to_kokobrain() {
+    let (_dir, store) = temp_store();
+    let created = store
+        .destination_create("Brain", None, DestinationKind::Label, None)
+        .expect("create label");
+
+    store
+        .destination_update(
+            &created.id,
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Work"}"#),
+        )
+        .expect("upgrade to kokobrain");
+
+    let after = store
+        .destination_find(&created.id)
+        .expect("find")
+        .expect("present");
+    assert_eq!(after.kind, DestinationKind::Kokobrain);
+    let parsed: serde_json::Value =
+        serde_json::from_str(after.config.as_deref().expect("config")).expect("json");
+    assert_eq!(parsed["vault"], "Work");
 }
 
 #[test]
 fn destination_create_rejects_duplicate_live_name() {
     let (_dir, store) = temp_store();
     store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("first create");
     let err = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect_err("dup should fail");
     match err {
         StoreError::DestinationNameConflict(name) => assert_eq!(name, "Todoist"),
@@ -458,11 +552,11 @@ fn destination_create_rejects_duplicate_live_name() {
 fn destination_update_renames_and_recolors() {
     let (_dir, store) = temp_store();
     let created = store
-        .destination_create("Todoist", Some("red"))
+        .destination_create("Todoist", Some("red"), DestinationKind::Label, None)
         .expect("create");
 
     store
-        .destination_update(&created.id, "Todoist Inbox", Some("blue"))
+        .destination_update(&created.id, "Todoist Inbox", Some("blue"), DestinationKind::Label, None)
         .expect("update");
 
     let after = store
@@ -477,13 +571,13 @@ fn destination_update_renames_and_recolors() {
 fn destination_update_rejects_conflict_with_other_live_name() {
     let (_dir, store) = temp_store();
     store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create todoist");
     let readwise = store
-        .destination_create("Readwise", None)
+        .destination_create("Readwise", None, DestinationKind::Label, None)
         .expect("create readwise");
     let err = store
-        .destination_update(&readwise.id, "Todoist", None)
+        .destination_update(&readwise.id, "Todoist", None, DestinationKind::Label, None)
         .expect_err("conflict expected");
     assert!(matches!(err, StoreError::DestinationNameConflict(_)));
 }
@@ -492,7 +586,7 @@ fn destination_update_rejects_conflict_with_other_live_name() {
 fn destination_soft_delete_hides_from_live_list_but_keeps_row() {
     let (_dir, store) = temp_store();
     let created = store
-        .destination_create("Old Project", None)
+        .destination_create("Old Project", None, DestinationKind::Label, None)
         .expect("create");
     store
         .destination_soft_delete(&created.id)
@@ -513,14 +607,14 @@ fn destination_soft_delete_hides_from_live_list_but_keeps_row() {
 fn destination_soft_delete_then_create_same_name_succeeds() {
     let (_dir, store) = temp_store();
     let first = store
-        .destination_create("Reading", None)
+        .destination_create("Reading", None, DestinationKind::Label, None)
         .expect("first create");
     store
         .destination_soft_delete(&first.id)
         .expect("soft delete");
     // Live unique index excludes deleted rows.
     let second = store
-        .destination_create("Reading", None)
+        .destination_create("Reading", None, DestinationKind::Label, None)
         .expect("re-create same name");
     assert_ne!(first.id, second.id);
 }
@@ -529,7 +623,7 @@ fn destination_soft_delete_then_create_same_name_succeeds() {
 fn destination_restore_brings_back_when_no_conflict() {
     let (_dir, store) = temp_store();
     let created = store
-        .destination_create("Ref", None)
+        .destination_create("Ref", None, DestinationKind::Label, None)
         .expect("create");
     store
         .destination_soft_delete(&created.id)
@@ -546,12 +640,12 @@ fn destination_restore_brings_back_when_no_conflict() {
 fn destination_restore_conflicts_when_name_taken_by_live() {
     let (_dir, store) = temp_store();
     let old = store
-        .destination_create("Reading", None)
+        .destination_create("Reading", None, DestinationKind::Label, None)
         .expect("create old");
     store.destination_soft_delete(&old.id).expect("soft delete");
     // New live destination grabs the freed name.
     store
-        .destination_create("Reading", None)
+        .destination_create("Reading", None, DestinationKind::Label, None)
         .expect("re-create same name");
     let err = store
         .destination_restore(&old.id)
@@ -569,7 +663,7 @@ fn capture_route_moves_capture_from_inbox_to_archive() {
         .expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse ulid");
     let dest = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create dest");
 
     store.capture_route(&id, &dest.id).expect("route");
@@ -599,7 +693,7 @@ fn capture_unroute_returns_capture_to_inbox() {
         .expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse");
     let dest = store
-        .destination_create("Readwise", None)
+        .destination_create("Readwise", None, DestinationKind::Label, None)
         .expect("create dest");
     store.capture_route(&id, &dest.id).expect("route");
     store.capture_unroute(&id).expect("unroute");
@@ -623,10 +717,10 @@ fn capture_reroute_updates_destination_and_routed_at() {
         .expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse");
     let first = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create first");
     let second = store
-        .destination_create("Readwise", None)
+        .destination_create("Readwise", None, DestinationKind::Label, None)
         .expect("create second");
     store.capture_route(&id, &first.id).expect("route first");
     let after_first = store.list_archive(None, None, 10).expect("archive")[0]
@@ -658,7 +752,7 @@ fn capture_route_rejects_soft_deleted_destination() {
         .expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse");
     let dest = store
-        .destination_create("Old", None)
+        .destination_create("Old", None, DestinationKind::Label, None)
         .expect("create dest");
     store.destination_soft_delete(&dest.id).expect("soft delete");
 
@@ -689,7 +783,7 @@ fn routed_capture_keeps_destination_reference_after_soft_delete() {
         .expect("save");
     let id = Ulid::from_string(&saved.id).expect("parse");
     let dest = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create dest");
     store.capture_route(&id, &dest.id).expect("route");
     store.destination_soft_delete(&dest.id).expect("soft delete");
@@ -715,7 +809,7 @@ fn count_inbox_excludes_routed_and_deleted() {
         })
         .expect("save dropped");
     let dest = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create dest");
     let routed_id = Ulid::from_string(&routed.id).expect("parse");
     store.capture_route(&routed_id, &dest.id).expect("route");
@@ -740,7 +834,7 @@ fn search_excludes_routed_captures_from_inbox_results() {
         })
         .expect("save routed");
     let dest = store
-        .destination_create("Todoist", None)
+        .destination_create("Todoist", None, DestinationKind::Label, None)
         .expect("create dest");
     let routed_id = Ulid::from_string(&routed.id).expect("parse");
     store.capture_route(&routed_id, &dest.id).expect("route");
@@ -759,8 +853,8 @@ fn search_excludes_routed_captures_from_inbox_results() {
 #[test]
 fn list_archive_filters_by_destination() {
     let (_dir, store) = temp_store();
-    let dest_a = store.destination_create("A", None).expect("a");
-    let dest_b = store.destination_create("B", None).expect("b");
+    let dest_a = store.destination_create("A", None, DestinationKind::Label, None).expect("a");
+    let dest_b = store.destination_create("B", None, DestinationKind::Label, None).expect("b");
     let a1 = store
         .save(CaptureInput::Note { text: "a1".into() })
         .expect("save a1");
@@ -793,7 +887,7 @@ fn list_archive_filters_by_destination() {
 #[test]
 fn list_archive_paginates_through_routed_at_id_cursor() {
     let (_dir, store) = temp_store();
-    let dest = store.destination_create("D", None).expect("dest");
+    let dest = store.destination_create("D", None, DestinationKind::Label, None).expect("dest");
 
     // Seed 12 captures, route each with a 2ms gap so routed_at strictly
     // increases — same trick as the inbox cursor test.

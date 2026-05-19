@@ -16,6 +16,8 @@ function mkDest(
     color,
     created_at: new Date().toISOString(),
     deleted_at: deleted ? new Date().toISOString() : null,
+    kind: "label",
+    config: null,
   };
 }
 

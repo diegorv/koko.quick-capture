@@ -145,8 +145,38 @@ pub struct Capture {
     pub routed_at: Option<String>,
 }
 
-/// A row in the `destinations` table. User-managed label that a
-/// Capture can be Routed to. See ADR-0010.
+/// Closed set of Destination kinds. See ADR-0012.
+///
+/// `Label` is a pure routing label (the only kind in ADR-0010). `Kokobrain`
+/// pairs the routing label with a deep-link handoff to the kokobrain app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DestinationKind {
+    Label,
+    Kokobrain,
+}
+
+impl DestinationKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DestinationKind::Label => "label",
+            DestinationKind::Kokobrain => "kokobrain",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, StoreError> {
+        match value {
+            "label" => Ok(DestinationKind::Label),
+            "kokobrain" => Ok(DestinationKind::Kokobrain),
+            other => Err(StoreError::Decode(format!(
+                "unknown destination kind: {other}"
+            ))),
+        }
+    }
+}
+
+/// A row in the `destinations` table. User-managed routing target.
+/// See ADR-0010 (lifecycle) and ADR-0012 (kinds + per-kind config).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Destination {
     pub id: String,
@@ -155,6 +185,12 @@ pub struct Destination {
     pub color: Option<String>,
     pub created_at: String,
     pub deleted_at: Option<String>,
+    /// Routing behavior. `Label` is metadata-only; `Kokobrain` fires a
+    /// deep link to the kokobrain app on routing.
+    pub kind: DestinationKind,
+    /// Per-kind opaque JSON config. Required for `Kokobrain` (must encode
+    /// a non-blank `vault` string); always `None` for `Label`.
+    pub config: Option<String>,
 }
 
 /// Resolved context for a capture about to be persisted: macOS
@@ -280,7 +316,9 @@ impl Store {
                 name TEXT NOT NULL,
                 color TEXT,
                 created_at TEXT NOT NULL,
-                deleted_at TEXT
+                deleted_at TEXT,
+                kind TEXT NOT NULL DEFAULT 'label',
+                config TEXT
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_destinations_name_live
                 ON destinations(name) WHERE deleted_at IS NULL;
@@ -882,7 +920,7 @@ impl Store {
     pub fn destinations_list_live(&self) -> Result<Vec<Destination>, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, color, created_at, deleted_at
+            "SELECT id, name, color, created_at, deleted_at, kind, config
              FROM destinations
              WHERE deleted_at IS NULL
              ORDER BY LOWER(name) ASC",
@@ -900,7 +938,7 @@ impl Store {
     pub fn destinations_list_deleted(&self) -> Result<Vec<Destination>, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, color, created_at, deleted_at
+            "SELECT id, name, color, created_at, deleted_at, kind, config
              FROM destinations
              WHERE deleted_at IS NOT NULL
              ORDER BY LOWER(name) ASC",
@@ -918,7 +956,7 @@ impl Store {
     pub fn destination_find(&self, id: &str) -> Result<Option<Destination>, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, color, created_at, deleted_at
+            "SELECT id, name, color, created_at, deleted_at, kind, config
              FROM destinations
              WHERE id = ?1",
         )?;
@@ -937,6 +975,8 @@ impl Store {
         &self,
         name: &str,
         color: Option<&str>,
+        kind: DestinationKind,
+        config: Option<&str>,
     ) -> Result<Destination, StoreError> {
         let name = name.trim();
         if name.is_empty() {
@@ -945,14 +985,15 @@ impl Store {
             ));
         }
         let color = normalize_color(color);
+        let config = normalize_destination_config(kind, config)?;
         let id = Ulid::new().to_string();
         let created_at = now_rfc3339();
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let result = conn.execute(
-            "INSERT INTO destinations (id, name, color, created_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, NULL)",
-            params![&id, name, &color, &created_at],
+            "INSERT INTO destinations (id, name, color, created_at, deleted_at, kind, config)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![&id, name, &color, &created_at, kind.as_str(), &config],
         );
         if let Err(e) = result {
             if is_unique_violation(&e) {
@@ -966,6 +1007,8 @@ impl Store {
             color,
             created_at,
             deleted_at: None,
+            kind,
+            config,
         })
     }
 
@@ -980,6 +1023,8 @@ impl Store {
         id: &str,
         name: &str,
         color: Option<&str>,
+        kind: DestinationKind,
+        config: Option<&str>,
     ) -> Result<(), StoreError> {
         let name = name.trim();
         if name.is_empty() {
@@ -988,10 +1033,12 @@ impl Store {
             ));
         }
         let color = normalize_color(color);
+        let config = normalize_destination_config(kind, config)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let result = conn.execute(
-            "UPDATE destinations SET name = ?1, color = ?2 WHERE id = ?3",
-            params![name, &color, id],
+            "UPDATE destinations SET name = ?1, color = ?2, kind = ?3, config = ?4
+             WHERE id = ?5",
+            params![name, &color, kind.as_str(), &config, id],
         );
         match result {
             Ok(0) => Err(StoreError::NotFound(id.to_string())),
@@ -1301,12 +1348,20 @@ fn row_to_destination(
     let color: Option<String> = row.get(2)?;
     let created_at: String = row.get(3)?;
     let deleted_at: Option<String> = row.get(4)?;
+    let kind_str: String = row.get(5)?;
+    let config: Option<String> = row.get(6)?;
+    let kind = match DestinationKind::parse(&kind_str) {
+        Ok(k) => k,
+        Err(e) => return Ok(Err(e)),
+    };
     Ok(Ok(Destination {
         id,
         name,
         color,
         created_at,
         deleted_at,
+        kind,
+        config,
     }))
 }
 
@@ -1319,6 +1374,50 @@ fn normalize_color(color: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|c| !c.is_empty())
         .map(String::from)
+}
+
+/// Validate + normalize the per-kind `config` JSON. See ADR-0012.
+///
+/// `Label` rejects any non-null config (no behavior to configure).
+/// `Kokobrain` requires a JSON object with a non-blank string `vault`;
+/// the normalized form re-emits a minimal JSON object so callers cannot
+/// smuggle extra fields through.
+fn normalize_destination_config(
+    kind: DestinationKind,
+    config: Option<&str>,
+) -> Result<Option<String>, StoreError> {
+    match kind {
+        DestinationKind::Label => {
+            let has_value = config.map(|c| !c.trim().is_empty()).unwrap_or(false);
+            if has_value {
+                return Err(StoreError::InvalidArgument(
+                    "label destinations cannot carry config".into(),
+                ));
+            }
+            Ok(None)
+        }
+        DestinationKind::Kokobrain => {
+            let raw = config.ok_or_else(|| {
+                StoreError::InvalidArgument(
+                    "kokobrain destination requires config with a vault".into(),
+                )
+            })?;
+            let parsed: serde_json::Value = serde_json::from_str(raw)
+                .map_err(|e| StoreError::InvalidArgument(format!("invalid config json: {e}")))?;
+            let vault = parsed
+                .get("vault")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| {
+                    StoreError::InvalidArgument(
+                        "kokobrain destination config must include a non-blank vault".into(),
+                    )
+                })?;
+            let normalized = serde_json::json!({ "vault": vault });
+            Ok(Some(normalized.to_string()))
+        }
+    }
 }
 
 /// Encode the (routed_at, id) tuple cursor used by `list_archive`.

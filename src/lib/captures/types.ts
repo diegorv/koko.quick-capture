@@ -33,7 +33,11 @@ export interface Capture {
   routed_at: string | null;
 }
 
-/** A user-managed routing target. See ADR-0010. */
+/** Closed set of Destination kinds. See ADR-0012. */
+export type DestinationKind = "label" | "kokobrain";
+
+/** A user-managed routing target. See ADR-0010 (lifecycle) and
+ * ADR-0012 (kinds + per-kind config). */
 export interface Destination {
   id: string;
   name: string;
@@ -42,4 +46,10 @@ export interface Destination {
   created_at: string;
   /** Soft-delete marker. `null` for live Destinations. */
   deleted_at: string | null;
+  /** Routing behavior. "label" is metadata-only; "kokobrain" fires a
+   * deep link to the kokobrain app on routing. */
+  kind: DestinationKind;
+  /** Per-kind opaque JSON config string. `null` for "label".
+   * For "kokobrain", encodes `{ "vault": string }`. */
+  config: string | null;
 }
