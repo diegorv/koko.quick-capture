@@ -201,13 +201,6 @@
     </select>
   </div>
 
-  <p class="note">
-    Nightly versions use the format <code>X.Y.Z-nightly.&lt;count&gt;.&lt;sha&gt;</code>
-    and sort semver-greater than the same-base stable release. Switching from
-    <strong>Nightly</strong> back to <strong>Stable</strong> will not
-    automatically downgrade — the auto-updater never moves to a lower version.
-  </p>
-
   {#if needsManualReinstall}
     <div class="row">
       <div class="label">
@@ -362,21 +355,6 @@
   }
   @media (prefers-color-scheme: dark) {
     .label-desc {
-      color: rgba(255, 255, 255, 0.55);
-    }
-  }
-
-  .note {
-    margin: 0.5rem 0 0;
-    font-size: 0.78rem;
-    color: rgba(0, 0, 0, 0.55);
-  }
-  .note code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.95em;
-  }
-  @media (prefers-color-scheme: dark) {
-    .note {
       color: rgba(255, 255, 255, 0.55);
     }
   }
