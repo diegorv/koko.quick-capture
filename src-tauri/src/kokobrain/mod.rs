@@ -53,9 +53,26 @@ impl std::fmt::Display for BuildError {
 
 impl std::error::Error for BuildError {}
 
+/// Parsed kokobrain destination config. Re-derived from the JSON blob
+/// at URI-build time so a hand-edited DB row cannot smuggle in a
+/// malformed `vault` or `tags` past the store layer's normalization.
+struct KokobrainConfig {
+    vault: String,
+    /// Optional user-supplied tags. Stored as raw strings; the URI
+    /// builder kebab-cases each one before emitting.
+    tags: Vec<String>,
+}
+
 /// Build the `kokobrain://capture?vault=...&content=...&tags=...` URI
 /// for the given Capture + Destination pair. See module docs for
 /// payload mapping per kind.
+///
+/// The `tags` query parameter is the kebab-cased destination name
+/// followed by every user-supplied tag from the destination config
+/// (kebab-cased, deduplicated, original order preserved). When the
+/// merged list is empty — which only happens if both the destination
+/// name and every configured tag kebab-case to an empty string — the
+/// `tags` parameter is omitted entirely.
 pub fn build_capture_uri(
     capture: &Capture,
     destination: &Destination,
@@ -63,22 +80,25 @@ pub fn build_capture_uri(
     if destination.kind != DestinationKind::Kokobrain {
         return Err(BuildError::WrongDestinationKind);
     }
-    let vault = parse_vault(destination.config.as_deref())?;
+    let cfg = parse_kokobrain_config(destination.config.as_deref())?;
     let content = content_for_capture(capture)?;
-    let tag = kebab_case(&destination.name);
+    let tags = merge_tags(&destination.name, &cfg.tags);
 
-    let query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("vault", &vault)
-        .append_pair("content", &content)
-        .append_pair("tags", &tag)
-        .finish();
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    serializer
+        .append_pair("vault", &cfg.vault)
+        .append_pair("content", &content);
+    if !tags.is_empty() {
+        serializer.append_pair("tags", &tags.join(","));
+    }
+    let query = serializer.finish();
     Ok(format!("kokobrain://capture?{query}"))
 }
 
-/// Extract the vault string from a Destination's config blob. The
+/// Extract `vault` + `tags` from a Destination's config blob. The
 /// store layer already validates this on write, but we re-validate at
 /// read time so a hand-edited DB does not silently emit a broken URI.
-fn parse_vault(config: Option<&str>) -> Result<String, BuildError> {
+fn parse_kokobrain_config(config: Option<&str>) -> Result<KokobrainConfig, BuildError> {
     let raw = config.ok_or(BuildError::MissingConfig)?;
     let parsed: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| BuildError::InvalidConfig(e.to_string()))?;
@@ -87,8 +107,53 @@ fn parse_vault(config: Option<&str>) -> Result<String, BuildError> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| BuildError::InvalidConfig("vault must be a non-blank string".into()))?;
-    Ok(vault.to_string())
+        .ok_or_else(|| BuildError::InvalidConfig("vault must be a non-blank string".into()))?
+        .to_string();
+
+    let tags = match parsed.get("tags") {
+        None => Vec::new(),
+        Some(v) => {
+            let arr = v.as_array().ok_or_else(|| {
+                BuildError::InvalidConfig("tags must be an array of strings".into())
+            })?;
+            let mut out = Vec::with_capacity(arr.len());
+            for entry in arr {
+                let s = entry.as_str().ok_or_else(|| {
+                    BuildError::InvalidConfig("tags entries must be strings".into())
+                })?;
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_string());
+                }
+            }
+            out
+        }
+    };
+
+    Ok(KokobrainConfig { vault, tags })
+}
+
+/// Merge the destination name (as kebab) with the user-supplied tags
+/// (each kebab-cased). Destination name comes first; duplicates are
+/// dropped while preserving the first-seen position. Empty kebab
+/// results are skipped so an all-symbol destination name does not
+/// emit a phantom empty tag.
+fn merge_tags(destination_name: &str, user_tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(1 + user_tags.len());
+    let dest_kebab = kebab_case(destination_name);
+    if !dest_kebab.is_empty() {
+        out.push(dest_kebab);
+    }
+    for raw in user_tags {
+        let kebab = kebab_case(raw);
+        if kebab.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|existing| existing == &kebab) {
+            out.push(kebab);
+        }
+    }
+    out
 }
 
 /// Map a Capture to the markdown body that should land in kokobrain.
@@ -217,6 +282,19 @@ mod tests {
         }
     }
 
+    fn kokobrain_dest_with_tags(name: &str, vault: &str, tags: &[&str]) -> Destination {
+        let tags_json = serde_json::to_string(tags).expect("tags json");
+        Destination {
+            id: "01H000000000000000000000DEST".into(),
+            name: name.into(),
+            color: None,
+            created_at: "2026-05-18T12:00:00Z".into(),
+            deleted_at: None,
+            kind: DestinationKind::Kokobrain,
+            config: Some(format!(r#"{{"vault":"{vault}","tags":{tags_json}}}"#)),
+        }
+    }
+
     fn label_dest(name: &str) -> Destination {
         Destination {
             id: "01H000000000000000000000LBL".into(),
@@ -334,6 +412,124 @@ mod tests {
         ));
 
         dest.config = Some(r#"{"vault":""}"#.into());
+        assert!(matches!(
+            build_capture_uri(&cap, &dest),
+            Err(BuildError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn user_tags_appended_to_destination_name_tag() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest_with_tags(
+            "Reading List",
+            "Personal",
+            &["source/quick-capture", "Triage Inbox"],
+        );
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let tags = pairs
+            .iter()
+            .find(|(k, _)| k == "tags")
+            .map(|(_, v)| v.clone())
+            .expect("tags param present");
+        assert_eq!(tags, "reading-list,source-quick-capture,triage-inbox");
+    }
+
+    #[test]
+    fn duplicate_user_tag_matching_destination_name_is_dropped() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest_with_tags(
+            "Reading List",
+            "Personal",
+            &["Reading List", "extra"],
+        );
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let tags = pairs
+            .iter()
+            .find(|(k, _)| k == "tags")
+            .map(|(_, v)| v.clone())
+            .expect("tags param present");
+        assert_eq!(tags, "reading-list,extra");
+    }
+
+    #[test]
+    fn duplicate_user_tags_are_collapsed_preserving_first_position() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest_with_tags(
+            "Brain",
+            "Personal",
+            &["alpha", "beta", "alpha", "gamma", "BETA"],
+        );
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let tags = pairs
+            .iter()
+            .find(|(k, _)| k == "tags")
+            .map(|(_, v)| v.clone())
+            .expect("tags param present");
+        // dest-name first, then unique user tags in input order; case
+        // is folded to lowercase by kebab_case so BETA collapses with beta.
+        assert_eq!(tags, "brain,alpha,beta,gamma");
+    }
+
+    #[test]
+    fn destination_name_only_when_no_user_tags() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        assert!(uri.contains("tags=brain"));
+    }
+
+    #[test]
+    fn empty_kebab_destination_name_falls_back_to_user_tags() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest_with_tags("---", "Personal", &["fallback"]);
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let tags = pairs
+            .iter()
+            .find(|(k, _)| k == "tags")
+            .map(|(_, v)| v.clone())
+            .expect("tags param present");
+        assert_eq!(tags, "fallback");
+    }
+
+    #[test]
+    fn tags_param_omitted_when_merged_list_is_empty() {
+        let cap = note_capture("hello");
+        let dest = kokobrain_dest_with_tags("---", "Personal", &["---", "  "]);
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        assert!(
+            !uri.contains("tags="),
+            "tags should be omitted when nothing kebab-cases to a non-empty value, got: {uri}"
+        );
+    }
+
+    #[test]
+    fn invalid_tags_field_rejected() {
+        let cap = note_capture("hello");
+        let mut dest = kokobrain_dest("Brain", "Personal");
+        dest.config = Some(r#"{"vault":"Personal","tags":"not-an-array"}"#.into());
+        assert!(matches!(
+            build_capture_uri(&cap, &dest),
+            Err(BuildError::InvalidConfig(_))
+        ));
+
+        dest.config = Some(r#"{"vault":"Personal","tags":["ok",42]}"#.into());
         assert!(matches!(
             build_capture_uri(&cap, &dest),
             Err(BuildError::InvalidConfig(_))
