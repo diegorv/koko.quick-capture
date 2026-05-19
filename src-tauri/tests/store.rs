@@ -492,6 +492,98 @@ fn destination_create_kokobrain_requires_vault_config() {
 }
 
 #[test]
+fn destination_create_kokobrain_persists_optional_tags() {
+    let (_dir, store) = temp_store();
+
+    let dest = store
+        .destination_create(
+            "Reading List",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal","tags":["source/quick-capture","triage/inbox"]}"#),
+        )
+        .expect("create kokobrain dest with tags");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(dest.config.as_deref().expect("config")).expect("json");
+    assert_eq!(parsed["vault"], "Personal");
+    assert_eq!(
+        parsed["tags"],
+        serde_json::json!(["source/quick-capture", "triage/inbox"])
+    );
+}
+
+#[test]
+fn destination_create_kokobrain_normalizes_blank_and_empty_tags() {
+    let (_dir, store) = temp_store();
+
+    let dest = store
+        .destination_create(
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal","tags":["  spaced  ","","keep"]}"#),
+        )
+        .expect("create");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(dest.config.as_deref().expect("config")).expect("json");
+    assert_eq!(parsed["tags"], serde_json::json!(["spaced", "keep"]));
+}
+
+#[test]
+fn destination_create_kokobrain_drops_tags_when_array_is_empty() {
+    let (_dir, store) = temp_store();
+
+    let dest = store
+        .destination_create(
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal","tags":[]}"#),
+        )
+        .expect("create");
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(dest.config.as_deref().expect("config")).expect("json");
+    assert_eq!(parsed["vault"], "Personal");
+    assert!(
+        parsed.get("tags").is_none(),
+        "empty tags should be dropped from normalized config"
+    );
+}
+
+#[test]
+fn destination_create_kokobrain_rejects_non_array_tags() {
+    let (_dir, store) = temp_store();
+
+    let err = store
+        .destination_create(
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal","tags":"single-string"}"#),
+        )
+        .expect_err("non-array tags should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
+fn destination_create_kokobrain_rejects_non_string_tag_entry() {
+    let (_dir, store) = temp_store();
+
+    let err = store
+        .destination_create(
+            "Brain",
+            None,
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"Personal","tags":["ok",42]}"#),
+        )
+        .expect_err("non-string entry should fail");
+    assert!(matches!(err, StoreError::InvalidArgument(_)));
+}
+
+#[test]
 fn destination_create_label_rejects_config() {
     let (_dir, store) = temp_store();
 

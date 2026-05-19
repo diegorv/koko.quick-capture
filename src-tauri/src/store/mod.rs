@@ -1379,9 +1379,12 @@ fn normalize_color(color: Option<&str>) -> Option<String> {
 /// Validate + normalize the per-kind `config` JSON. See ADR-0012.
 ///
 /// `Label` rejects any non-null config (no behavior to configure).
-/// `Kokobrain` requires a JSON object with a non-blank string `vault`;
-/// the normalized form re-emits a minimal JSON object so callers cannot
-/// smuggle extra fields through.
+/// `Kokobrain` requires a JSON object with a non-blank string `vault`
+/// and an optional `tags` array of non-blank strings; the normalized
+/// form re-emits a minimal JSON object so callers cannot smuggle extra
+/// fields through. An empty `tags` array is dropped from the normalized
+/// output (no `tags` field) so the on-disk shape stays minimal for
+/// destinations that never set any.
 fn normalize_destination_config(
     kind: DestinationKind,
     config: Option<&str>,
@@ -1414,10 +1417,44 @@ fn normalize_destination_config(
                         "kokobrain destination config must include a non-blank vault".into(),
                     )
                 })?;
-            let normalized = serde_json::json!({ "vault": vault });
+            let tags = normalize_kokobrain_tags(parsed.get("tags"))?;
+            let normalized = if tags.is_empty() {
+                serde_json::json!({ "vault": vault })
+            } else {
+                serde_json::json!({ "vault": vault, "tags": tags })
+            };
             Ok(Some(normalized.to_string()))
         }
     }
+}
+
+/// Validate the `tags` field on a kokobrain destination config. Must
+/// be an array of strings; each entry is trimmed and empties are
+/// dropped. Returns an empty vec when the field is absent. Surfaces
+/// `InvalidArgument` when the field is present but not an array, or
+/// when an entry is not a string.
+fn normalize_kokobrain_tags(value: Option<&serde_json::Value>) -> Result<Vec<String>, StoreError> {
+    let Some(v) = value else {
+        return Ok(Vec::new());
+    };
+    let arr = v.as_array().ok_or_else(|| {
+        StoreError::InvalidArgument(
+            "kokobrain destination config `tags` must be an array of strings".into(),
+        )
+    })?;
+    let mut out = Vec::with_capacity(arr.len());
+    for entry in arr {
+        let s = entry.as_str().ok_or_else(|| {
+            StoreError::InvalidArgument(
+                "kokobrain destination config `tags` entries must be strings".into(),
+            )
+        })?;
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            out.push(trimmed.to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// Encode the (routed_at, id) tuple cursor used by `list_archive`.
