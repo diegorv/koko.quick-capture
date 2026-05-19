@@ -348,6 +348,19 @@ pub fn run() {
         // (ADR-0012). The capability file scopes the JS-facing
         // `opener:allow-open-url` permission to that scheme only.
         .plugin(tauri_plugin_opener::init())
+        // Updater plugin: ships the JS `download_and_install` command
+        // used by the UpdatesSection. The channel-aware metadata fetch
+        // lives in `commands::update_channel`; this plugin only handles
+        // the bundle download + install step against a cached `Update`
+        // stored in the webview's resource table.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Process plugin: exposes `relaunch()` to JS so the
+        // UpdatesSection can restart after a successful install.
+        .plugin(tauri_plugin_process::init())
+        // Store plugin: persists update preferences (channel,
+        // autoCheck, lastCheckedAt) across launches without spreading
+        // a new SQLite table for a handful of scalar settings.
+        .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             // Accessory mode: no Dock icon, no system menu bar (see
             // ADR-0009). The app lives in the Tray and is summoned by
@@ -663,7 +676,8 @@ pub fn run() {
             commands::list_people,
             commands::pick_wikilink_source_folder,
             commands::reveal_wikilink_source_folder,
-            commands::list_capture_mentions
+            commands::list_capture_mentions,
+            commands::update_channel::check_for_update_on_channel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

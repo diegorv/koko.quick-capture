@@ -6,6 +6,8 @@
 //! for `invoke()`. The real logic is in the helper functions below so
 //! tests can drive them without a Tauri runtime.
 
+pub mod update_channel;
+
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
