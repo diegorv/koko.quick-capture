@@ -253,8 +253,9 @@ describe("DestinationPicker", () => {
     );
   });
 
-  it("disables KokoBrain destinations when the Capture is a Shot", async () => {
+  it("routes Shot captures to KokoBrain via route_to_kokobrain", async () => {
     const live = [mkKokoDest("01HKB", "Personal Brain", "Personal")];
+    const kokobrainSpy = vi.fn();
     const routeSpy = vi.fn();
     const invokeFn = makeInvoke({
       list_destinations: () => live,
@@ -262,13 +263,16 @@ describe("DestinationPicker", () => {
         routeSpy(args);
         return null;
       },
+      route_to_kokobrain: (args) => {
+        kokobrainSpy(args);
+        return null;
+      },
     });
 
-    const { findAllByTestId, getByTestId } = render(DestinationPicker, {
+    const { findAllByTestId } = render(DestinationPicker, {
       props: {
         open: true,
         captureId: "01HCAP",
-        captureKind: "Shot",
         invokeFn,
         onClose: () => {},
         onAssigned: () => {},
@@ -276,15 +280,14 @@ describe("DestinationPicker", () => {
     });
 
     const rows = await findAllByTestId("picker-result");
-    expect(rows[0].getAttribute("data-disabled")).toBe("true");
-    expect(rows[0].textContent).toContain("KokoBrain handoff supports text only");
-
-    // Click does not fire route_capture; an inline reason replaces it.
     await fireEvent.click(rows[0]);
-    expect(routeSpy).not.toHaveBeenCalled();
-    expect(getByTestId("picker-error").textContent).toContain(
-      "KokoBrain handoff supports text only",
+    await waitFor(() =>
+      expect(kokobrainSpy).toHaveBeenCalledWith({
+        id: "01HCAP",
+        destinationId: "01HKB",
+      }),
     );
+    expect(routeSpy).not.toHaveBeenCalled();
   });
 
   it("routes Note captures to KokoBrain via route_to_kokobrain", async () => {
@@ -307,7 +310,6 @@ describe("DestinationPicker", () => {
       props: {
         open: true,
         captureId: "01HCAP",
-        captureKind: "Note",
         invokeFn,
         onClose: () => {},
         onAssigned: () => {},
@@ -346,7 +348,6 @@ describe("DestinationPicker", () => {
       props: {
         open: true,
         captureId: "01HCAP",
-        captureKind: "Note",
         invokeFn,
         onClose: () => {},
         onAssigned: () => {},

@@ -21,16 +21,18 @@
 //! - `Link` sends `url` plus an optional `title` (resolved from
 //!   `source_title` -> `payload.title`; omitted when neither exists so
 //!   the brain can fall back on its own).
-//! - `Shot` / `File` are still rejected here; the brain parser accepts
-//!   `kind=shot|file` with `path=`, but quick-capture will wire that in
-//!   a later change.
+//! - `Shot` / `File` send `path` (prefers `payload.blob_path` for
+//!   pasted bytes, falls back to `payload.source_path` for drag-in or
+//!   external files). `mime` rides along when present; `File` also
+//!   sends `original_name` so the brain can preserve the user-facing
+//!   filename. The path is emitted as a raw filesystem string — the
+//!   brain side resolves it.
 
 use crate::store::{Capture, CaptureKind, Destination, DestinationKind};
 
 /// Error variants surfaced when a Capture cannot be turned into a
 /// `kokobrain://` URI. Each variant maps to a user-visible message in
-/// the command layer; the picker uses [`BuildError::UnsupportedKind`]
-/// to disable kokobrain destinations for `Shot`/`File` rows.
+/// the command layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildError {
     /// Destination is not a kokobrain destination. Caller should route
@@ -40,10 +42,9 @@ pub enum BuildError {
     MissingConfig,
     /// Config JSON is malformed or the vault string is blank.
     InvalidConfig(String),
-    /// The Capture's `kind` cannot be expressed as note content.
-    UnsupportedKind(CaptureKind),
     /// The Capture's payload JSON is missing an expected field for the
-    /// content mapping (e.g. `Link` without a `url`).
+    /// content mapping (e.g. `Link` without a `url`, `Shot`/`File`
+    /// without a path).
     MalformedPayload(&'static str),
 }
 
@@ -57,9 +58,6 @@ impl std::fmt::Display for BuildError {
                 write!(f, "kokobrain destination is missing its config")
             }
             BuildError::InvalidConfig(msg) => write!(f, "invalid kokobrain config: {msg}"),
-            BuildError::UnsupportedKind(k) => {
-                write!(f, "{k:?} captures cannot be routed to a kokobrain destination")
-            }
             BuildError::MalformedPayload(field) => {
                 write!(f, "capture payload missing field: {field}")
             }
@@ -140,7 +138,34 @@ pub fn build_capture_uri(
             // which the brain treats as authoritative.
         }
         CaptureKind::Shot | CaptureKind::File => {
-            return Err(BuildError::UnsupportedKind(capture.kind));
+            let path = capture
+                .payload
+                .get("blob_path")
+                .and_then(|v| v.as_str())
+                .or_else(|| capture.payload.get("source_path").and_then(|v| v.as_str()))
+                .ok_or(BuildError::MalformedPayload("path"))?;
+            s.append_pair("path", path);
+            if let Some(mime) = capture.payload.get("mime").and_then(|v| v.as_str()) {
+                s.append_pair("mime", mime);
+            }
+            if capture.kind == CaptureKind::File {
+                if let Some(name) = capture
+                    .payload
+                    .get("original_name")
+                    .and_then(|v| v.as_str())
+                {
+                    s.append_pair("original_name", name);
+                }
+            }
+            if let Some(v) = non_blank(capture.source_app.as_deref()) {
+                s.append_pair("source_app", v);
+            }
+            if let Some(v) = non_blank(capture.source_title.as_deref()) {
+                s.append_pair("source_title", v);
+            }
+            if let Some(v) = non_blank(capture.source_url.as_deref()) {
+                s.append_pair("source_url", v);
+            }
         }
     }
 
@@ -327,6 +352,49 @@ mod tests {
         }
     }
 
+    fn shot_bytes_capture(blob_path: &str, mime: &str) -> Capture {
+        Capture {
+            id: "01H000000000000000000000SHOB".into(),
+            kind: CaptureKind::Shot,
+            created_at: "2026-05-18T12:00:00Z".into(),
+            payload: serde_json::json!({
+                "blob_path": blob_path,
+                "mime": mime,
+                "width": 800,
+                "height": 600,
+            }),
+            source_app: None,
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: None,
+            source_url: None,
+            destination_id: None,
+            routed_at: None,
+        }
+    }
+
+    fn file_capture(source_path: &str, mime: &str, original_name: &str) -> Capture {
+        Capture {
+            id: "01H000000000000000000000FILE".into(),
+            kind: CaptureKind::File,
+            created_at: "2026-05-18T12:00:00Z".into(),
+            payload: serde_json::json!({
+                "source_path": source_path,
+                "mime": mime,
+                "original_name": original_name,
+            }),
+            source_app: None,
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: None,
+            source_url: None,
+            destination_id: None,
+            routed_at: None,
+        }
+    }
+
     fn kokobrain_dest(name: &str, vault: &str) -> Destination {
         Destination {
             id: "01H000000000000000000000DEST".into(),
@@ -478,11 +546,58 @@ mod tests {
     }
 
     #[test]
-    fn shot_capture_rejected_with_unsupported_kind() {
+    fn shot_bytes_emits_blob_path_and_mime() {
+        let cap = shot_bytes_capture("/var/koko/blobs/01HSHOT.png", "image/png");
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "kind"), Some("shot"));
+        assert_eq!(get_pair(&pairs, "path"), Some("/var/koko/blobs/01HSHOT.png"));
+        assert_eq!(get_pair(&pairs, "mime"), Some("image/png"));
+        assert_eq!(get_pair(&pairs, "original_name"), None);
+    }
+
+    #[test]
+    fn shot_drag_falls_back_to_source_path() {
         let cap = shot_capture();
         let dest = kokobrain_dest("Brain", "Personal");
-        let err = build_capture_uri(&cap, &dest).expect_err("shot rejected");
-        assert_eq!(err, BuildError::UnsupportedKind(CaptureKind::Shot));
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "kind"), Some("shot"));
+        assert_eq!(get_pair(&pairs, "path"), Some("/tmp/x.png"));
+        assert_eq!(get_pair(&pairs, "mime"), Some("image/png"));
+    }
+
+    #[test]
+    fn file_emits_path_mime_and_original_name() {
+        let cap = file_capture("/tmp/notes.pdf", "application/pdf", "notes.pdf");
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "kind"), Some("file"));
+        assert_eq!(get_pair(&pairs, "path"), Some("/tmp/notes.pdf"));
+        assert_eq!(get_pair(&pairs, "mime"), Some("application/pdf"));
+        assert_eq!(get_pair(&pairs, "original_name"), Some("notes.pdf"));
+    }
+
+    #[test]
+    fn shot_without_any_path_rejected_as_malformed_payload() {
+        let mut cap = shot_capture();
+        cap.payload = serde_json::json!({ "mime": "image/png" });
+        let dest = kokobrain_dest("Brain", "Personal");
+        let err = build_capture_uri(&cap, &dest).expect_err("rejected");
+        assert_eq!(err, BuildError::MalformedPayload("path"));
+    }
+
+    #[test]
+    fn shot_prefers_blob_path_over_source_path() {
+        let mut cap = shot_bytes_capture("/var/koko/blobs/x.png", "image/png");
+        let payload = cap.payload.as_object_mut().unwrap();
+        payload.insert("source_path".into(), serde_json::json!("/should/be/ignored.png"));
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs = parse_pairs(&uri);
+        assert_eq!(get_pair(&pairs, "path"), Some("/var/koko/blobs/x.png"));
     }
 
     #[test]

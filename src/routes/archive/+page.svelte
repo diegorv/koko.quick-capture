@@ -284,13 +284,11 @@
   // ── Re-route + un-route (ADR-0010 slice 6) ──────────────────────
   let pickerOpen = $state(false);
   let pickerCaptureId = $state<string | null>(null);
-  let pickerCaptureKind = $state<Capture["kind"] | null>(null);
   let pickerCurrentDest = $state<string | null>(null);
 
   function onRoute(id: string) {
     const capture = pager.items.find((c) => c.id === id);
     pickerCaptureId = id;
-    pickerCaptureKind = capture?.kind ?? null;
     pickerCurrentDest = capture?.destination_id ?? null;
     pickerOpen = true;
   }
@@ -298,7 +296,6 @@
   function onPickerClose() {
     pickerOpen = false;
     pickerCaptureId = null;
-    pickerCaptureKind = null;
     pickerCurrentDest = null;
   }
 
@@ -488,7 +485,6 @@
   <DestinationPicker
     open={pickerOpen}
     captureId={pickerCaptureId}
-    captureKind={pickerCaptureKind}
     currentDestinationId={pickerCurrentDest}
     invokeFn={(cmd, args) => invokeFn(cmd, args ?? {})}
     onClose={onPickerClose}
