@@ -49,7 +49,7 @@ mime_guess = "2"
 # resvg writes into. No text features pulled (default-features off on
 # usvg) so we skip fontdb and its OS font-discovery cost.
 resvg = { version = "0.45", default-features = false }
-usvg = { version = "0.45", default-features = false }
+usvg = { version = "0.47", default-features = false }
 tiny-skia = "0.11"
 
 # Dock fullscreen observer (slice 05): NSWorkspace subscription via
