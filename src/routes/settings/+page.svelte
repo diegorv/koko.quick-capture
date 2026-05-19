@@ -1,11 +1,39 @@
 <script lang="ts">
-  // Settings window. Holds the static info panels and (per ADR-0010)
-  // the Destinations management section.
+  // Settings window. Two-pane layout: left nav lists categories, right
+  // pane renders the active section. Mirrors the brain project's
+  // SettingsDialog shape (sidebar + details).
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getVersion } from "@tauri-apps/api/app";
   import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
   import WikilinkFolderSection from "$lib/wikilink/WikilinkFolderSection.svelte";
+
+  type SectionId =
+    | "shortcuts"
+    | "destinations"
+    | "wikilink"
+    | "storage"
+    | "about";
+
+  const SECTIONS: Array<{ id: SectionId; label: string; group: string }> = [
+    { id: "shortcuts", label: "Shortcuts", group: "General" },
+    { id: "destinations", label: "Destinations", group: "Capture" },
+    { id: "wikilink", label: "Wikilink folder", group: "Capture" },
+    { id: "storage", label: "Storage", group: "Advanced" },
+    { id: "about", label: "About", group: "Advanced" },
+  ];
+
+  const GROUPED = SECTIONS.reduce<Array<{ group: string; items: typeof SECTIONS }>>(
+    (acc, item) => {
+      const last = acc[acc.length - 1];
+      if (last && last.group === item.group) last.items.push(item);
+      else acc.push({ group: item.group, items: [item] });
+      return acc;
+    },
+    [],
+  );
+
+  let activeSection = $state<SectionId>("shortcuts");
 
   let version = $state("…");
   let totalCount = $state<number | null>(null);
@@ -60,61 +88,80 @@
 </script>
 
 <div class="settings">
-  <header class="header">
-    <h1>Settings</h1>
-    <p class="lede">
-      Read-only for now. Editing shortcuts and storage path comes in a
-      future release.
-    </p>
-  </header>
+  <nav class="sidebar" aria-label="Settings sections">
+    <h1 class="brand">Settings</h1>
+    {#each GROUPED as group}
+      <div class="group">
+        <div class="group-label">{group.group}</div>
+        {#each group.items as item}
+          <button
+            type="button"
+            class="nav-item"
+            class:active={activeSection === item.id}
+            aria-current={activeSection === item.id ? "page" : undefined}
+            onclick={() => (activeSection = item.id)}
+          >
+            {item.label}
+          </button>
+        {/each}
+      </div>
+    {/each}
+  </nav>
 
-  <section class="section">
-    <h2>Shortcuts</h2>
-    <dl class="shortcuts">
-      {#each SHORTCUTS as s}
-        <dt>
-          {#each s.keys as key}<kbd>{key}</kbd>{/each}
-        </dt>
-        <dd>{s.label}</dd>
-      {/each}
-    </dl>
-  </section>
-
-  <DestinationsSection />
-
-  <WikilinkFolderSection />
-
-  <section class="section">
-    <h2>Storage</h2>
-    <dl class="kv">
-      <dt>Captures</dt>
-      <dd>{totalCount ?? "—"}</dd>
-      <dt>Unread</dt>
-      <dd>{unreadCount ?? "—"}</dd>
-      <dt>Database</dt>
-      <dd class="path-row">
-        <span class="path">{dbPath ?? "…"}</span>
-        <button
-          type="button"
-          class="reveal"
-          onclick={revealDb}
-          disabled={dbPath === null}
-        >
-          Reveal in Finder
-        </button>
-      </dd>
-    </dl>
-  </section>
-
-  <section class="section">
-    <h2>About</h2>
-    <dl class="kv">
-      <dt>Version</dt>
-      <dd>{version}</dd>
-      <dt>Source</dt>
-      <dd>Frictionless macOS capture inbox · Tauri 2 + SvelteKit + Rust</dd>
-    </dl>
-  </section>
+  <div class="details">
+    {#if activeSection === "shortcuts"}
+      <section class="section">
+        <h2>Shortcuts</h2>
+        <p class="lede">
+          Read-only for now. Editing comes in a future release.
+        </p>
+        <dl class="shortcuts">
+          {#each SHORTCUTS as s}
+            <dt>
+              {#each s.keys as key}<kbd>{key}</kbd>{/each}
+            </dt>
+            <dd>{s.label}</dd>
+          {/each}
+        </dl>
+      </section>
+    {:else if activeSection === "destinations"}
+      <DestinationsSection />
+    {:else if activeSection === "wikilink"}
+      <WikilinkFolderSection />
+    {:else if activeSection === "storage"}
+      <section class="section">
+        <h2>Storage</h2>
+        <dl class="kv">
+          <dt>Captures</dt>
+          <dd>{totalCount ?? "—"}</dd>
+          <dt>Unread</dt>
+          <dd>{unreadCount ?? "—"}</dd>
+          <dt>Database</dt>
+          <dd class="path-row">
+            <span class="path">{dbPath ?? "…"}</span>
+            <button
+              type="button"
+              class="reveal"
+              onclick={revealDb}
+              disabled={dbPath === null}
+            >
+              Reveal in Finder
+            </button>
+          </dd>
+        </dl>
+      </section>
+    {:else if activeSection === "about"}
+      <section class="section">
+        <h2>About</h2>
+        <dl class="kv">
+          <dt>Version</dt>
+          <dd>{version}</dd>
+          <dt>Source</dt>
+          <dd>Frictionless macOS capture inbox · Tauri 2 + SvelteKit + Rust</dd>
+        </dl>
+      </section>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -135,18 +182,90 @@
   }
 
   .settings {
-    padding: 1.5rem 1.75rem 2rem;
-    max-width: 560px;
-    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    min-height: 100vh;
   }
 
-  .header h1 {
-    margin: 0;
-    font-size: 1.25rem;
+  .sidebar {
+    padding: 1.25rem 0.75rem 1rem;
+    background: #efefef;
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    .sidebar {
+      background: #1f1f22;
+      border-right-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .brand {
+    margin: 0 0.5rem 0.75rem;
+    font-size: 0.95rem;
     letter-spacing: -0.01em;
   }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .group-label {
+    padding: 0.4rem 0.5rem 0.25rem;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(0, 0, 0, 0.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    .group-label {
+      color: rgba(255, 255, 255, 0.45);
+    }
+  }
+
+  .nav-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 80ms ease;
+  }
+  .nav-item:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .nav-item.active {
+    background: rgba(76, 29, 149, 0.12);
+    color: rgba(76, 29, 149, 1);
+    font-weight: 500;
+  }
+  @media (prefers-color-scheme: dark) {
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .nav-item.active {
+      background: rgba(167, 139, 250, 0.16);
+      color: rgba(167, 139, 250, 1);
+    }
+  }
+
+  .details {
+    padding: 1.5rem 1.75rem 2rem;
+    overflow-y: auto;
+    max-width: 640px;
+  }
+
   .lede {
-    margin: 0.3rem 0 1.5rem;
+    margin: 0.3rem 0 1rem;
     color: rgba(0, 0, 0, 0.55);
     font-size: 0.85rem;
   }
@@ -157,7 +276,6 @@
   }
 
   .section {
-    margin-top: 1.25rem;
     padding: 1rem 1.1rem;
     background: #ffffff;
     border: 1px solid rgba(0, 0, 0, 0.08);
