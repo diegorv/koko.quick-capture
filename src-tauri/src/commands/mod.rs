@@ -457,6 +457,14 @@ pub fn show_archive(app: &AppHandle) {
     });
 }
 
+/// Default + minimum logical dimensions for the Settings window.
+/// Shared with `lib::run` (initial builder) and `show_settings`
+/// (post-restore clamp) so a single source of truth governs both.
+pub const SETTINGS_DEFAULT_W: f64 = 960.0;
+pub const SETTINGS_DEFAULT_H: f64 = 640.0;
+pub const SETTINGS_MIN_W: f64 = 720.0;
+pub const SETTINGS_MIN_H: f64 = 480.0;
+
 /// One place that knows how to bring the Settings window to screen.
 /// Mirrors `show_inbox` but does not touch the activation policy
 /// because Settings is meant as a transient configuration popover;
@@ -465,6 +473,24 @@ pub fn show_settings(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = handle.get_webview_window("settings") {
+            // The window-state plugin restores SIZE bypassing the
+            // builder's `min_inner_size` (which only constrains
+            // user-driven resize). Clamp on every show so existing
+            // installs that saved a smaller geometry before the size
+            // bump get pushed up to the new default. Resizes the
+            // user makes _above_ the minimum stay untouched.
+            if let Ok(physical) = window.inner_size() {
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let logical_w = (physical.width as f64) / scale;
+                let logical_h = (physical.height as f64) / scale;
+                if logical_w < SETTINGS_MIN_W || logical_h < SETTINGS_MIN_H {
+                    let _ = window.set_size(tauri::LogicalSize::new(
+                        SETTINGS_DEFAULT_W,
+                        SETTINGS_DEFAULT_H,
+                    ));
+                    let _ = window.center();
+                }
+            }
             let _ = window.show();
             let _ = window.set_focus();
         }
