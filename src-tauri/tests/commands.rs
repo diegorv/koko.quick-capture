@@ -6,10 +6,10 @@ use quick_capture_lib::commands::{
     create_destination_with_store, delete_capture_with_store, inbox_count_with_store,
     is_clipboard_duplicate, list_archive_with_store, list_captures_with_store,
     list_deleted_destinations_with_store, list_destinations_with_store, mark_read_with_store,
-    restore_destination_with_store, route_capture_with_store, save_note_with_store,
-    search_archive_with_store, search_captures_with_store, soft_delete_destination_with_store,
-    star_capture_with_store, total_count_with_store, unread_count_with_store,
-    unroute_capture_with_store, update_destination_with_store,
+    restore_destination_with_store, route_capture_with_store, route_to_kokobrain_with_store,
+    save_note_with_store, search_archive_with_store, search_captures_with_store,
+    soft_delete_destination_with_store, star_capture_with_store, total_count_with_store,
+    unread_count_with_store, unroute_capture_with_store, update_destination_with_store,
 };
 use quick_capture_lib::store::{CaptureContext, CaptureInput, CaptureKind, DestinationKind, Store};
 use tempfile::TempDir;
@@ -592,4 +592,109 @@ fn inbox_count_command_excludes_routed_and_deleted_rows() {
     delete_capture_with_store(&store, &dropped.id).expect("delete");
 
     assert_eq!(inbox_count_with_store(&store).expect("inbox count"), 1);
+}
+
+// ── route_to_kokobrain (ADR-0012) ─────────────────────────────────
+
+fn kokobrain_dest(store: &Store, name: &str, vault: &str) -> quick_capture_lib::store::Destination {
+    create_destination_with_store(
+        store,
+        name,
+        None,
+        DestinationKind::Kokobrain,
+        Some(&format!(r#"{{"vault":"{vault}"}}"#)),
+    )
+    .expect("create kokobrain dest")
+}
+
+#[test]
+fn route_to_kokobrain_fires_uri_and_marks_routed() {
+    use std::sync::Mutex;
+    let (_dir, store) = temp_store();
+    let saved =
+        save_note_with_store(&store, "hello brain", CaptureContext::default()).expect("save");
+    let dest = kokobrain_dest(&store, "Reading List", "Personal");
+
+    let calls: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let opener = |uri: &str| -> Result<(), String> {
+        calls.lock().unwrap().push(uri.to_string());
+        Ok(())
+    };
+    let uri = route_to_kokobrain_with_store(&store, &opener, &saved.id, &dest.id)
+        .expect("route to kokobrain");
+
+    let observed = calls.lock().unwrap();
+    assert_eq!(observed.len(), 1, "opener fires exactly once");
+    assert_eq!(observed[0], uri);
+    assert!(uri.starts_with("kokobrain://capture?"));
+    assert!(uri.contains("vault=Personal"));
+    assert!(uri.contains("content=hello+brain"));
+    assert!(uri.contains("tags=reading-list"));
+
+    let archive = list_archive_with_store(&store, None, None, None, 10).expect("archive");
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive[0].id, saved.id);
+    assert_eq!(archive[0].destination_id.as_deref(), Some(dest.id.as_str()));
+}
+
+#[test]
+fn route_to_kokobrain_keeps_capture_in_inbox_when_opener_fails() {
+    let (_dir, store) = temp_store();
+    let saved =
+        save_note_with_store(&store, "abort me", CaptureContext::default()).expect("save");
+    let dest = kokobrain_dest(&store, "Brain", "Personal");
+
+    let opener = |_uri: &str| -> Result<(), String> { Err("opener exploded".into()) };
+    let err = route_to_kokobrain_with_store(&store, &opener, &saved.id, &dest.id)
+        .expect_err("opener failure aborts route");
+    assert!(err.contains("opener exploded"));
+
+    let inbox = list_captures_with_store(&store, None, None, 10).expect("inbox");
+    assert_eq!(inbox.len(), 1, "capture must stay in inbox");
+    assert_eq!(inbox[0].id, saved.id);
+    assert!(inbox[0].destination_id.is_none());
+    assert!(inbox[0].routed_at.is_none());
+}
+
+#[test]
+fn route_to_kokobrain_rejects_label_destination() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "x", CaptureContext::default()).expect("save");
+    let dest = create_destination_with_store(&store, "Todoist", None, DestinationKind::Label, None)
+        .expect("create label dest");
+
+    let called = std::sync::Mutex::new(false);
+    let opener = |_uri: &str| -> Result<(), String> {
+        *called.lock().unwrap() = true;
+        Ok(())
+    };
+    let err = route_to_kokobrain_with_store(&store, &opener, &saved.id, &dest.id)
+        .expect_err("must reject label dest");
+    assert!(err.contains("not a kokobrain destination"));
+    assert!(!*called.lock().unwrap(), "opener must not fire when destination kind is wrong");
+}
+
+#[test]
+fn route_to_kokobrain_rejects_deleted_capture() {
+    let (_dir, store) = temp_store();
+    let saved = save_note_with_store(&store, "doomed", CaptureContext::default()).expect("save");
+    delete_capture_with_store(&store, &saved.id).expect("delete");
+    let dest = kokobrain_dest(&store, "Brain", "Personal");
+
+    let opener = |_uri: &str| -> Result<(), String> { Ok(()) };
+    let err = route_to_kokobrain_with_store(&store, &opener, &saved.id, &dest.id)
+        .expect_err("must reject deleted capture");
+    assert!(err.contains("deleted"));
+}
+
+#[test]
+fn route_to_kokobrain_rejects_missing_capture() {
+    let (_dir, store) = temp_store();
+    let dest = kokobrain_dest(&store, "Brain", "Personal");
+    let missing_id = ulid::Ulid::new().to_string();
+
+    let opener = |_uri: &str| -> Result<(), String> { Ok(()) };
+    let err = route_to_kokobrain_with_store(&store, &opener, &missing_id, &dest.id)
+        .expect_err("missing capture must error");
+    assert!(err.contains("capture not found"));
 }
