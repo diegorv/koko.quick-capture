@@ -68,6 +68,14 @@ jobs:
   ci:
     name: CI
     needs: validate
+    # Reusable ci.yml declares `pull-requests: read` (for dorny/paths-filter
+    # on pull_request runs). A called workflow can't exceed the caller's
+    # permissions, so grant the same scopes here. `force_all: true` skips
+    # the filter step in practice, but the permission must still be
+    # declarable for the call to be accepted.
+    permissions:
+      contents: read
+      pull-requests: read
     uses: ./.github/workflows/ci.yml
     # Force the full frontend + rust matrix on release runs so a tag
     # push can never short-circuit a check via paths-filter (e.g. if
