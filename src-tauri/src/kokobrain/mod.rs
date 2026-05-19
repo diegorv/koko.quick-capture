@@ -83,6 +83,7 @@ pub fn build_capture_uri(
     let cfg = parse_kokobrain_config(destination.config.as_deref())?;
     let content = content_for_capture(capture)?;
     let tags = merge_tags(&destination.name, &cfg.tags);
+    let title = title_for_capture(capture);
 
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     serializer
@@ -90,6 +91,9 @@ pub fn build_capture_uri(
         .append_pair("content", &content);
     if !tags.is_empty() {
         serializer.append_pair("tags", &tags.join(","));
+    }
+    if let Some(t) = title {
+        serializer.append_pair("title", &t);
     }
     let query = serializer.finish();
     Ok(format!("kokobrain://capture?{query}"))
@@ -154,6 +158,34 @@ fn merge_tags(destination_name: &str, user_tags: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// Best-effort structured title for the capture. Only `Link` captures
+/// carry a meaningful standalone title; for every other kind the
+/// "title" is just the content itself, so emitting it would be
+/// redundant. Falls back through `source_title` -> `payload.title`;
+/// returns `None` when neither is populated rather than sending the
+/// raw URL as a title (the URL already appears in the markdown body
+/// produced by `content_for_capture`).
+fn title_for_capture(capture: &Capture) -> Option<String> {
+    if capture.kind != CaptureKind::Link {
+        return None;
+    }
+    if let Some(t) = capture
+        .source_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        return Some(t.to_string());
+    }
+    capture
+        .payload
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
 }
 
 /// Map a Capture to the markdown body that should land in kokobrain.
@@ -534,6 +566,66 @@ mod tests {
             build_capture_uri(&cap, &dest),
             Err(BuildError::InvalidConfig(_))
         ));
+    }
+
+    #[test]
+    fn link_with_source_title_emits_title_param() {
+        let cap = link_capture(
+            "https://example.com/post",
+            Some("Payload Title"),
+            Some("Window Title"),
+        );
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let title = pairs
+            .iter()
+            .find(|(k, _)| k == "title")
+            .map(|(_, v)| v.clone())
+            .expect("title param present");
+        assert_eq!(title, "Window Title");
+    }
+
+    #[test]
+    fn link_without_source_title_falls_back_to_payload_title() {
+        let cap = link_capture("https://example.com/post", Some("Payload Title"), None);
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        let pairs: Vec<(String, String)> =
+            url::form_urlencoded::parse(uri.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let title = pairs
+            .iter()
+            .find(|(k, _)| k == "title")
+            .map(|(_, v)| v.clone())
+            .expect("title param present");
+        assert_eq!(title, "Payload Title");
+    }
+
+    #[test]
+    fn link_without_any_title_omits_title_param() {
+        let cap = link_capture("https://example.com/post", None, None);
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        assert!(
+            !uri.contains("title="),
+            "title param should be omitted when no human-readable title exists, got: {uri}"
+        );
+    }
+
+    #[test]
+    fn note_capture_never_emits_title_param() {
+        let cap = note_capture("hello world");
+        let dest = kokobrain_dest("Brain", "Personal");
+        let uri = build_capture_uri(&cap, &dest).expect("build");
+        assert!(
+            !uri.contains("title="),
+            "title is link-only; note captures should not emit it, got: {uri}"
+        );
     }
 
     #[test]
