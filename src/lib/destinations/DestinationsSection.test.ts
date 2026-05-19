@@ -314,6 +314,138 @@ describe("DestinationsSection", () => {
     expect(rows.length).toBe(1);
   });
 
+  it("persists optional tags on a KokoBrain destination", async () => {
+    const invokeFn = makeInvoke({
+      list_destinations: () => [],
+      list_deleted_destinations: () => [],
+      create_destination: () => ({
+        id: "01H0099",
+        name: "Reading List",
+        color: null,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+        kind: "kokobrain",
+        config: JSON.stringify({
+          vault: "Personal",
+          tags: ["source/quick-capture", "triage/inbox"],
+        }),
+      }),
+    });
+
+    const { getByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    await fireEvent.click(getByTestId("new-destination-btn"));
+    const form = getByTestId("create-form");
+    const name = within(form).getByTestId("create-name-input") as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: "Reading List" } });
+    const kokoRadio = within(form).getByTestId("create-kind-kokobrain") as HTMLInputElement;
+    await fireEvent.click(kokoRadio);
+    const vault = within(form).getByTestId("create-vault-input") as HTMLInputElement;
+    await fireEvent.input(vault, { target: { value: "Personal" } });
+    const tags = within(form).getByTestId("create-tags-input") as HTMLInputElement;
+    await fireEvent.input(tags, {
+      target: { value: "source/quick-capture,  triage/inbox " },
+    });
+
+    await fireEvent.click(within(form).getByText("Save"));
+
+    expect(invokeFn).toHaveBeenCalledWith("create_destination", {
+      name: "Reading List",
+      color: null,
+      kind: "kokobrain",
+      config: JSON.stringify({
+        vault: "Personal",
+        tags: ["source/quick-capture", "triage/inbox"],
+      }),
+    });
+  });
+
+  it("omits the tags field on a KokoBrain destination when input is empty", async () => {
+    const invokeFn = makeInvoke({
+      list_destinations: () => [],
+      list_deleted_destinations: () => [],
+      create_destination: () => ({
+        id: "01H00AA",
+        name: "Brain",
+        color: null,
+        created_at: new Date().toISOString(),
+        deleted_at: null,
+        kind: "kokobrain",
+        config: JSON.stringify({ vault: "Personal" }),
+      }),
+    });
+
+    const { getByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    await fireEvent.click(getByTestId("new-destination-btn"));
+    const form = getByTestId("create-form");
+    const name = within(form).getByTestId("create-name-input") as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: "Brain" } });
+    const kokoRadio = within(form).getByTestId("create-kind-kokobrain") as HTMLInputElement;
+    await fireEvent.click(kokoRadio);
+    const vault = within(form).getByTestId("create-vault-input") as HTMLInputElement;
+    await fireEvent.input(vault, { target: { value: "Personal" } });
+    // Tags input present but left empty.
+    expect(within(form).getByTestId("create-tags-input")).toBeTruthy();
+
+    await fireEvent.click(within(form).getByText("Save"));
+
+    expect(invokeFn).toHaveBeenCalledWith("create_destination", {
+      name: "Brain",
+      color: null,
+      kind: "kokobrain",
+      config: JSON.stringify({ vault: "Personal" }),
+    });
+  });
+
+  it("prefills the tags input from existing config when editing", async () => {
+    const existing: Destination = {
+      id: "01H00BB",
+      name: "Reading List",
+      color: null,
+      created_at: new Date().toISOString(),
+      deleted_at: null,
+      kind: "kokobrain",
+      config: JSON.stringify({
+        vault: "Personal",
+        tags: ["alpha", "beta"],
+      }),
+    };
+    const invokeFn = makeInvoke({
+      list_destinations: () => [existing],
+      list_deleted_destinations: () => [],
+    });
+
+    const { findAllByTestId, getByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    const [row] = await findAllByTestId("destination-row");
+    await fireEvent.click(within(row).getByTestId("edit-btn"));
+
+    const tags = getByTestId("edit-tags-input") as HTMLInputElement;
+    expect(tags.value).toBe("alpha, beta");
+  });
+
+  it("hides the tags input when kind is label", async () => {
+    const invokeFn = makeInvoke({
+      list_destinations: () => [],
+      list_deleted_destinations: () => [],
+    });
+
+    const { getByTestId, queryByTestId } = render(DestinationsSection, {
+      props: { invokeFn, listenFn: noopListen() },
+    });
+
+    await fireEvent.click(getByTestId("new-destination-btn"));
+    // Default kind is `label`; tags input should not be in the DOM yet.
+    expect(queryByTestId("create-tags-input")).toBeNull();
+  });
+
   it("blocks KokoBrain submit when the vault field is blank", async () => {
     const invokeFn = makeInvoke({
       list_destinations: () => [],

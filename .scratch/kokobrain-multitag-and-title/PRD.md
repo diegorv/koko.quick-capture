@@ -27,10 +27,10 @@ Two small additions to the existing `kokobrain` destination kind introduced by A
 
 Each slice is its own commit per ADR-0006. All four checks (`pnpm test`, `pnpm check`, `cargo test`, `cargo check`) must pass before each commit.
 
-- [ ] Slice 1 (Rust store): Extend `normalize_destination_config` to accept and persist an optional `tags` array on `kokobrain` configs. Validate each tag is a non-blank string after trim. Re-emit the JSON in normalized form so callers cannot smuggle extra fields. Tests in `tests/store.rs`.
-- [ ] Slice 2 (Rust kokobrain): Replace `parse_vault` with `parse_kokobrain_config` returning a struct `{ vault: String, tags: Vec<String> }`. Update `build_capture_uri` to kebab-case each user tag, append to the kebab destination-name tag, deduplicate while preserving order (destination name first). Emit `tags=a,b,c` when more than one tag results. Update `kokobrain::mod` tests.
-- [ ] Slice 3 (Rust kokobrain): For `Link` captures, also append `title=<value>` to the URI using the existing title fallback chain. `Note`/`Clip`/`Shot`/`File` continue to omit `title`. Update tests.
-- [ ] Slice 4 (Svelte): Add a `tags` input field (string, comma-separated) to the `DestinationsSection` create + edit forms, visible only when `kind === "kokobrain"`. Parse the string into the config JSON `tags` array on submit; render the stored array back as a comma-separated string on edit. Component tests for both forms.
+- [x] Slice 1 (Rust store): Extend `normalize_destination_config` to accept and persist an optional `tags` array on `kokobrain` configs. Validate each tag is a non-blank string after trim. Re-emit the JSON in normalized form so callers cannot smuggle extra fields. Tests in `tests/store.rs`.
+- [x] Slice 2 (Rust kokobrain): Replace `parse_vault` with `parse_kokobrain_config` returning a struct `{ vault: String, tags: Vec<String> }`. Update `build_capture_uri` to kebab-case each user tag, append to the kebab destination-name tag, deduplicate while preserving order (destination name first). Emit `tags=a,b,c` when more than one tag results. Update `kokobrain::mod` tests.
+- [x] Slice 3 (Rust kokobrain): For `Link` captures, also append `title=<value>` to the URI using the existing title fallback chain. `Note`/`Clip`/`Shot`/`File` continue to omit `title`. Update tests.
+- [x] Slice 4 (Svelte): Add a `tags` input field (string, comma-separated) to the `DestinationsSection` create + edit forms, visible only when `kind === "kokobrain"`. Parse the string into the config JSON `tags` array on submit; render the stored array back as a comma-separated string on edit. Component tests for both forms.
 
 ## Risks
 
@@ -40,4 +40,4 @@ Each slice is its own commit per ADR-0006. All four checks (`pnpm test`, `pnpm c
 
 ## Status
 
-Not started.
+Shipped. Slice 1 (c84319c), Slice 2 (b4ea157), Slice 3 (0ea855c), Slice 4 (this commit).

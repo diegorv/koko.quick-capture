@@ -37,14 +37,19 @@
   let showDeleted = $state(false);
 
   // Draft state for the inline "+ New" form. `null` = form hidden.
-  // `vault` is only consulted when `kind === "kokobrain"`; the field is
-  // kept in the shape regardless so the kind toggle does not destroy
-  // the string the user already typed.
+  // `vault` and `tags` are only consulted when `kind === "kokobrain"`;
+  // both fields are kept in the shape regardless so the kind toggle
+  // does not destroy the strings the user already typed.
+  //
+  // `tags` is the raw comma-separated string as the user typed it;
+  // it is split + trimmed only at submit time. Stored array shape on
+  // disk comes back through `parseTagsFromConfig` for the edit form.
   type Draft = {
     name: string;
     color: PaletteKey | null;
     kind: DestinationKind;
     vault: string;
+    tags: string;
   };
   let createDraft = $state<Draft | null>(null);
 
@@ -58,9 +63,37 @@
     }
   }
 
-  function configForKind(kind: DestinationKind, vault: string): string | null {
+  function parseTagsFromConfig(config: string | null): string {
+    if (!config) return "";
+    try {
+      const parsed = JSON.parse(config) as { tags?: unknown };
+      if (!Array.isArray(parsed.tags)) return "";
+      return parsed.tags
+        .filter((t): t is string => typeof t === "string")
+        .join(", ");
+    } catch {
+      return "";
+    }
+  }
+
+  function parseTagsInput(raw: string): string[] {
+    return raw
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+  }
+
+  function configForKind(
+    kind: DestinationKind,
+    vault: string,
+    tagsInput: string,
+  ): string | null {
     if (kind !== "kokobrain") return null;
-    return JSON.stringify({ vault: vault.trim() });
+    const tags = parseTagsInput(tagsInput);
+    if (tags.length === 0) {
+      return JSON.stringify({ vault: vault.trim() });
+    }
+    return JSON.stringify({ vault: vault.trim(), tags });
   }
 
   // Map of destination id -> in-progress edit draft. Multiple rows could
@@ -126,7 +159,13 @@
   }
 
   function startCreate() {
-    createDraft = { name: "", color: null, kind: "label", vault: "" };
+    createDraft = {
+      name: "",
+      color: null,
+      kind: "label",
+      vault: "",
+      tags: "",
+    };
     errorMessage = null;
   }
 
@@ -151,7 +190,11 @@
         name,
         color: createDraft.color,
         kind: createDraft.kind,
-        config: configForKind(createDraft.kind, createDraft.vault),
+        config: configForKind(
+          createDraft.kind,
+          createDraft.vault,
+          createDraft.tags,
+        ),
       });
       createDraft = null;
       errorMessage = null;
@@ -169,6 +212,7 @@
         color: (dest.color as PaletteKey | null) ?? null,
         kind: dest.kind,
         vault: parseVault(dest.config),
+        tags: parseTagsFromConfig(dest.config),
       },
     };
     errorMessage = null;
@@ -198,7 +242,7 @@
         name,
         color: draft.color,
         kind: draft.kind,
-        config: configForKind(draft.kind, draft.vault),
+        config: configForKind(draft.kind, draft.vault, draft.tags),
       });
       cancelEdit(id);
       await refresh({ includeDeleted: showDeleted });
@@ -299,10 +343,22 @@
           }}
           data-testid="create-vault-input"
         />
+        <input
+          type="text"
+          class="name-input"
+          placeholder="Tags (comma-separated, optional)"
+          bind:value={createDraft.tags}
+          onkeydown={(e) => {
+            if (e.key === "Enter") submitCreate();
+            if (e.key === "Escape") cancelCreate();
+          }}
+          data-testid="create-tags-input"
+        />
         <p class="hint">
           Routes capture content to the named vault via a
           <code>kokobrain://</code> deep link. The vault must already
-          exist in KokoBrain.
+          exist in KokoBrain. Tags are merged with the destination
+          name and attached to every routed capture.
         </p>
       {/if}
       <PaletteSwatches
@@ -371,6 +427,17 @@
                   if (e.key === "Escape") cancelEdit(dest.id);
                 }}
                 data-testid="edit-vault-input"
+              />
+              <input
+                type="text"
+                class="name-input"
+                placeholder="Tags (comma-separated, optional)"
+                bind:value={editDrafts[dest.id].tags}
+                onkeydown={(e) => {
+                  if (e.key === "Enter") submitEdit(dest.id);
+                  if (e.key === "Escape") cancelEdit(dest.id);
+                }}
+                data-testid="edit-tags-input"
               />
             {/if}
             <PaletteSwatches
