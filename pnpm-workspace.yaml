@@ -1,0 +1,3 @@
+overrides:
+  cookie@<0.7.0: ">=0.7.0"
+  "@adobe/css-tools": 4.4.4
