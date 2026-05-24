@@ -686,3 +686,125 @@ pub fn save_transcription(
         })
         .map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ChunkedTranscript ---
+
+    #[test]
+    fn transcript_new_is_empty() {
+        let t = ChunkedTranscript::new();
+        assert_eq!(t.merged(), "");
+        assert_eq!(t.last_chunk(), None);
+        assert_eq!(t.stats(), (0, 0));
+    }
+
+    #[test]
+    fn transcript_push_non_empty_text() {
+        let mut t = ChunkedTranscript::new();
+        t.push("hello".into());
+        t.push("world".into());
+        assert_eq!(t.merged(), "hello world");
+        assert_eq!(t.last_chunk(), Some("world".into()));
+        assert_eq!(t.stats(), (2, 0));
+    }
+
+    #[test]
+    fn transcript_push_empty_text_increments_count_but_skips_storage() {
+        let mut t = ChunkedTranscript::new();
+        t.push("hello".into());
+        t.push("".into());
+        t.push("world".into());
+        assert_eq!(t.merged(), "hello world");
+        assert_eq!(t.stats(), (3, 0));
+    }
+
+    #[test]
+    fn transcript_record_failure_increments_failed_count() {
+        let mut t = ChunkedTranscript::new();
+        t.push("ok".into());
+        t.record_failure();
+        t.record_failure();
+        assert_eq!(t.stats(), (1, 2));
+    }
+
+    #[test]
+    fn transcript_merged_trims_whitespace() {
+        let mut t = ChunkedTranscript::new();
+        t.push("  hello  ".into());
+        assert_eq!(t.merged(), "hello");
+    }
+
+    // --- validate_model_file ---
+
+    #[test]
+    fn validate_model_file_nonexistent_returns_false() {
+        assert!(!validate_model_file(
+            std::path::Path::new("/nonexistent/model.bin"),
+            100
+        ));
+    }
+
+    #[test]
+    fn validate_model_file_too_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.bin");
+        // GGML magic + 6 bytes = 10 bytes total
+        let mut data = GGML_MAGIC.to_vec();
+        data.extend_from_slice(&[0u8; 6]);
+        std::fs::write(&path, &data).unwrap();
+        assert!(!validate_model_file(&path, 1000));
+    }
+
+    #[test]
+    fn validate_model_file_wrong_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad_magic.bin");
+        let data = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00];
+        std::fs::write(&path, &data).unwrap();
+        assert!(!validate_model_file(&path, 4));
+    }
+
+    #[test]
+    fn validate_model_file_ggml_magic_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ggml.bin");
+        let mut data = GGML_MAGIC.to_vec();
+        data.resize(100, 0);
+        std::fs::write(&path, &data).unwrap();
+        assert!(validate_model_file(&path, 50));
+    }
+
+    #[test]
+    fn validate_model_file_gguf_magic_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gguf.bin");
+        let mut data = GGUF_MAGIC.to_vec();
+        data.resize(100, 0);
+        std::fs::write(&path, &data).unwrap();
+        assert!(validate_model_file(&path, 50));
+    }
+
+    // --- model paths ---
+
+    #[test]
+    fn model_path_ends_with_expected_filename() {
+        let p = model_path();
+        assert!(p.to_string_lossy().ends_with(MODEL_FILENAME));
+    }
+
+    #[test]
+    fn vad_model_path_ends_with_expected_filename() {
+        let p = vad_model_path();
+        assert!(p.to_string_lossy().ends_with(VAD_MODEL_FILENAME));
+    }
+
+    #[test]
+    fn audio_dir_is_under_data_dir() {
+        let p = audio_dir();
+        assert!(p.to_string_lossy().contains("com.koko.quick-capture"));
+        assert!(p.to_string_lossy().ends_with("audio"));
+    }
+}
