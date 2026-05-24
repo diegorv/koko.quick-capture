@@ -197,9 +197,16 @@ impl RecordingHandle {
         let duration_secs = self.elapsed_secs();
 
         self.is_recording.store(false, Ordering::Relaxed);
-        std::thread::sleep(std::time::Duration::from_millis(200));
 
-        // Drain remaining samples from channel
+        // Wait for the chunker thread to finish processing remaining
+        // samples. Without this join, we race: the chunker polls every
+        // 500ms and might not have written the final transcript yet.
+        if let Some(thread) = self._chunker_thread.take() {
+            let _ = thread.join();
+        }
+
+        // Drain remaining samples from channel (only has data when
+        // chunker was never started)
         let mut remaining_raw: Vec<f32> = Vec::new();
         while let Ok(chunk) = self.rx.try_recv() {
             remaining_raw.extend(chunk);
