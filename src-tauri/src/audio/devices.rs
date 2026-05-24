@@ -73,6 +73,16 @@ pub fn list_input_devices() -> Result<Vec<AudioDevice>> {
     Ok(all_devices)
 }
 
+const BT_KEYWORDS: &[&str] = &[
+    "airpods", "bluetooth", "beats", "jabra", "bose", "sony wh-",
+    "sony wf-", "galaxy buds", "pixel buds", "jbl ",
+];
+
+pub fn is_likely_bluetooth(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    BT_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
 pub(super) fn find_device(name: &str, device_type: &DeviceType) -> Result<(cpal::Device, bool)> {
     match device_type {
         DeviceType::Input => {

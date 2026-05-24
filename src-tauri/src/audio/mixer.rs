@@ -17,8 +17,14 @@ pub struct AudioMixerRingBuffer {
 
 impl AudioMixerRingBuffer {
     pub fn new(mic_rate: u32, sys_rate: Option<u32>, has_system: bool) -> Self {
-        let window_samples = (mic_rate as f32 * 0.6) as usize; // 600ms
-        let max_buffer_samples = window_samples * 8; // ~4.8s overflow protection
+        Self::with_bluetooth(mic_rate, sys_rate, has_system, false)
+    }
+
+    pub fn with_bluetooth(mic_rate: u32, sys_rate: Option<u32>, has_system: bool, bluetooth: bool) -> Self {
+        let window_ms = if bluetooth { 800.0 } else { 600.0 };
+        let window_samples = (mic_rate as f32 * window_ms / 1000.0) as usize;
+        let buffer_mult = if bluetooth { 12 } else { 8 };
+        let max_buffer_samples = window_samples * buffer_mult;
 
         let sys_resampler = match sys_rate {
             Some(sr) if sr != mic_rate && has_system => {

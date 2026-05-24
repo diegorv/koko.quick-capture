@@ -13,8 +13,8 @@ use crate::audio::mixer::AudioMixerRingBuffer;
 use crate::audio::normalize::LoudnessNormalizer;
 use crate::audio::vad::ContinuousVadProcessor;
 use crate::audio::{
-    resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, AudioChunk,
-    PersistentResampler, SelectedDevice,
+    is_likely_bluetooth, resample_to_16khz, resample_to_48khz, save_wav, AudioCapture,
+    AudioChunk, PersistentResampler, SelectedDevice,
 };
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
@@ -239,6 +239,7 @@ pub struct RecordingHandle {
     pub started_at: Instant,
     sample_rate: u32,
     sys_sample_rate: Option<u32>,
+    mic_bluetooth: bool,
     language: String,
     rx: mpsc::UnboundedReceiver<AudioChunk>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
@@ -253,6 +254,14 @@ impl RecordingHandle {
         sys_device: Option<SelectedDevice>,
         language: String,
     ) -> Result<Self> {
+        let mic_bluetooth = mic_device
+            .as_ref()
+            .map(|d| is_likely_bluetooth(&d.name))
+            .unwrap_or(false);
+        if mic_bluetooth {
+            eprintln!("[recording] Bluetooth mic detected, using larger buffers");
+        }
+
         let is_recording = Arc::new(AtomicBool::new(true));
         let mic_peak = Arc::new(AtomicU32::new(0));
         let sys_peak = Arc::new(AtomicU32::new(0));
@@ -309,6 +318,7 @@ impl RecordingHandle {
             started_at: Instant::now(),
             sample_rate,
             sys_sample_rate,
+            mic_bluetooth,
             language,
             rx,
             transcript,
@@ -434,6 +444,7 @@ impl RecordingHandle {
         let all_samples = self.all_samples_16k.clone();
         let sample_rate = self.sample_rate;
         let sys_sample_rate = self.sys_sample_rate;
+        let mic_bluetooth = self.mic_bluetooth;
         let language = self.language.clone();
         let sys_active = self.sys_active;
 
@@ -445,7 +456,7 @@ impl RecordingHandle {
         let thread = std::thread::spawn(move || {
             chunker_loop(
                 rx, is_rec, whisper_ctx, transcript, all_samples,
-                sample_rate, sys_sample_rate, &language, sys_active,
+                sample_rate, sys_sample_rate, &language, sys_active, mic_bluetooth,
             );
         });
 
@@ -604,6 +615,7 @@ fn chunker_loop(
     sys_sample_rate: Option<u32>,
     language: &str,
     sys_active: bool,
+    mic_bluetooth: bool,
 ) {
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = Denoiser::new();
@@ -624,7 +636,7 @@ fn chunker_loop(
     };
 
     // Mixer at 16kHz: mic arrives pre-processed (DSP → 16k), system resampled internally
-    let mut mixer = AudioMixerRingBuffer::new(16000, sys_sample_rate, sys_active);
+    let mut mixer = AudioMixerRingBuffer::with_bluetooth(16000, sys_sample_rate, sys_active, mic_bluetooth);
 
     let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
         Ok(v) => {
