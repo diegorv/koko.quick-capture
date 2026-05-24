@@ -248,8 +248,14 @@ pub async fn stop_recording(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
+    let transcript_text = text.clone();
     let capture = recording::save_transcription(&store, text, audio_path, duration_secs)?;
     let _ = app.emit(CAPTURES_CHANGED_EVENT, &capture);
     let _ = app.emit(DOCK_PULSE_EVENT, ());
+
+    if let Ok(mut clip) = arboard::Clipboard::new() {
+        let _ = clip.set_text(&transcript_text);
+    }
+
     Ok(capture)
 }
