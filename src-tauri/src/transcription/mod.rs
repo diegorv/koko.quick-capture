@@ -38,7 +38,7 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
         .create_state()
         .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
 
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
     let audio = pad_audio_to_min_length(audio_data, MIN_AUDIO_SAMPLES_16KHZ);
 
