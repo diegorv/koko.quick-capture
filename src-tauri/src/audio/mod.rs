@@ -3,11 +3,13 @@ mod devices;
 pub mod filter;
 pub mod mixer;
 pub mod normalize;
+pub mod pool;
 mod resample;
 mod stream;
 pub mod vad;
 
 pub use devices::{is_likely_bluetooth, list_input_devices, AudioDevice, DeviceType, SelectedDevice};
+pub use pool::BufferPool;
 pub use resample::{resample_to_16khz, resample_to_48khz, PersistentResampler};
 pub use stream::AudioCapture;
 

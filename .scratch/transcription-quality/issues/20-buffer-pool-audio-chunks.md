@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # 20 - Buffer pool for audio chunk allocation
 
