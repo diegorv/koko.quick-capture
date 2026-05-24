@@ -35,3 +35,43 @@ pub fn save_wav(path: &std::path::Path, samples: &[f32]) -> Result<()> {
     writer.finalize()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_wav_creates_readable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.wav");
+        let samples: Vec<f32> = (0..1600)
+            .map(|i| (i as f32 * 0.01).sin())
+            .collect();
+        save_wav(&path, &samples).unwrap();
+
+        let reader = hound::WavReader::open(&path).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.sample_rate, 16000);
+        assert_eq!(spec.bits_per_sample, 32);
+        let read_samples: Vec<f32> = reader
+            .into_samples::<f32>()
+            .map(|s| s.unwrap())
+            .collect();
+        assert_eq!(read_samples.len(), samples.len());
+        for (a, b) in read_samples.iter().zip(samples.iter()) {
+            assert!((a - b).abs() < 1e-6, "sample mismatch: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn save_wav_empty_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.wav");
+        save_wav(&path, &[]).unwrap();
+
+        let reader = hound::WavReader::open(&path).unwrap();
+        let count = reader.into_samples::<f32>().count();
+        assert_eq!(count, 0);
+    }
+}
