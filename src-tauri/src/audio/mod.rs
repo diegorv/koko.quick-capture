@@ -1,6 +1,7 @@
 pub mod denoise;
 mod devices;
 pub mod filter;
+pub mod normalize;
 mod resample;
 mod stream;
 

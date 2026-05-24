@@ -9,6 +9,7 @@ use whisper_rs::WhisperContext;
 
 use crate::audio::denoise::Denoiser;
 use crate::audio::filter::HighPassFilter;
+use crate::audio::normalize::LoudnessNormalizer;
 use crate::audio::{resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, SelectedDevice};
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
@@ -268,6 +269,8 @@ impl RecordingHandle {
                 .map(|mut s48| {
                     let mut dn = Denoiser::new();
                     dn.process(&mut s48);
+                    let mut norm = LoudnessNormalizer::new(48000);
+                    norm.process(&mut s48);
                     resample_to_16khz(&s48, 48000)
                 });
             let resampled_result = match denoised {
@@ -393,6 +396,7 @@ fn chunker_loop(
     let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = Denoiser::new();
+    let mut normalizer = LoudnessNormalizer::new(48000);
 
     loop {
         while let Ok(chunk) = rx.try_recv() {
@@ -411,6 +415,7 @@ fn chunker_loop(
                 &all_samples_16k,
                 language,
                 &mut denoiser,
+                &mut normalizer,
             );
         }
 
@@ -426,6 +431,7 @@ fn chunker_loop(
                     &all_samples_16k,
                     language,
                     &mut denoiser,
+                    &mut normalizer,
                 );
             }
             break;
@@ -443,6 +449,7 @@ fn process_chunk(
     all_samples_16k: &Mutex<Vec<f32>>,
     language: &str,
     denoiser: &mut Denoiser,
+    normalizer: &mut LoudnessNormalizer,
 ) {
     let mut samples_48k = match resample_to_48khz(raw_samples, sample_rate) {
         Ok(r) => r,
@@ -452,6 +459,7 @@ fn process_chunk(
         }
     };
     denoiser.process(&mut samples_48k);
+    normalizer.process(&mut samples_48k);
 
     let resampled = match resample_to_16khz(&samples_48k, 48000) {
         Ok(r) => r,
