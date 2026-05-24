@@ -7,8 +7,9 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use whisper_rs::WhisperContext;
 
+use crate::audio::denoise::Denoiser;
 use crate::audio::filter::HighPassFilter;
-use crate::audio::{resample_to_16khz, save_wav, AudioCapture, SelectedDevice};
+use crate::audio::{resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, SelectedDevice};
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
 
@@ -263,7 +264,17 @@ impl RecordingHandle {
         if !remaining_raw.is_empty() {
             let mut hp = HighPassFilter::new(80.0, self.sample_rate);
             hp.process(&mut remaining_raw);
-            if let Ok(resampled) = resample_to_16khz(&remaining_raw, self.sample_rate) {
+            let denoised = resample_to_48khz(&remaining_raw, self.sample_rate)
+                .map(|mut s48| {
+                    let mut dn = Denoiser::new();
+                    dn.process(&mut s48);
+                    resample_to_16khz(&s48, 48000)
+                });
+            let resampled_result = match denoised {
+                Ok(inner) => inner,
+                Err(e) => Err(e),
+            };
+            if let Ok(resampled) = resampled_result {
                 if !resampled.is_empty() {
                     // RMS silence check
                     let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
@@ -381,6 +392,7 @@ fn chunker_loop(
     let mut buffer: Vec<f32> = Vec::new();
     let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
+    let mut denoiser = Denoiser::new();
 
     loop {
         while let Ok(chunk) = rx.try_recv() {
@@ -398,6 +410,7 @@ fn chunker_loop(
                 &transcript,
                 &all_samples_16k,
                 language,
+                &mut denoiser,
             );
         }
 
@@ -412,6 +425,7 @@ fn chunker_loop(
                     &transcript,
                     &all_samples_16k,
                     language,
+                    &mut denoiser,
                 );
             }
             break;
@@ -428,11 +442,21 @@ fn process_chunk(
     transcript: &Mutex<ChunkedTranscript>,
     all_samples_16k: &Mutex<Vec<f32>>,
     language: &str,
+    denoiser: &mut Denoiser,
 ) {
-    let resampled = match resample_to_16khz(raw_samples, sample_rate) {
+    let mut samples_48k = match resample_to_48khz(raw_samples, sample_rate) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[recording] resample failed: {e}");
+            eprintln!("[recording] resample to 48kHz failed: {e}");
+            return;
+        }
+    };
+    denoiser.process(&mut samples_48k);
+
+    let resampled = match resample_to_16khz(&samples_48k, 48000) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[recording] resample to 16kHz failed: {e}");
             return;
         }
     };

@@ -10,7 +10,15 @@ pub(super) fn audio_to_mono(data: &[f32], channels: u16) -> Vec<f32> {
 }
 
 pub fn resample_to_16khz(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
-    if from_rate == 16000 {
+    resample(samples, from_rate, 16000)
+}
+
+pub fn resample_to_48khz(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
+    resample(samples, from_rate, 48000)
+}
+
+fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
+    if from_rate == to_rate {
         return Ok(samples.to_vec());
     }
 
@@ -28,7 +36,7 @@ pub fn resample_to_16khz(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
     };
 
     let mut resampler = Async::<f32>::new_sinc(
-        16000.0 / from_rate as f64,
+        to_rate as f64 / from_rate as f64,
         2.0,
         &params,
         samples.len(),
