@@ -123,6 +123,7 @@
     { value: "Clip", label: "Clips" },
     { value: "Shot", label: "Shots" },
     { value: "File", label: "Files" },
+    { value: "Transcription", label: "Transcriptions" },
   ];
 
   function setKindFilter(value: Capture["kind"] | null) {
