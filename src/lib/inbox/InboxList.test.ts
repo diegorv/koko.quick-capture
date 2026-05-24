@@ -37,6 +37,23 @@ function link(id: string, url: string): Capture {
   };
 }
 
+function transcription(id: string, text: string): Capture {
+  return {
+    id,
+    kind: "Transcription",
+    created_at: new Date().toISOString(),
+    payload: { text, audio_path: "/tmp/audio.wav", duration_secs: 15.3 },
+    source_app: null,
+    starred: false,
+    deleted_at: null,
+    read_at: null,
+    source_title: null,
+    source_url: null,
+    destination_id: null,
+    routed_at: null,
+  };
+}
+
 function file(id: string, original_name: string): Capture {
   return {
     id,
@@ -64,6 +81,7 @@ describe("InboxList", () => {
       note("01H000000000000000000000A1", "first thought"),
       link("01H000000000000000000000B2", "https://example.com/page"),
       file("01H000000000000000000000C3", "notes.pdf"),
+      transcription("01H000000000000000000000D4", "voice note text"),
     ];
     const { getAllByRole, getByText } = render(InboxList, {
       props: {
@@ -76,10 +94,11 @@ describe("InboxList", () => {
     });
 
     const rows = getAllByRole("option");
-    expect(rows.length).toBe(3);
+    expect(rows.length).toBe(4);
     expect(getByText("first thought")).toBeTruthy();
     expect(getByText("https://example.com/page")).toBeTruthy();
     expect(getByText("notes.pdf")).toBeTruthy();
+    expect(getByText("voice note text")).toBeTruthy();
   });
 
   it("clicking a row calls onSelect with that row's id", async () => {

@@ -124,6 +124,27 @@ function bytesShot(id: string, blobPath: string): Capture {
   };
 }
 
+function transcription(id: string, text: string, audioPath: string): Capture {
+  return {
+    id,
+    kind: "Transcription",
+    created_at: new Date().toISOString(),
+    payload: {
+      text,
+      audio_path: audioPath,
+      duration_secs: 42.5,
+    },
+    source_app: null,
+    starred: false,
+    deleted_at: null,
+    read_at: null,
+    source_title: null,
+    source_url: null,
+    destination_id: null,
+    routed_at: null,
+  };
+}
+
 function file(id: string, name: string, sourcePath: string): Capture {
   return {
     id,
@@ -492,6 +513,47 @@ describe("InboxDetail", () => {
         },
       });
       expect(getByTestId("detail-destination").textContent).toContain("(deleted)");
+    });
+  });
+
+  describe("Transcription", () => {
+    it("shows the transcript text", () => {
+      const cap = transcription(
+        "01H000000000000000000000T1",
+        "Hello world from voice",
+        "/tmp/test.wav",
+      );
+      const { getByTestId } = render(InboxDetail, {
+        props: { capture: cap, onOpenLink: vi.fn(), onReveal: vi.fn() },
+      });
+      expect(getByTestId("payload-text").textContent).toContain(
+        "Hello world from voice",
+      );
+    });
+
+    it("renders an audio element for playback", () => {
+      const cap = transcription(
+        "01H000000000000000000000T2",
+        "Some transcript",
+        "/path/to/audio.wav",
+      );
+      const { container } = render(InboxDetail, {
+        props: { capture: cap, onOpenLink: vi.fn(), onReveal: vi.fn() },
+      });
+      const audio = container.querySelector("audio");
+      expect(audio).toBeTruthy();
+    });
+
+    it("shows duration metadata", () => {
+      const cap = transcription(
+        "01H000000000000000000000T3",
+        "Short note",
+        "/tmp/audio.wav",
+      );
+      const { getByText } = render(InboxDetail, {
+        props: { capture: cap, onOpenLink: vi.fn(), onReveal: vi.fn() },
+      });
+      expect(getByText("0:42")).toBeTruthy();
     });
   });
 });
