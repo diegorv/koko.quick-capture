@@ -364,6 +364,24 @@ impl RecordingHandle {
     ) -> Result<(String, PathBuf, f64)> {
         let duration_secs = self.elapsed_secs();
 
+        // Grace period for very short recordings: if accumulated audio
+        // is < 50ms at 16kHz (800 samples), wait up to 60ms for more
+        // audio to arrive before stopping capture.
+        const MIN_SAMPLES_16K: usize = 800;
+        const GRACE_POLL_MS: u64 = 10;
+        const GRACE_MAX_MS: u64 = 60;
+        let sample_count = self.all_samples_16k.lock().expect("samples mutex").len();
+        if sample_count < MIN_SAMPLES_16K {
+            let deadline = Instant::now() + std::time::Duration::from_millis(GRACE_MAX_MS);
+            while Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(GRACE_POLL_MS));
+                let count = self.all_samples_16k.lock().expect("samples mutex").len();
+                if count >= MIN_SAMPLES_16K {
+                    break;
+                }
+            }
+        }
+
         self.is_recording.store(false, Ordering::Relaxed);
 
         // Wait for the chunker thread to finish processing remaining

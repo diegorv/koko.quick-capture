@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # 18 - Short-speech grace period on recording stop
 
