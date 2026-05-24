@@ -412,4 +412,118 @@ mod tests {
         let result = strip_hallucination_artifacts("Some text. Like and subscribe!");
         assert_eq!(result, "Some text.");
     }
+
+    // --- hallucination detection edge cases ---
+
+    #[test]
+    fn hallucination_three_word_repeat() {
+        assert!(is_hallucination(
+            "E aí pessoal E aí pessoal E aí pessoal E aí pessoal"
+        ));
+    }
+
+    #[test]
+    fn hallucination_four_word_repeat() {
+        assert!(is_hallucination(
+            "a b c d a b c d a b c d a b c d"
+        ));
+    }
+
+    #[test]
+    fn hallucination_empty_is_not_hallucination() {
+        assert!(!is_hallucination(""));
+    }
+
+    #[test]
+    fn hallucination_three_words_is_not_hallucination() {
+        assert!(!is_hallucination("one two three"));
+    }
+
+    #[test]
+    fn hallucination_partial_repeat_below_threshold() {
+        assert!(!is_hallucination(
+            "hello hello hello world foo bar baz qux"
+        ));
+    }
+
+    // --- collapse_repeated_words edge cases ---
+
+    #[test]
+    fn collapse_case_insensitive() {
+        assert_eq!(collapse_repeated_words("The the THE dog"), "The dog");
+    }
+
+    #[test]
+    fn collapse_no_repeats() {
+        assert_eq!(collapse_repeated_words("all different words"), "all different words");
+    }
+
+    #[test]
+    fn collapse_empty() {
+        assert_eq!(collapse_repeated_words(""), "");
+    }
+
+    // --- strip_bracketed_tokens edge cases ---
+
+    #[test]
+    fn strip_multiple_bracketed_tokens() {
+        assert_eq!(
+            strip_bracketed_tokens("[MUSIC] hello [BLANK_AUDIO] world (applause)"),
+            " hello  world "
+        );
+    }
+
+    #[test]
+    fn strip_nested_brackets_treated_as_single() {
+        assert_eq!(strip_bracketed_tokens("[a [b] c]"), " c]");
+    }
+
+    #[test]
+    fn strip_empty_brackets() {
+        assert_eq!(strip_bracketed_tokens("[]()text"), "text");
+    }
+
+    // --- strip_hallucination_artifacts combined ---
+
+    #[test]
+    fn strip_artifacts_all_removed_returns_empty() {
+        let result = strip_hallucination_artifacts("Fala pessoal, Obrigado por assistir!");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn strip_artifacts_bracketed_plus_prefix() {
+        let result = strip_hallucination_artifacts("E aí, [MUSIC] real content here");
+        assert_eq!(result, "real content here");
+    }
+
+    #[test]
+    fn strip_artifacts_repeated_words_collapsed() {
+        let result = strip_hallucination_artifacts("hello hello hello world world");
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn strip_pt_suffix_ate_a_proxima() {
+        let result = strip_hallucination_artifacts("Conteúdo real. Até a próxima!");
+        assert_eq!(result, "Conteúdo real.");
+    }
+
+    #[test]
+    fn strip_pt_prefix_fala_galera() {
+        let result = strip_hallucination_artifacts("Fala galera, conteúdo real aqui");
+        assert_eq!(result, "conteúdo real aqui");
+    }
+
+    #[test]
+    fn strip_en_see_you_next_time() {
+        let result = strip_hallucination_artifacts("Good stuff. See you next time!");
+        assert_eq!(result, "Good stuff.");
+    }
+
+    #[test]
+    fn strip_legendas_amara() {
+        let result = strip_hallucination_artifacts("Texto. Legendas pela comunidade Amara.org");
+        assert_eq!(result, "Texto.");
+    }
 }
