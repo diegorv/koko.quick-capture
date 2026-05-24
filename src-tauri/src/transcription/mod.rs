@@ -63,6 +63,9 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
 
+    let audio_ctx = ((1500 * audio.len()) / (16_000 * 30) + 128).min(1500) as i32;
+    params.set_audio_ctx(audio_ctx);
+
     state
         .full(params, &audio)
         .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?;
