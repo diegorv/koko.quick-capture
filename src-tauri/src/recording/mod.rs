@@ -122,30 +122,28 @@ impl RecordingHandle {
         let mic_pk = mic_peak.clone();
         let sys_pk = sys_peak.clone();
         let sys_tx = tx.clone();
-        let has_sys = sys_device.is_some();
-
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         let audio_thread = std::thread::spawn(move || {
             match AudioCapture::start(tx, is_rec.clone(), mic_device, mic_pk) {
                 Ok((_mic_stream, capture)) => {
-                    let _sys_stream = if let Some(sys_dev) = sys_device {
+                    let (_sys_stream, sys_started) = if let Some(sys_dev) = sys_device {
                         let sys_rec = is_rec.clone();
                         match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_pk) {
                             Ok((stream, _)) => {
                                 eprintln!("[recording] System audio stream started");
-                                Some(stream)
+                                (Some(stream), true)
                             }
                             Err(e) => {
                                 eprintln!("[recording] System audio failed (continuing with mic only): {e}");
-                                None
+                                (None, false)
                             }
                         }
                     } else {
-                        None
+                        (None, false)
                     };
 
-                    let _ = result_tx.send(Ok(capture.sample_rate));
+                    let _ = result_tx.send(Ok((capture.sample_rate, sys_started)));
                     while is_rec.load(Ordering::Relaxed) {
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
@@ -156,7 +154,7 @@ impl RecordingHandle {
             }
         });
 
-        let sample_rate = result_rx
+        let (sample_rate, sys_active) = result_rx
             .recv()
             .map_err(|_| anyhow::anyhow!("Audio thread died before reporting sample rate"))??;
 
@@ -167,7 +165,7 @@ impl RecordingHandle {
             is_recording,
             mic_peak,
             sys_peak,
-            sys_active: has_sys,
+            sys_active,
             started_at: Instant::now(),
             sample_rate,
             language,
