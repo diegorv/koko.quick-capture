@@ -19,6 +19,7 @@
   let sysEnabled = $state(false);
   let transcript = $state("");
   let processing = $state(false);
+  let loading = $state(false);
 
   let vuTimer: ReturnType<typeof setInterval> | undefined;
   let statusTimer: ReturnType<typeof setInterval> | undefined;
@@ -53,12 +54,14 @@
   }
 
   async function startRecording() {
+    loading = true;
     try {
       const status = await invoke<{ downloaded: boolean }>("get_model_status");
       if (!status.downloaded) {
         await invoke("download_model");
       }
       await invoke("start_recording");
+      loading = false;
       recording = true;
       elapsed = 0;
       transcript = "";
@@ -83,6 +86,7 @@
       }, 2000);
     } catch (err) {
       console.error("start_recording failed", err);
+      loading = false;
     }
   }
 
@@ -196,9 +200,9 @@
         Stop
       </button>
     {:else}
-      <button type="button" class="record-btn" onclick={startRecording} disabled={processing}>
+      <button type="button" class="record-btn" onclick={startRecording} disabled={processing || loading}>
         <span class="record-icon"></span>
-        Record
+        {loading ? "Loading model..." : "Record"}
       </button>
     {/if}
     <span class="timer">{formatElapsed(elapsed)}</span>

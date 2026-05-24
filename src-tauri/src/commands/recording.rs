@@ -74,17 +74,35 @@ fn ensure_whisper_loaded(whisper: &WhisperState) -> Result<std::sync::Arc<Whispe
 }
 
 #[tauri::command]
-pub fn start_recording(
+pub async fn start_recording(
     rec_state: State<'_, RecordingState>,
     whisper: State<'_, WhisperState>,
     store: State<'_, Store>,
 ) -> Result<(), String> {
-    let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
-    if guard.is_some() {
-        return Err("Already recording".to_string());
+    {
+        let guard = rec_state.0.lock().expect("recording mutex poisoned");
+        if guard.is_some() {
+            return Err("Already recording".to_string());
+        }
     }
 
-    let ctx = ensure_whisper_loaded(&whisper)?;
+    let whisper_clone = whisper.0.lock().expect("whisper mutex").clone();
+    let ctx = if let Some(ctx) = whisper_clone {
+        ctx
+    } else {
+        let path = recording::model_path();
+        if !path.exists() {
+            return Err("Model not downloaded. Call download_model first.".to_string());
+        }
+        let ctx = tauri::async_runtime::spawn_blocking(move || {
+            crate::transcription::create_whisper_context(&path)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        *whisper.0.lock().expect("whisper mutex") = Some(ctx.clone());
+        ctx
+    };
 
     let mic_device = store
         .settings_get(SETTING_MIC_DEVICE)
@@ -126,6 +144,8 @@ pub fn start_recording(
     let mut handle = RecordingHandle::start(mic_device, sys_device, language)
         .map_err(|e| e.to_string())?;
     handle.start_chunker(ctx);
+
+    let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
     *guard = Some(handle);
     Ok(())
 }
