@@ -1,0 +1,235 @@
+use std::collections::VecDeque;
+
+pub struct AudioMixerRingBuffer {
+    mic_buffer: VecDeque<f32>,
+    sys_buffer: VecDeque<f32>,
+    window_samples: usize,
+    max_buffer_samples: usize,
+    has_system: bool,
+}
+
+impl AudioMixerRingBuffer {
+    pub fn new(sample_rate: u32, has_system: bool) -> Self {
+        let window_samples = (sample_rate as f32 * 0.6) as usize; // 600ms
+        let max_buffer_samples = window_samples * 8; // ~4.8s overflow protection
+        Self {
+            mic_buffer: VecDeque::with_capacity(window_samples * 2),
+            sys_buffer: VecDeque::with_capacity(window_samples * 2),
+            window_samples,
+            max_buffer_samples,
+            has_system,
+        }
+    }
+
+    pub fn push_mic(&mut self, samples: &[f32]) {
+        self.mic_buffer.extend(samples);
+        self.trim_overflow(&Source::Mic);
+    }
+
+    pub fn push_system(&mut self, samples: &[f32]) {
+        self.sys_buffer.extend(samples);
+        self.trim_overflow(&Source::System);
+    }
+
+    pub fn extract_mixed(&mut self) -> Option<Vec<f32>> {
+        if !self.has_system {
+            if self.mic_buffer.len() >= self.window_samples {
+                let mic: Vec<f32> = self.mic_buffer.drain(..self.window_samples).collect();
+                return Some(mic);
+            }
+            return None;
+        }
+
+        if self.mic_buffer.len() < self.window_samples
+            && self.sys_buffer.len() < self.window_samples
+        {
+            return None;
+        }
+
+        let mic_window = self.drain_or_pad(&Source::Mic);
+        let sys_window = self.drain_or_pad(&Source::System);
+
+        let mixed: Vec<f32> = mic_window
+            .iter()
+            .zip(sys_window.iter())
+            .map(|(&m, &s)| soft_clip(m + s))
+            .collect();
+
+        Some(mixed)
+    }
+
+    pub fn drain_remaining(&mut self) -> Vec<f32> {
+        if !self.has_system {
+            return self.mic_buffer.drain(..).collect();
+        }
+
+        let len = self.mic_buffer.len().max(self.sys_buffer.len());
+        if len == 0 {
+            return Vec::new();
+        }
+
+        let mic: Vec<f32> = self.mic_buffer.drain(..).collect();
+        let sys: Vec<f32> = self.sys_buffer.drain(..).collect();
+
+        (0..len)
+            .map(|i| {
+                let m = mic.get(i).copied().unwrap_or(0.0);
+                let s = sys.get(i).copied().unwrap_or(0.0);
+                soft_clip(m + s)
+            })
+            .collect()
+    }
+
+    fn drain_or_pad(&mut self, source: &Source) -> Vec<f32> {
+        let buf = match source {
+            Source::Mic => &mut self.mic_buffer,
+            Source::System => &mut self.sys_buffer,
+        };
+
+        if buf.len() >= self.window_samples {
+            buf.drain(..self.window_samples).collect()
+        } else if !buf.is_empty() {
+            let mut window: Vec<f32> = buf.drain(..).collect();
+            window.resize(self.window_samples, 0.0);
+            window
+        } else {
+            vec![0.0; self.window_samples]
+        }
+    }
+
+    fn trim_overflow(&mut self, source: &Source) {
+        let buf = match source {
+            Source::Mic => &mut self.mic_buffer,
+            Source::System => &mut self.sys_buffer,
+        };
+        if buf.len() > self.max_buffer_samples {
+            let overflow = buf.len() - self.max_buffer_samples;
+            eprintln!(
+                "[mixer] {} buffer overflow, dropping {} samples",
+                match source {
+                    Source::Mic => "mic",
+                    Source::System => "system",
+                },
+                overflow
+            );
+            buf.drain(..overflow);
+        }
+    }
+}
+
+enum Source {
+    Mic,
+    System,
+}
+
+fn soft_clip(sample: f32) -> f32 {
+    let abs = sample.abs();
+    if abs > 1.0 {
+        sample / abs
+    } else {
+        sample
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mic_only_passthrough() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, false);
+        let samples = vec![0.5f32; 9600]; // 600ms at 16kHz
+        mixer.push_mic(&samples);
+        let out = mixer.extract_mixed().unwrap();
+        assert_eq!(out.len(), 9600);
+        assert!((out[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mic_only_returns_none_when_insufficient() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, false);
+        mixer.push_mic(&vec![0.1; 100]);
+        assert!(mixer.extract_mixed().is_none());
+    }
+
+    #[test]
+    fn equal_signals_sum() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let window = (16000.0 * 0.6) as usize;
+        mixer.push_mic(&vec![0.3; window]);
+        mixer.push_system(&vec![0.2; window]);
+        let out = mixer.extract_mixed().unwrap();
+        assert_eq!(out.len(), window);
+        assert!((out[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn soft_clipping_prevents_overflow() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let window = (16000.0 * 0.6) as usize;
+        mixer.push_mic(&vec![0.8; window]);
+        mixer.push_system(&vec![0.8; window]);
+        let out = mixer.extract_mixed().unwrap();
+        for &s in &out {
+            assert!(s.abs() <= 1.0, "sample {} exceeds 1.0", s);
+        }
+    }
+
+    #[test]
+    fn zero_padding_when_system_behind() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let window = (16000.0 * 0.6) as usize;
+        mixer.push_mic(&vec![0.5; window]);
+        // system has nothing -> zero-padded
+        let out = mixer.extract_mixed().unwrap();
+        assert_eq!(out.len(), window);
+        // Should be mic signal only (system zero-padded)
+        assert!((out[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn overflow_trims_oldest() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        // Push way more than max_buffer
+        let huge = vec![0.1; mixer.max_buffer_samples + 5000];
+        mixer.push_mic(&huge);
+        assert!(mixer.mic_buffer.len() <= mixer.max_buffer_samples);
+    }
+
+    #[test]
+    fn drain_remaining_mixes_uneven_buffers() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        mixer.push_mic(&vec![0.4; 1000]);
+        mixer.push_system(&vec![0.3; 500]);
+        let out = mixer.drain_remaining();
+        assert_eq!(out.len(), 1000);
+        // First 500: mixed (0.4 + 0.3 = 0.7)
+        assert!((out[0] - 0.7).abs() < 1e-6);
+        // Last 500: mic only (0.4 + 0.0 = 0.4)
+        assert!((out[500] - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn soft_clip_function() {
+        assert!((soft_clip(0.5) - 0.5).abs() < 1e-6);
+        assert!((soft_clip(1.5) - 1.0).abs() < 1e-6);
+        assert!((soft_clip(-1.5) - (-1.0)).abs() < 1e-6);
+        assert!((soft_clip(0.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multiple_windows_extracted_sequentially() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let window = (16000.0 * 0.6) as usize;
+        mixer.push_mic(&vec![0.1; window * 3]);
+        mixer.push_system(&vec![0.2; window * 3]);
+
+        let out1 = mixer.extract_mixed().unwrap();
+        let out2 = mixer.extract_mixed().unwrap();
+        let out3 = mixer.extract_mixed().unwrap();
+        assert_eq!(out1.len(), window);
+        assert_eq!(out2.len(), window);
+        assert_eq!(out3.len(), window);
+        assert!(mixer.extract_mixed().is_none());
+    }
+}

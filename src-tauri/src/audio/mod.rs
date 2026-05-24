@@ -1,6 +1,7 @@
 pub mod denoise;
 mod devices;
 pub mod filter;
+pub mod mixer;
 pub mod normalize;
 mod resample;
 mod stream;
@@ -9,6 +10,11 @@ pub mod vad;
 pub use devices::{list_input_devices, AudioDevice, DeviceType, SelectedDevice};
 pub use resample::{resample_to_16khz, resample_to_48khz, PersistentResampler};
 pub use stream::AudioCapture;
+
+pub enum AudioChunk {
+    Mic(Vec<f32>),
+    System(Vec<f32>),
+}
 
 use anyhow::Result;
 
