@@ -96,4 +96,38 @@ mod tests {
             TRUE_PEAK_LIMIT
         );
     }
+
+    #[test]
+    fn empty_signal_is_noop() {
+        let mut signal: Vec<f32> = vec![];
+        let mut norm = LoudnessNormalizer::new(48000);
+        norm.process(&mut signal);
+        assert!(signal.is_empty());
+    }
+
+    #[test]
+    fn silence_is_not_amplified() {
+        let mut signal = vec![0.0f32; 48000];
+        let mut norm = LoudnessNormalizer::new(48000);
+        norm.process(&mut signal);
+        assert!(
+            signal.iter().all(|&s| s == 0.0),
+            "silence should remain silent"
+        );
+    }
+
+    #[test]
+    fn gain_never_exceeds_max() {
+        let mut signal: Vec<f32> = (0..48000)
+            .map(|i| 0.00001 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin())
+            .collect();
+        let mut norm = LoudnessNormalizer::new(48000);
+        norm.process(&mut signal);
+        let peak = signal.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+        assert!(
+            peak <= TRUE_PEAK_LIMIT + 0.001,
+            "Even very quiet signal must stay under true peak limit, got {:.4}",
+            peak
+        );
+    }
 }

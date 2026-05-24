@@ -61,4 +61,29 @@ mod tests {
             rms_after
         );
     }
+
+    #[test]
+    fn sub_frame_input_does_not_panic() {
+        let mut samples = vec![0.1f32; RNNOISE_FRAME_SIZE / 2];
+        let mut denoiser = Denoiser::new();
+        denoiser.process(&mut samples);
+        assert_eq!(samples.len(), RNNOISE_FRAME_SIZE / 2);
+    }
+
+    #[test]
+    fn exact_frame_size_input() {
+        let mut samples = vec![0.1f32; RNNOISE_FRAME_SIZE];
+        let mut denoiser = Denoiser::new();
+        denoiser.process(&mut samples);
+        assert_eq!(samples.len(), RNNOISE_FRAME_SIZE);
+    }
+
+    #[test]
+    fn multiple_frames_processed() {
+        let mut samples = vec![0.1f32; RNNOISE_FRAME_SIZE * 3 + 10];
+        let original_len = samples.len();
+        let mut denoiser = Denoiser::new();
+        denoiser.process(&mut samples);
+        assert_eq!(samples.len(), original_len);
+    }
 }

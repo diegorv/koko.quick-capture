@@ -155,4 +155,84 @@ mod tests {
             out.len()
         );
     }
+
+    // --- resample_to_48khz ---
+
+    #[test]
+    fn resample_to_48khz_is_clone_when_already_48khz() {
+        let input = vec![0.1f32, 0.2, 0.3, 0.4];
+        let out = resample_to_48khz(&input, 48000).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn resample_to_48khz_16k_to_48k_produces_roughly_three_times_samples() {
+        let input: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin()).collect();
+        let out = resample_to_48khz(&input, 16000).unwrap();
+        let expected = input.len() * 3;
+        let low = (expected as f32 * 0.95) as usize;
+        let high = (expected as f32 * 1.05) as usize;
+        assert!(
+            out.len() >= low && out.len() <= high,
+            "expected ~{}, got {}",
+            expected,
+            out.len()
+        );
+    }
+
+    // --- audio_to_mono edge cases ---
+
+    #[test]
+    fn audio_to_mono_three_channels() {
+        let input = vec![3.0, 6.0, 9.0, 1.0, 2.0, 3.0];
+        let out = audio_to_mono(&input, 3);
+        assert_eq!(out.len(), 2);
+        assert!((out[0] - 6.0).abs() < 1e-6);
+        assert!((out[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn audio_to_mono_empty_input() {
+        let out = audio_to_mono(&[], 2);
+        assert!(out.is_empty());
+    }
+
+    // --- PersistentResampler ---
+
+    #[test]
+    fn persistent_resampler_same_rate_passthrough() {
+        let mut r = PersistentResampler::new(48000, 48000).unwrap();
+        let input = vec![0.5f32; 100];
+        let out = r.process(&input).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn persistent_resampler_48k_to_16k() {
+        let mut r = PersistentResampler::new(48000, 16000).unwrap();
+        let input: Vec<f32> = (0..CHUNK_SIZE)
+            .map(|i| (i as f32 * 0.01).sin())
+            .collect();
+        let out = r.process(&input).unwrap();
+        let expected = CHUNK_SIZE / 3;
+        let tolerance = (expected as f32 * 0.1) as usize;
+        assert!(
+            (out.len() as i64 - expected as i64).unsigned_abs() <= tolerance as u64,
+            "expected ~{}, got {}",
+            expected,
+            out.len()
+        );
+    }
+
+    #[test]
+    fn persistent_resampler_multiple_chunks_produce_output() {
+        let mut r = PersistentResampler::new(48000, 16000).unwrap();
+        let chunk: Vec<f32> = (0..CHUNK_SIZE)
+            .map(|i| (i as f32 * 0.01).sin())
+            .collect();
+        let out1 = r.process(&chunk).unwrap();
+        let out2 = r.process(&chunk).unwrap();
+        assert!(!out1.is_empty());
+        assert!(!out2.is_empty());
+    }
 }

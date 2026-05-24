@@ -97,4 +97,49 @@ mod tests {
             attenuation_db
         );
     }
+
+    #[test]
+    fn passes_1khz_nearly_untouched() {
+        let mut signal = generate_sine(1000.0, 48000, 0.5);
+        let rms_before = rms(&signal);
+        let mut filter = HighPassFilter::new(80.0, 48000);
+        filter.process(&mut signal);
+        let rms_after = rms(&signal);
+        let attenuation_db = 20.0 * (rms_after / rms_before).log10();
+        assert!(
+            attenuation_db > -0.5,
+            "Expected <0.5dB loss at 1kHz, got {:.2}dB",
+            attenuation_db
+        );
+    }
+
+    #[test]
+    fn dc_offset_fully_removed() {
+        let mut signal = vec![1.0f32; 48000];
+        let mut filter = HighPassFilter::new(80.0, 48000);
+        filter.process(&mut signal);
+        let tail_rms = rms(&signal[24000..]);
+        assert!(
+            tail_rms < 0.01,
+            "DC should be removed after settling, tail RMS = {:.4}",
+            tail_rms
+        );
+    }
+
+    #[test]
+    fn consecutive_batches_maintain_state() {
+        let mut filter = HighPassFilter::new(80.0, 48000);
+        let mut batch1 = generate_sine(50.0, 48000, 0.25);
+        let mut batch2 = generate_sine(50.0, 48000, 0.25);
+        filter.process(&mut batch1);
+        filter.process(&mut batch2);
+        let rms2 = rms(&batch2);
+        let original_rms = rms(&generate_sine(50.0, 48000, 0.25));
+        let attenuation_db = 20.0 * (rms2 / original_rms).log10();
+        assert!(
+            attenuation_db < -6.0,
+            "Second batch should still attenuate 50Hz, got {:.1}dB",
+            attenuation_db
+        );
+    }
 }
