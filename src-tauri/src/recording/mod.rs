@@ -16,6 +16,8 @@ const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
 const CHUNK_INTERVAL_SECS: u64 = 20;
+const SILENCE_SCAN_WINDOW_MS: usize = 20;
+const SILENCE_SCAN_TAIL_SECS: f32 = 1.5;
 
 pub fn models_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -288,6 +290,50 @@ impl RecordingHandle {
     }
 }
 
+/// Find the best split point near the end of a buffer by scanning for the
+/// quietest 20ms window in the last 1.5s. Returns the sample index to split at,
+/// or `nominal` if no quiet window is found. Technique from buzz.
+fn find_silence_split(buffer: &[f32], sample_rate: u32, nominal: usize) -> usize {
+    let window_samples = (sample_rate as usize * SILENCE_SCAN_WINDOW_MS) / 1000;
+    let tail_samples = (sample_rate as f32 * SILENCE_SCAN_TAIL_SECS) as usize;
+    let scan_start = nominal.saturating_sub(tail_samples);
+
+    if scan_start + window_samples > buffer.len() || window_samples == 0 {
+        return nominal.min(buffer.len());
+    }
+
+    let scan_end = nominal.min(buffer.len());
+    let mean_rms = {
+        let total: f32 = buffer[scan_start..scan_end]
+            .chunks(window_samples)
+            .map(|w| (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt())
+            .sum();
+        let n = (scan_end - scan_start) / window_samples;
+        if n == 0 { return nominal.min(buffer.len()); }
+        total / n as f32
+    };
+
+    let mut best_idx = nominal.min(buffer.len());
+    let mut best_rms = f32::MAX;
+
+    let mut i = scan_start;
+    while i + window_samples <= scan_end {
+        let rms = (buffer[i..i + window_samples]
+            .iter()
+            .map(|s| s * s)
+            .sum::<f32>()
+            / window_samples as f32)
+            .sqrt();
+        if rms < 0.5 * mean_rms && rms < best_rms {
+            best_rms = rms;
+            best_idx = i + window_samples;
+        }
+        i += window_samples;
+    }
+
+    best_idx
+}
+
 fn chunker_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<f32>>,
     is_recording: Arc<AtomicBool>,
@@ -306,9 +352,9 @@ fn chunker_loop(
             buffer.extend(chunk);
         }
 
-        // Process chunk if we have enough samples
         if buffer.len() >= chunk_samples {
-            let chunk_data: Vec<f32> = buffer.drain(..chunk_samples).collect();
+            let split = find_silence_split(&buffer, sample_rate, chunk_samples);
+            let chunk_data: Vec<f32> = buffer.drain(..split).collect();
             process_chunk(
                 &chunk_data,
                 sample_rate,
