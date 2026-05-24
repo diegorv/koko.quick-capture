@@ -32,10 +32,15 @@ fn pad_audio(samples: &[f32]) -> Vec<f32> {
 }
 
 pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
-    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE)
+    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None)
 }
 
-pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], language: &str) -> Result<String> {
+pub fn transcribe_with_language(
+    ctx: &WhisperContext,
+    audio_data: &[f32],
+    language: &str,
+    initial_prompt: Option<&str>,
+) -> Result<String> {
     let mut state = ctx
         .create_state()
         .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
@@ -62,6 +67,12 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
     params.set_logprob_thold(-1.0);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
+
+    if let Some(prompt) = initial_prompt {
+        if !prompt.is_empty() {
+            params.set_initial_prompt(prompt);
+        }
+    }
 
     let audio_ctx = ((1500 * audio.len()) / (16_000 * 30) + 128).min(1500) as i32;
     params.set_audio_ctx(audio_ctx);

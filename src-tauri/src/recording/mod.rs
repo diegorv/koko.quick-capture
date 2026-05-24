@@ -90,6 +90,10 @@ impl ChunkedTranscript {
     fn merged(&self) -> String {
         self.texts.join(" ").trim().to_string()
     }
+
+    fn last_chunk(&self) -> Option<String> {
+        self.texts.last().cloned()
+    }
 }
 
 pub struct RecordingHandle {
@@ -231,8 +235,14 @@ impl RecordingHandle {
                         / resampled.len() as f32)
                         .sqrt();
                     if rms >= 0.01 {
-                        let text = transcription::transcribe_with_language(whisper_ctx, &resampled, &self.language)
-                            .unwrap_or_default();
+                        let prev = self.transcript.lock().expect("transcript mutex").last_chunk();
+                        let text = transcription::transcribe_with_language(
+                            whisper_ctx,
+                            &resampled,
+                            &self.language,
+                            prev.as_deref(),
+                        )
+                        .unwrap_or_default();
                         self.transcript.lock().expect("transcript mutex").push(text);
                     }
                 }
@@ -359,7 +369,8 @@ fn process_chunk(
         return;
     }
 
-    match transcription::transcribe_with_language(whisper_ctx, &resampled, language) {
+    let prev = transcript.lock().expect("transcript mutex").last_chunk();
+    match transcription::transcribe_with_language(whisper_ctx, &resampled, language, prev.as_deref()) {
         Ok(text) => {
             if !text.is_empty() {
                 eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);
