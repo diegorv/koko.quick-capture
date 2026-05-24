@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # 22 - RNNoise toggle (optional denoise)
 
