@@ -19,8 +19,15 @@ impl AudioCapture {
         peak_level: Arc<AtomicU32>,
     ) -> Result<(cpal::Stream, Self)> {
         let device = if let Some(ref sel) = selected {
-            let (dev, _is_sck) = find_device(&sel.name, &sel.device_type)?;
-            dev
+            match find_device(&sel.name, &sel.device_type) {
+                Ok((dev, _)) => dev,
+                Err(e) => {
+                    eprintln!("[audio] Saved device '{}' not found ({}), falling back to default", sel.name, e);
+                    let host = cpal::default_host();
+                    host.default_input_device()
+                        .ok_or_else(|| anyhow!("No input device available"))?
+                }
+            }
         } else {
             let host = cpal::default_host();
             host.default_input_device()
