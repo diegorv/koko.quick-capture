@@ -277,7 +277,25 @@
           Open in Browser
         </button>
       </footer>
-    {:else if capture.kind === "Clip" || capture.kind === "Note" || capture.kind === "Transcription"}
+    {:else if capture.kind === "Transcription"}
+      {@const text = str(capture.payload.text) ?? ""}
+      {@const audioPath = str(capture.payload.audio_path)}
+      {@const durationSecs = capture.payload.duration_secs}
+      <section class="body">
+        {#if audioPath}
+          <audio controls src={convertFileSrc(audioPath)} class="audio-player">
+            <track kind="captions" />
+          </audio>
+        {/if}
+        {#if typeof durationSecs === "number"}
+          <dl class="meta">
+            <dt>Duration</dt>
+            <dd>{Math.floor(durationSecs / 60)}:{Math.floor(durationSecs % 60).toString().padStart(2, "0")}</dd>
+          </dl>
+        {/if}
+        <pre class="payload-text" data-testid="payload-text">{text}</pre>
+      </section>
+    {:else if capture.kind === "Clip" || capture.kind === "Note"}
       {@const text = str(capture.payload.text) ?? ""}
       {@const segments = parseMentionSegments(text)}
       <section class="body">
@@ -678,6 +696,12 @@
   .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.8rem;
+  }
+
+  .audio-player {
+    width: 100%;
+    margin-bottom: 0.5rem;
+    border-radius: 8px;
   }
 
   .preview {
