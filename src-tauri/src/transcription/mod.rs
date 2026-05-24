@@ -142,10 +142,11 @@ pub fn transcribe_full(
 }
 
 const HALLUCINATION_PREFIXES: &[&str] = &[
-    "E aí,",
-    "E aí!",
+    // PT-BR
     "E aí pessoal,",
     "E aí pessoal!",
+    "E aí,",
+    "E aí!",
     "E aí.",
     "E aí",
     "Fala pessoal,",
@@ -157,6 +158,7 @@ const HALLUCINATION_PREFIXES: &[&str] = &[
 ];
 
 const HALLUCINATION_SUFFIXES: &[&str] = &[
+    // PT-BR
     "Obrigado por assistir!",
     "Obrigado por assistir.",
     "Obrigado por assistir",
@@ -170,6 +172,29 @@ const HALLUCINATION_SUFFIXES: &[&str] = &[
     "Inscreva-se no canal!",
     "Inscreva-se no canal.",
     "Inscreva-se no canal",
+    // EN
+    "Thank you for watching!",
+    "Thank you for watching.",
+    "Thank you for watching",
+    "Thanks for watching!",
+    "Thanks for watching.",
+    "Thanks for watching",
+    "Please like and subscribe!",
+    "Please like and subscribe.",
+    "Please like and subscribe",
+    "Like and subscribe!",
+    "Like and subscribe.",
+    "Like and subscribe",
+    "Please subscribe!",
+    "Please subscribe.",
+    "Please subscribe",
+    "See you in the next video!",
+    "See you in the next video.",
+    "See you in the next video",
+    "See you next time!",
+    "See you next time.",
+    "See you next time",
+    "Subtitles by the Amara.org community",
 ];
 
 fn strip_hallucination_artifacts(text: &str) -> String {
@@ -350,5 +375,17 @@ mod tests {
     fn strip_leading_exclamation() {
         let result = strip_hallucination_artifacts("! Some text here");
         assert_eq!(result, "Some text here");
+    }
+
+    #[test]
+    fn strip_en_suffix_thank_you() {
+        let result = strip_hallucination_artifacts("Real content here. Thank you for watching!");
+        assert_eq!(result, "Real content here.");
+    }
+
+    #[test]
+    fn strip_en_suffix_subscribe() {
+        let result = strip_hallucination_artifacts("Some text. Like and subscribe!");
+        assert_eq!(result, "Some text.");
     }
 }
