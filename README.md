@@ -25,14 +25,19 @@ them.
 
 ### Composer
 
-A small borderless popover (600x240) for free-text notes. Lives
-hidden until summoned.
+A small borderless popover (600x240) for free-text notes and voice
+recordings. Lives hidden until summoned.
 
 - **Open**: `Ctrl+Alt+Cmd+Space`, click the Dock disc, tray menu
   "Open Composer".
 - **Save**: `Cmd+Enter`. Indigo confirmation ring flashes for ~180ms,
   then the window hides itself.
-- **Cancel**: `Esc` or `Cmd+W`. Window hides without saving.
+- **Record**: click the mic button to start recording. A pulsing red
+  dot, timer, and partial transcript appear. Click Stop to transcribe
+  and save as a Transcription capture. The whisper model downloads
+  automatically on first use (~547 MB).
+- **Cancel**: `Esc` or `Cmd+W`. Window hides without saving. If
+  recording, stops and saves first.
 - **Drag**: drag from any non-textarea padding to reposition.
 
 ### Inbox
@@ -80,7 +85,7 @@ Items: **Open Composer** (`Ctrl+Alt+Cmd+Space`), **Open Inbox**
 
 ## Capture kinds
 
-Every row in the Inbox is one of five kinds. The active capture path
+Every row in the Inbox is one of six kinds. The active capture path
 determines which kind is produced.
 
 | Kind | Payload                       | Created by                                                                                |
@@ -90,8 +95,12 @@ determines which kind is produced.
 | Link | `{ url, raw_text, title? }`   | Clipboard shortcut when the text parses as a URL.                                         |
 | Shot | `{ source_path | blob_path, mime, width?, height? }` | Clipboard shortcut with image bytes (`blob_path`), or drag-drop / clipboard with an image file (`source_path`). |
 | File | `{ source_path, mime, original_name? }` | Drag-drop of a non-image file onto the Dock, or clipboard with non-image file paths.       |
+| Transcription | `{ text, audio_path, duration_secs }` | Composer mic button. Records mic (+ optional system audio), transcribes locally via whisper-rs (Metal GPU). |
 
-The kind detection lives in `src-tauri/src/kind_detect/`.
+The kind detection lives in `src-tauri/src/kind_detect/`. Voice
+transcription lives in `src-tauri/src/recording/` (pipeline) and
+`src-tauri/src/transcription/` (whisper inference + hallucination
+filtering).
 
 ---
 
@@ -157,6 +166,22 @@ project uses in place of macOS UI automation.
       from the previous session).
 - [ ] Dragging from the padding around the textarea moves the window;
       clicking inside the textarea places the caret.
+
+### Voice transcription
+- [ ] Click the mic button in the Composer. On first use, the whisper
+      model downloads (~547 MB) with a progress bar in Settings.
+- [ ] Recording shows a pulsing red dot, elapsed timer, and Stop
+      button. The text editor is hidden during recording.
+- [ ] After 30 seconds of recording, a partial transcript appears
+      below the timer.
+- [ ] Click Stop. The Composer dismisses and a Transcription capture
+      appears in the Inbox with the mic icon.
+- [ ] The Inbox detail pane shows an audio player, duration, and
+      the transcript text.
+- [ ] Audio playback works from the detail pane.
+- [ ] Settings > Transcription shows the model status, language
+      picker (PT/EN), mic device selector, and system audio toggle.
+- [ ] Changing the language in Settings affects subsequent recordings.
 
 ### Clipboard capture
 - [ ] Copy plain text → `Ctrl+Alt+Cmd+C` creates a `Clip`.
@@ -304,7 +329,7 @@ Each line has four columns separated by two spaces:
 ```
 
 - `<short-ulid>` — first 8 chars of the Capture's ULID.
-- `<kind>` — one of `Link`, `Clip`, `Shot`, `File`, `Note`.
+- `<kind>` — one of `Link`, `Clip`, `Shot`, `File`, `Note`, `Transcription`.
 - `<created_at>` — ISO-8601 UTC timestamp.
 - `<payload preview>` — single-line preview of the payload, truncated
   with `...` and `\n` escapes if it overruns 60 chars.
