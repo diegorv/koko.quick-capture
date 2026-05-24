@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 
 use super::devices::{find_device, SelectedDevice};
 use super::resample::audio_to_mono;
+use super::AudioChunk;
 
 pub struct AudioCapture {
     pub sample_rate: u32,
@@ -13,10 +14,11 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     pub fn start(
-        sample_sender: mpsc::UnboundedSender<Vec<f32>>,
+        sample_sender: mpsc::UnboundedSender<AudioChunk>,
         is_recording: Arc<AtomicBool>,
         selected: Option<SelectedDevice>,
         peak_level: Arc<AtomicU32>,
+        is_system: bool,
     ) -> Result<(cpal::Stream, Self)> {
         let device = if let Some(ref sel) = selected {
             match find_device(&sel.name, &sel.device_type) {
@@ -62,7 +64,12 @@ impl AudioCapture {
                 if !is_recording.load(Ordering::Relaxed) {
                     return;
                 }
-                let _ = sample_sender.send(mono);
+                let chunk = if is_system {
+                    AudioChunk::System(mono)
+                } else {
+                    AudioChunk::Mic(mono)
+                };
+                let _ = sample_sender.send(chunk);
             },
             |err| {
                 log::error!("Audio stream error: {}", err);

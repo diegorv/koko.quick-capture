@@ -9,11 +9,12 @@ use whisper_rs::WhisperContext;
 
 use crate::audio::denoise::Denoiser;
 use crate::audio::filter::HighPassFilter;
+use crate::audio::mixer::AudioMixerRingBuffer;
 use crate::audio::normalize::LoudnessNormalizer;
 use crate::audio::vad::ContinuousVadProcessor;
 use crate::audio::{
-    resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, PersistentResampler,
-    SelectedDevice,
+    resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, AudioChunk,
+    PersistentResampler, SelectedDevice,
 };
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
@@ -204,7 +205,7 @@ pub struct RecordingHandle {
     pub started_at: Instant,
     sample_rate: u32,
     language: String,
-    rx: mpsc::UnboundedReceiver<Vec<f32>>,
+    rx: mpsc::UnboundedReceiver<AudioChunk>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     _audio_thread: std::thread::JoinHandle<()>,
@@ -229,11 +230,11 @@ impl RecordingHandle {
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         let audio_thread = std::thread::spawn(move || {
-            match AudioCapture::start(tx, is_rec.clone(), mic_device, mic_pk) {
+            match AudioCapture::start(tx, is_rec.clone(), mic_device, mic_pk, false) {
                 Ok((_mic_stream, capture)) => {
                     let (_sys_stream, sys_started) = if let Some(sys_dev) = sys_device {
                         let sys_rec = is_rec.clone();
-                        match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_pk) {
+                        match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_pk, true) {
                             Ok((stream, _)) => {
                                 eprintln!("[recording] System audio stream started");
                                 (Some(stream), true)
@@ -321,7 +322,11 @@ impl RecordingHandle {
         // chunker was never started)
         let mut remaining_raw: Vec<f32> = Vec::new();
         while let Ok(chunk) = self.rx.try_recv() {
-            remaining_raw.extend(chunk);
+            match chunk {
+                AudioChunk::Mic(samples) | AudioChunk::System(samples) => {
+                    remaining_raw.extend(samples);
+                }
+            }
         }
 
         // Collect all accumulated 16k samples
@@ -393,6 +398,7 @@ impl RecordingHandle {
         let all_samples = self.all_samples_16k.clone();
         let sample_rate = self.sample_rate;
         let language = self.language.clone();
+        let sys_active = self.sys_active;
 
         let rx = std::mem::replace(&mut self.rx, {
             let (_tx, rx) = mpsc::unbounded_channel();
@@ -400,7 +406,10 @@ impl RecordingHandle {
         });
 
         let thread = std::thread::spawn(move || {
-            chunker_loop(rx, is_rec, whisper_ctx, transcript, all_samples, sample_rate, &language);
+            chunker_loop(
+                rx, is_rec, whisper_ctx, transcript, all_samples,
+                sample_rate, &language, sys_active,
+            );
         });
 
         self._chunker_thread = Some(thread);
@@ -509,14 +518,40 @@ fn transcribe_segment(
     }
 }
 
+fn drain_chunks_to_mixer(
+    rx: &mut mpsc::UnboundedReceiver<AudioChunk>,
+    mixer: &mut AudioMixerRingBuffer,
+) {
+    while let Ok(chunk) = rx.try_recv() {
+        match chunk {
+            AudioChunk::Mic(samples) => mixer.push_mic(&samples),
+            AudioChunk::System(samples) => mixer.push_system(&samples),
+        }
+    }
+}
+
+fn process_vad_segments(
+    segments: Vec<crate::audio::vad::SpeechSegment>,
+    whisper_ctx: &WhisperContext,
+    transcript: &Mutex<ChunkedTranscript>,
+    language: &str,
+) {
+    for seg in segments {
+        if seg.samples.len() >= 800 {
+            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false);
+        }
+    }
+}
+
 fn chunker_loop(
-    mut rx: mpsc::UnboundedReceiver<Vec<f32>>,
+    mut rx: mpsc::UnboundedReceiver<AudioChunk>,
     is_recording: Arc<AtomicBool>,
     whisper_ctx: Arc<WhisperContext>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
     language: &str,
+    sys_active: bool,
 ) {
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = Denoiser::new();
@@ -536,6 +571,8 @@ fn chunker_loop(
         }
     };
 
+    let mut mixer = AudioMixerRingBuffer::new(sample_rate, sys_active);
+
     let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
         Ok(v) => {
             eprintln!("[recording] VAD-driven chunking active ({}ms redemption)", VAD_REDEMPTION_TIME_MS);
@@ -551,14 +588,11 @@ fn chunker_loop(
     let mut fallback_buffer: Vec<f32> = Vec::new();
 
     loop {
-        let mut raw_batch: Vec<f32> = Vec::new();
-        while let Ok(chunk) = rx.try_recv() {
-            raw_batch.extend(chunk);
-        }
+        drain_chunks_to_mixer(&mut rx, &mut mixer);
 
-        if !raw_batch.is_empty() {
+        while let Some(mut mixed) = mixer.extract_mixed() {
             if let Some(samples_16k) = run_dsp(
-                &mut raw_batch,
+                &mut mixed,
                 &mut hp_filter,
                 &mut denoiser,
                 &mut normalizer,
@@ -566,26 +600,12 @@ fn chunker_loop(
                 &mut resampler_to_16k,
                 sample_rate,
             ) {
-                {
-                    let mut guard = all_samples_16k.lock().expect("samples mutex");
-                    guard.extend(&samples_16k);
-                }
+                all_samples_16k.lock().expect("samples mutex").extend(&samples_16k);
 
                 if let Some(ref mut vad_proc) = vad {
                     match vad_proc.process_audio(&samples_16k) {
                         Ok(segments) => {
-                            for seg in segments {
-                                if seg.samples.len() < 800 {
-                                    continue;
-                                }
-                                transcribe_segment(
-                                    &seg.samples,
-                                    &whisper_ctx,
-                                    &transcript,
-                                    language,
-                                    false,
-                                );
-                            }
+                            process_vad_segments(segments, &whisper_ctx, &transcript, language);
                         }
                         Err(e) => eprintln!("[recording] VAD error: {e}"),
                     }
@@ -595,11 +615,7 @@ fn chunker_loop(
                         let chunk_data: Vec<f32> =
                             fallback_buffer.drain(..fallback_chunk_16k).collect();
                         transcribe_segment(
-                            &chunk_data,
-                            &whisper_ctx,
-                            &transcript,
-                            language,
-                            true,
+                            &chunk_data, &whisper_ctx, &transcript, language, true,
                         );
                     }
                 }
@@ -608,11 +624,10 @@ fn chunker_loop(
 
         if !is_recording.load(Ordering::Relaxed) {
             // Final drain
-            let mut remaining: Vec<f32> = Vec::new();
-            while let Ok(chunk) = rx.try_recv() {
-                remaining.extend(chunk);
-            }
+            drain_chunks_to_mixer(&mut rx, &mut mixer);
+            let remaining = mixer.drain_remaining();
             if !remaining.is_empty() {
+                let mut remaining = remaining;
                 if let Some(samples_16k) = run_dsp(
                     &mut remaining,
                     &mut hp_filter,
@@ -626,17 +641,7 @@ fn chunker_loop(
 
                     if let Some(ref mut vad_proc) = vad {
                         if let Ok(segments) = vad_proc.process_audio(&samples_16k) {
-                            for seg in segments {
-                                if seg.samples.len() >= 800 {
-                                    transcribe_segment(
-                                        &seg.samples,
-                                        &whisper_ctx,
-                                        &transcript,
-                                        language,
-                                        false,
-                                    );
-                                }
-                            }
+                            process_vad_segments(segments, &whisper_ctx, &transcript, language);
                         }
                     } else {
                         fallback_buffer.extend(&samples_16k);
@@ -648,17 +653,7 @@ fn chunker_loop(
             if let Some(ref mut vad_proc) = vad {
                 match vad_proc.flush() {
                     Ok(segments) => {
-                        for seg in segments {
-                            if seg.samples.len() >= 800 {
-                                transcribe_segment(
-                                    &seg.samples,
-                                    &whisper_ctx,
-                                    &transcript,
-                                    language,
-                                    false,
-                                );
-                            }
-                        }
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language);
                     }
                     Err(e) => eprintln!("[recording] VAD flush error: {e}"),
                 }
