@@ -16,6 +16,7 @@
     Image as ImageIcon,
     File as FileIcon,
     StickyNote,
+    Mic,
     type Icon as IconType,
   } from "@lucide/svelte";
 
@@ -25,6 +26,7 @@
     Shot: ImageIcon,
     File: FileIcon,
     Note: StickyNote,
+    Transcription: Mic,
   };
 
   interface Props {
@@ -126,6 +128,7 @@
     switch (capture.kind) {
       case "Note":
       case "Clip":
+      case "Transcription":
         raw = typeof p.text === "string" ? p.text : "";
         break;
       case "Link":

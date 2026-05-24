@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Quick Capture needs microphone access to record and transcribe voice notes.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Quick Capture needs screen recording permission to capture system audio for transcription.</string>
+</dict>
+</plist>

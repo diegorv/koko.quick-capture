@@ -1,19 +1,16 @@
 <script lang="ts">
-  // Thin wrapper around the Composer component that wires it to the
-  // Tauri side: `save` invokes the Rust `save_note` command, `onclose`
-  // hides the window.
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
   import Composer from "$lib/composer/Composer.svelte";
   import { OPEN_COMPOSER } from "$lib/events";
 
-  // Bumped on every `open_composer` event from Rust so the Composer
-  // component re-focuses its textarea and clears stale text. The
-  // window is created once at startup and only hidden / shown after
-  // that, so the Svelte component never remounts.
   let focusKey = $state(0);
   let unlisten: UnlistenFn | undefined;
+  let recordingActive = $state(false);
+  let recordingElapsed = $state(0);
+  let partialTranscript = $state("");
+  let recordingTimer: ReturnType<typeof setInterval> | undefined;
 
   async function save(text: string) {
     try {
@@ -25,10 +22,58 @@
   }
 
   async function close() {
-    // dismiss_composer hides the Composer AND yields macOS key status
-    // back to the previously frontmost app (or focuses the Inbox if it
-    // is on screen). A plain window.hide() leaves the user without
-    // keyboard focus until they Cmd+Tab out.
+    if (recordingActive) {
+      await stopRecording();
+      return;
+    }
+    try {
+      await invoke("dismiss_composer");
+    } catch (err) {
+      console.error("dismiss_composer failed", err);
+    }
+  }
+
+  async function startRecording() {
+    try {
+      const status = await invoke<{ downloaded: boolean }>("get_model_status");
+      if (!status.downloaded) {
+        console.log("Downloading transcription model...");
+        await invoke("download_model");
+      }
+      await invoke("start_recording");
+      recordingActive = true;
+      recordingElapsed = 0;
+      partialTranscript = "";
+      recordingTimer = setInterval(async () => {
+        try {
+          const s = await invoke<{
+            elapsed_secs: number;
+            partial_transcript: string;
+          }>("get_recording_status");
+          recordingElapsed = s.elapsed_secs;
+          partialTranscript = s.partial_transcript;
+        } catch {
+          recordingElapsed += 1;
+        }
+      }, 1000);
+    } catch (err) {
+      console.error("start_recording failed", err);
+    }
+  }
+
+  async function stopRecording() {
+    if (recordingTimer) {
+      clearInterval(recordingTimer);
+      recordingTimer = undefined;
+    }
+    try {
+      await invoke("stop_recording");
+    } catch (err) {
+      console.error("stop_recording failed", err);
+    }
+    recordingActive = false;
+    recordingElapsed = 0;
+    partialTranscript = "";
     try {
       await invoke("dismiss_composer");
     } catch (err) {
@@ -48,7 +93,17 @@
 
   onDestroy(() => {
     unlisten?.();
+    if (recordingTimer) clearInterval(recordingTimer);
   });
 </script>
 
-<Composer {save} onclose={close} {focusKey} />
+<Composer
+  {save}
+  onclose={close}
+  {focusKey}
+  onStartRecording={startRecording}
+  onStopRecording={stopRecording}
+  {recordingActive}
+  {recordingElapsed}
+  {partialTranscript}
+/>

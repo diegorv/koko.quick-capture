@@ -103,7 +103,7 @@ pub fn build_capture_uri(
     s.append_pair("vault", &cfg.vault);
 
     match capture.kind {
-        CaptureKind::Note | CaptureKind::Clip => {
+        CaptureKind::Note | CaptureKind::Clip | CaptureKind::Transcription => {
             let text = capture
                 .payload
                 .get("text")
@@ -184,6 +184,7 @@ fn capture_kind_param(kind: CaptureKind) -> &'static str {
         CaptureKind::Link => "link",
         CaptureKind::Shot => "shot",
         CaptureKind::File => "file",
+        CaptureKind::Transcription => "transcription",
     }
 }
 

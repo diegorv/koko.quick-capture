@@ -25,6 +25,11 @@ pub const SETTING_LAST_INBOX_OPEN_ID: &str = "last_inbox_open_id";
 /// user clears the path.
 pub const SETTING_WIKILINK_SOURCE_FOLDER: &str = "wikilink_source_folder";
 
+pub const SETTING_TRANSCRIPTION_LANGUAGE: &str = "transcription_language";
+pub const SETTING_MIC_DEVICE: &str = "mic_device";
+pub const SETTING_SYS_AUDIO_DEVICE: &str = "sys_audio_device";
+pub const SETTING_SYS_AUDIO_ENABLED: &str = "sys_audio_enabled";
+
 /// ULID min (26 zero characters). Used as the default `count_after`
 /// cursor when `SETTING_LAST_INBOX_OPEN_ID` has never been written, so
 /// the first-launch badge equals the total non-deleted capture count.
@@ -38,6 +43,7 @@ pub enum CaptureKind {
     Shot,
     File,
     Note,
+    Transcription,
 }
 
 impl CaptureKind {
@@ -48,6 +54,7 @@ impl CaptureKind {
             CaptureKind::Shot => "Shot",
             CaptureKind::File => "File",
             CaptureKind::Note => "Note",
+            CaptureKind::Transcription => "Transcription",
         }
     }
 
@@ -58,6 +65,7 @@ impl CaptureKind {
             "Shot" => Ok(CaptureKind::Shot),
             "File" => Ok(CaptureKind::File),
             "Note" => Ok(CaptureKind::Note),
+            "Transcription" => Ok(CaptureKind::Transcription),
             other => Err(StoreError::Decode(format!("unknown kind: {other}"))),
         }
     }
@@ -107,6 +115,11 @@ pub enum CaptureInput {
         mime: String,
         original_name: Option<String>,
     },
+    Transcription {
+        text: String,
+        audio_path: PathBuf,
+        duration_secs: f64,
+    },
 }
 
 impl CaptureInput {
@@ -117,6 +130,7 @@ impl CaptureInput {
             CaptureInput::Clip { .. } => CaptureKind::Clip,
             CaptureInput::Shot { .. } => CaptureKind::Shot,
             CaptureInput::File { .. } => CaptureKind::File,
+            CaptureInput::Transcription { .. } => CaptureKind::Transcription,
         }
     }
 }
@@ -616,6 +630,15 @@ impl Store {
                 "source_path": source_path.to_string_lossy(),
                 "mime": mime,
                 "original_name": original_name,
+            }),
+            CaptureInput::Transcription {
+                text,
+                audio_path,
+                duration_secs,
+            } => serde_json::json!({
+                "text": text,
+                "audio_path": audio_path.to_string_lossy(),
+                "duration_secs": duration_secs,
             }),
         })
     }
@@ -1563,11 +1586,9 @@ fn searchable_text_for_input(input: &CaptureInput) -> String {
         }
         CaptureInput::Shot { source, .. } => match source {
             ShotSource::Path { source_path, .. } => source_path.to_string_lossy().into_owned(),
-            // Image bytes have no on-disk source name yet; the
-            // blob_path the caller assigns is uninteresting to a
-            // human search.
             ShotSource::Bytes { .. } => String::new(),
         },
+        CaptureInput::Transcription { text, .. } => text.clone(),
     }
 }
 

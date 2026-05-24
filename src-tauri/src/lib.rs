@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod clipboard;
 pub mod commands;
 pub mod dock;
@@ -6,9 +7,11 @@ pub mod events;
 pub mod kind_detect;
 pub mod kokobrain;
 pub mod mentions;
+pub mod recording;
 pub mod shell;
 pub mod shortcuts;
 pub mod store;
+pub mod transcription;
 pub mod tray;
 pub mod wikilink;
 
@@ -458,6 +461,8 @@ pub fn run() {
             // focus back. Lives in Tauri-managed state rather than a
             // process-global static so the seam is inspectable.
             app.manage(commands::PrevFrontmostPid::new());
+            app.manage(commands::recording::RecordingState(std::sync::Mutex::new(None)));
+            app.manage(commands::recording::WhisperState(std::sync::Mutex::new(None)));
 
             // Inbox (main) window is declared in tauri.conf.json with
             // label "inbox" and url "/inbox". It is the app shell;
@@ -778,7 +783,21 @@ pub fn run() {
             commands::pick_wikilink_source_folder,
             commands::reveal_wikilink_source_folder,
             commands::list_capture_mentions,
-            commands::update_channel::check_for_update_on_channel
+            commands::update_channel::check_for_update_on_channel,
+            commands::recording::list_audio_devices,
+            commands::recording::get_model_status,
+            commands::recording::download_model,
+            commands::recording::start_recording,
+            commands::recording::stop_recording,
+            commands::recording::get_recording_status,
+            commands::recording::set_mic_device,
+            commands::recording::get_mic_device,
+            commands::recording::set_transcription_language,
+            commands::recording::get_transcription_language,
+            commands::recording::set_sys_audio_device,
+            commands::recording::get_sys_audio_device,
+            commands::recording::set_sys_audio_enabled,
+            commands::recording::get_sys_audio_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -95,6 +95,7 @@ fn kind_label(k: CaptureKind) -> &'static str {
         CaptureKind::Shot => "Shot",
         CaptureKind::File => "File",
         CaptureKind::Note => "Note",
+        CaptureKind::Transcription => "Transcription",
     }
 }
 
