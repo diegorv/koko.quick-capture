@@ -38,6 +38,7 @@ pub enum CaptureKind {
     Shot,
     File,
     Note,
+    Transcription,
 }
 
 impl CaptureKind {
@@ -48,6 +49,7 @@ impl CaptureKind {
             CaptureKind::Shot => "Shot",
             CaptureKind::File => "File",
             CaptureKind::Note => "Note",
+            CaptureKind::Transcription => "Transcription",
         }
     }
 
@@ -58,6 +60,7 @@ impl CaptureKind {
             "Shot" => Ok(CaptureKind::Shot),
             "File" => Ok(CaptureKind::File),
             "Note" => Ok(CaptureKind::Note),
+            "Transcription" => Ok(CaptureKind::Transcription),
             other => Err(StoreError::Decode(format!("unknown kind: {other}"))),
         }
     }
@@ -107,6 +110,11 @@ pub enum CaptureInput {
         mime: String,
         original_name: Option<String>,
     },
+    Transcription {
+        text: String,
+        audio_path: PathBuf,
+        duration_secs: f64,
+    },
 }
 
 impl CaptureInput {
@@ -117,6 +125,7 @@ impl CaptureInput {
             CaptureInput::Clip { .. } => CaptureKind::Clip,
             CaptureInput::Shot { .. } => CaptureKind::Shot,
             CaptureInput::File { .. } => CaptureKind::File,
+            CaptureInput::Transcription { .. } => CaptureKind::Transcription,
         }
     }
 }
@@ -616,6 +625,15 @@ impl Store {
                 "source_path": source_path.to_string_lossy(),
                 "mime": mime,
                 "original_name": original_name,
+            }),
+            CaptureInput::Transcription {
+                text,
+                audio_path,
+                duration_secs,
+            } => serde_json::json!({
+                "text": text,
+                "audio_path": audio_path.to_string_lossy(),
+                "duration_secs": duration_secs,
             }),
         })
     }
@@ -1563,11 +1581,9 @@ fn searchable_text_for_input(input: &CaptureInput) -> String {
         }
         CaptureInput::Shot { source, .. } => match source {
             ShotSource::Path { source_path, .. } => source_path.to_string_lossy().into_owned(),
-            // Image bytes have no on-disk source name yet; the
-            // blob_path the caller assigns is uninteresting to a
-            // human search.
             ShotSource::Bytes { .. } => String::new(),
         },
+        CaptureInput::Transcription { text, .. } => text.clone(),
     }
 }
 
