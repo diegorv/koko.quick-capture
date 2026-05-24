@@ -30,6 +30,40 @@ const VAD_MODEL_URL: &str =
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
 const FALLBACK_CHUNK_SECS: u64 = 20;
 
+struct ChunkerStats {
+    segments_transcribed: u32,
+    segments_skipped_short: u32,
+    segments_skipped_silence: u32,
+    last_report: std::time::Instant,
+}
+
+impl ChunkerStats {
+    fn new() -> Self {
+        Self {
+            segments_transcribed: 0,
+            segments_skipped_short: 0,
+            segments_skipped_silence: 0,
+            last_report: std::time::Instant::now(),
+        }
+    }
+
+    fn maybe_report(&mut self) {
+        if self.last_report.elapsed().as_secs() >= 60 {
+            let total = self.segments_transcribed + self.segments_skipped_short + self.segments_skipped_silence;
+            if total > 0 {
+                eprintln!(
+                    "[recording] stats: {} transcribed, {} skipped (short), {} skipped (silence) in last 60s",
+                    self.segments_transcribed, self.segments_skipped_short, self.segments_skipped_silence
+                );
+            }
+            self.segments_transcribed = 0;
+            self.segments_skipped_short = 0;
+            self.segments_skipped_silence = 0;
+            self.last_report = std::time::Instant::now();
+        }
+    }
+}
+
 pub fn models_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("com.koko.quick-capture").join("models")
@@ -475,6 +509,7 @@ fn transcribe_segment(
     transcript: &Mutex<ChunkedTranscript>,
     language: &str,
     use_whisper_vad: bool,
+    stats: &mut ChunkerStats,
 ) {
     if samples_16k.is_empty() {
         return;
@@ -482,7 +517,7 @@ fn transcribe_segment(
 
     let rms = (samples_16k.iter().map(|s| s * s).sum::<f32>() / samples_16k.len() as f32).sqrt();
     if rms < 0.01 {
-        eprintln!("[recording] segment skipped (silence)");
+        stats.segments_skipped_silence += 1;
         return;
     }
 
@@ -500,12 +535,7 @@ fn transcribe_segment(
         vad_path.as_deref(),
     ) {
         Ok(text) => {
-            if !text.is_empty() {
-                eprintln!(
-                    "[recording] segment transcribed: {}...",
-                    &text[..text.len().min(60)]
-                );
-            }
+            stats.segments_transcribed += 1;
             transcript.lock().expect("transcript mutex").push(text);
         }
         Err(e) => {
@@ -535,10 +565,13 @@ fn process_vad_segments(
     whisper_ctx: &WhisperContext,
     transcript: &Mutex<ChunkedTranscript>,
     language: &str,
+    stats: &mut ChunkerStats,
 ) {
     for seg in segments {
         if seg.samples.len() >= 800 {
-            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false);
+            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false, stats);
+        } else {
+            stats.segments_skipped_short += 1;
         }
     }
 }
@@ -586,6 +619,7 @@ fn chunker_loop(
 
     let fallback_chunk_16k = (16000u64 * FALLBACK_CHUNK_SECS) as usize;
     let mut fallback_buffer: Vec<f32> = Vec::new();
+    let mut stats = ChunkerStats::new();
 
     loop {
         drain_chunks_to_mixer(&mut rx, &mut mixer);
@@ -605,7 +639,7 @@ fn chunker_loop(
                 if let Some(ref mut vad_proc) = vad {
                     match vad_proc.process_audio(&samples_16k) {
                         Ok(segments) => {
-                            process_vad_segments(segments, &whisper_ctx, &transcript, language);
+                            process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
                         }
                         Err(e) => eprintln!("[recording] VAD error: {e}"),
                     }
@@ -615,7 +649,7 @@ fn chunker_loop(
                         let chunk_data: Vec<f32> =
                             fallback_buffer.drain(..fallback_chunk_16k).collect();
                         transcribe_segment(
-                            &chunk_data, &whisper_ctx, &transcript, language, true,
+                            &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats,
                         );
                     }
                 }
@@ -641,7 +675,7 @@ fn chunker_loop(
 
                     if let Some(ref mut vad_proc) = vad {
                         if let Ok(segments) = vad_proc.process_audio(&samples_16k) {
-                            process_vad_segments(segments, &whisper_ctx, &transcript, language);
+                            process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
                         }
                     } else {
                         fallback_buffer.extend(&samples_16k);
@@ -653,18 +687,19 @@ fn chunker_loop(
             if let Some(ref mut vad_proc) = vad {
                 match vad_proc.flush() {
                     Ok(segments) => {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language);
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
                     }
                     Err(e) => eprintln!("[recording] VAD flush error: {e}"),
                 }
             } else if !fallback_buffer.is_empty() {
                 let remainder = std::mem::take(&mut fallback_buffer);
-                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true);
+                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true, &mut stats);
             }
 
             break;
         }
 
+        stats.maybe_report();
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
