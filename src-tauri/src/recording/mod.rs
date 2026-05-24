@@ -241,6 +241,7 @@ pub struct RecordingHandle {
     sys_sample_rate: Option<u32>,
     mic_bluetooth: bool,
     language: String,
+    denoise_enabled: bool,
     rx: mpsc::UnboundedReceiver<AudioChunk>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
@@ -320,6 +321,7 @@ impl RecordingHandle {
             sys_sample_rate,
             mic_bluetooth,
             language,
+            denoise_enabled: true,
             rx,
             transcript,
             all_samples_16k,
@@ -386,8 +388,10 @@ impl RecordingHandle {
             hp.process(&mut remaining_raw);
             let denoised = resample_to_48khz(&remaining_raw, self.sample_rate)
                 .map(|mut s48| {
-                    let mut dn = Denoiser::new();
-                    dn.process(&mut s48);
+                    if self.denoise_enabled {
+                        let mut dn = Denoiser::new();
+                        dn.process(&mut s48);
+                    }
                     let mut norm = LoudnessNormalizer::new(48000);
                     norm.process(&mut s48);
                     resample_to_16khz(&s48, 48000)
@@ -438,7 +442,8 @@ impl RecordingHandle {
     /// CHUNK_INTERVAL_SECS, resamples to 16kHz, and runs whisper
     /// inference on each chunk. Call after start() when whisper
     /// context is available.
-    pub fn start_chunker(&mut self, whisper_ctx: Arc<WhisperContext>) {
+    pub fn start_chunker(&mut self, whisper_ctx: Arc<WhisperContext>, denoise_enabled: bool) {
+        self.denoise_enabled = denoise_enabled;
         let is_rec = self.is_recording.clone();
         let transcript = self.transcript.clone();
         let all_samples = self.all_samples_16k.clone();
@@ -457,6 +462,7 @@ impl RecordingHandle {
             chunker_loop(
                 rx, is_rec, whisper_ctx, transcript, all_samples,
                 sample_rate, sys_sample_rate, &language, sys_active, mic_bluetooth,
+                denoise_enabled,
             );
         });
 
@@ -467,7 +473,7 @@ impl RecordingHandle {
 fn run_dsp(
     raw: &mut [f32],
     hp_filter: &mut HighPassFilter,
-    denoiser: &mut Denoiser,
+    denoiser: &mut Option<Denoiser>,
     normalizer: &mut LoudnessNormalizer,
     resampler_48k: &mut Option<PersistentResampler>,
     resampler_16k: &mut Option<PersistentResampler>,
@@ -493,7 +499,9 @@ fn run_dsp(
         }
     };
 
-    denoiser.process(&mut s48);
+    if let Some(ref mut d) = denoiser {
+        d.process(&mut s48);
+    }
     normalizer.process(&mut s48);
 
     let s16 = if let Some(ref mut r) = resampler_16k {
@@ -566,7 +574,7 @@ fn process_and_route_chunks(
     rx: &mut mpsc::UnboundedReceiver<AudioChunk>,
     mixer: &mut AudioMixerRingBuffer,
     hp_filter: &mut HighPassFilter,
-    denoiser: &mut Denoiser,
+    denoiser: &mut Option<Denoiser>,
     normalizer: &mut LoudnessNormalizer,
     resampler_48k: &mut Option<PersistentResampler>,
     resampler_16k: &mut Option<PersistentResampler>,
@@ -616,9 +624,10 @@ fn chunker_loop(
     language: &str,
     sys_active: bool,
     mic_bluetooth: bool,
+    denoise_enabled: bool,
 ) {
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
-    let mut denoiser = Denoiser::new();
+    let mut denoiser = if denoise_enabled { Some(Denoiser::new()) } else { None };
     let mut normalizer = LoudnessNormalizer::new(48000);
     let mut resampler_to_48k = match PersistentResampler::new(sample_rate, 48000) {
         Ok(r) => Some(r),

@@ -7,8 +7,8 @@ use crate::audio::{DeviceType, SelectedDevice};
 use crate::events::{CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT};
 use crate::recording::{self, RecordingHandle};
 use crate::store::{
-    Store, SETTING_MIC_DEVICE, SETTING_SYS_AUDIO_DEVICE, SETTING_SYS_AUDIO_ENABLED,
-    SETTING_TRANSCRIPTION_LANGUAGE,
+    Store, SETTING_DENOISE_ENABLED, SETTING_MIC_DEVICE, SETTING_SYS_AUDIO_DEVICE,
+    SETTING_SYS_AUDIO_ENABLED, SETTING_TRANSCRIPTION_LANGUAGE,
 };
 
 pub struct RecordingState(pub Mutex<Option<RecordingHandle>>);
@@ -139,6 +139,13 @@ pub async fn start_recording(
         .flatten()
         .unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string());
 
+    let denoise_enabled = store
+        .settings_get(SETTING_DENOISE_ENABLED)
+        .ok()
+        .flatten()
+        .map(|v| v != "false")
+        .unwrap_or(true);
+
     // Atomic check-and-set: hold lock from guard check through handle assignment
     let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
     if guard.is_some() {
@@ -147,7 +154,7 @@ pub async fn start_recording(
 
     let mut handle = RecordingHandle::start(mic_device, sys_device, language)
         .map_err(|e| e.to_string())?;
-    handle.start_chunker(ctx);
+    handle.start_chunker(ctx, denoise_enabled);
 
     *guard = Some(handle);
     Ok(())
@@ -226,6 +233,24 @@ pub fn get_sys_audio_enabled(store: State<'_, Store>) -> Result<bool, String> {
     store
         .settings_get(SETTING_SYS_AUDIO_ENABLED)
         .map(|v| v.map(|s| s == "true").unwrap_or(false))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_denoise_enabled(
+    enabled: bool,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    store
+        .settings_set(SETTING_DENOISE_ENABLED, if enabled { "true" } else { "false" })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_denoise_enabled(store: State<'_, Store>) -> Result<bool, String> {
+    store
+        .settings_get(SETTING_DENOISE_ENABLED)
+        .map(|v| v.map(|s| s != "false").unwrap_or(true))
         .map_err(|e| e.to_string())
 }
 

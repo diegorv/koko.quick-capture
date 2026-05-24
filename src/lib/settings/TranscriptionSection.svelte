@@ -26,6 +26,7 @@
   let selectedMic = $state<string | null>(null);
   let selectedSysDevice = $state<string | null>(null);
   let sysAudioEnabled = $state(false);
+  let denoiseEnabled = $state(true);
   let selectedLanguage = $state("pt");
   let unlistenProgress: UnlistenFn | undefined;
 
@@ -68,6 +69,12 @@
       sysAudioEnabled = await invoke<boolean>("get_sys_audio_enabled");
     } catch {
       sysAudioEnabled = false;
+    }
+
+    try {
+      denoiseEnabled = await invoke<boolean>("get_denoise_enabled");
+    } catch {
+      denoiseEnabled = true;
     }
 
     try {
@@ -139,6 +146,16 @@
       await invoke("set_sys_audio_enabled", { enabled: checked });
     } catch (err) {
       console.error("set_sys_audio_enabled failed", err);
+    }
+  }
+
+  async function onDenoiseChange(e: Event) {
+    const checked = (e.target as HTMLInputElement).checked;
+    denoiseEnabled = checked;
+    try {
+      await invoke("set_denoise_enabled", { enabled: checked });
+    } catch (err) {
+      console.error("set_denoise_enabled failed", err);
     }
   }
 
@@ -227,6 +244,19 @@
         </select>
       {/if}
     {/if}
+  </div>
+
+  <div class="subsection">
+    <h3>Audio processing</h3>
+    <label class="toggle-row">
+      <input
+        type="checkbox"
+        checked={denoiseEnabled}
+        onchange={onDenoiseChange}
+      />
+      <span>Noise suppression (RNNoise)</span>
+    </label>
+    <p class="hint">Reduces background noise before transcription. Disable if you experience audio artifacts.</p>
   </div>
 </section>
 
@@ -372,6 +402,17 @@
 
   .toggle-row input[type="checkbox"] {
     accent-color: rgba(79, 70, 229, 0.85);
+  }
+
+  .hint {
+    font-size: 0.72rem;
+    color: rgba(0, 0, 0, 0.45);
+    margin: 0.15rem 0 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .hint {
+      color: rgba(255, 255, 255, 0.4);
+    }
   }
 
 </style>

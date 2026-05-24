@@ -818,6 +818,8 @@ pub fn run() {
             commands::recording::get_sys_audio_device,
             commands::recording::set_sys_audio_enabled,
             commands::recording::get_sys_audio_enabled,
+            commands::recording::set_denoise_enabled,
+            commands::recording::get_denoise_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
