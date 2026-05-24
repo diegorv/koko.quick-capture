@@ -140,6 +140,11 @@ const HALLUCINATION_SUFFIXES: &[&str] = &[
 fn strip_hallucination_artifacts(text: &str) -> String {
     let mut result = text.to_string();
 
+    // Strip leading '!' (common whisper artifact, ref dsnote)
+    if let Some(rest) = result.strip_prefix('!') {
+        result = rest.trim_start().to_string();
+    }
+
     for prefix in HALLUCINATION_PREFIXES {
         if let Some(rest) = result.strip_prefix(prefix) {
             result = rest.trim().to_string();
@@ -154,7 +159,54 @@ fn strip_hallucination_artifacts(text: &str) -> String {
         }
     }
 
+    // Strip bracketed hallucination tokens: [MUSIC], [BLANK_AUDIO], (music), etc.
+    result = strip_bracketed_tokens(&result);
+
+    // Collapse 2+ consecutive identical words to one
+    result = collapse_repeated_words(&result);
+
+    result.trim().to_string()
+}
+
+fn strip_bracketed_tokens(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' || ch == '(' {
+            let close = if ch == '[' { ']' } else { ')' };
+            let mut inside = String::new();
+            let mut found_close = false;
+            for inner in chars.by_ref() {
+                if inner == close {
+                    found_close = true;
+                    break;
+                }
+                inside.push(inner);
+            }
+            if !found_close {
+                result.push(ch);
+                result.push_str(&inside);
+            }
+            // else: drop the bracketed content
+        } else {
+            result.push(ch);
+        }
+    }
     result
+}
+
+fn collapse_repeated_words(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < 2 {
+        return text.to_string();
+    }
+    let mut out = vec![words[0]];
+    for w in &words[1..] {
+        if !w.eq_ignore_ascii_case(out.last().unwrap()) {
+            out.push(w);
+        }
+    }
+    out.join(" ")
 }
 
 fn is_hallucination(text: &str) -> bool {
@@ -240,5 +292,28 @@ mod tests {
         let input = vec![0.1f32; MIN_AUDIO_SAMPLES_16KHZ + 100];
         let padded = pad_audio(&input);
         assert_eq!(padded.len(), input.len() + TRAILING_SILENCE_SAMPLES);
+    }
+
+    #[test]
+    fn strip_bracketed_tokens_removes_music_and_blank() {
+        assert_eq!(strip_bracketed_tokens("[MUSIC] hello [BLANK_AUDIO]"), " hello ");
+        assert_eq!(strip_bracketed_tokens("(music) test"), " test");
+    }
+
+    #[test]
+    fn strip_bracketed_tokens_preserves_unclosed() {
+        assert_eq!(strip_bracketed_tokens("hello [unclosed"), "hello [unclosed");
+    }
+
+    #[test]
+    fn collapse_repeated_words_deduplicates() {
+        assert_eq!(collapse_repeated_words("the the the dog"), "the dog");
+        assert_eq!(collapse_repeated_words("hello"), "hello");
+    }
+
+    #[test]
+    fn strip_leading_exclamation() {
+        let result = strip_hallucination_artifacts("! Some text here");
+        assert_eq!(result, "Some text here");
     }
 }
