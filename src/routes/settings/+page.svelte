@@ -55,6 +55,14 @@
       keys: ["⌃", "⌥", "⌘", "I"],
       label: "Open Inbox",
     },
+    {
+      keys: ["⌃", "⌥", "⌘", "A"],
+      label: "Open Archive",
+    },
+    {
+      keys: ["⌃", "⌥", "⌘", "R"],
+      label: "Open Recording",
+    },
     { keys: ["⌘", "F"], label: "Focus search inside Inbox" },
     { keys: ["⌘", "W"], label: "Close current window" },
     { keys: ["⌘", "Q"], label: "Quit" },
