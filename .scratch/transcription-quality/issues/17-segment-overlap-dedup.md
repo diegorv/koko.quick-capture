@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # 17 - Segment overlap dedup via longest-common-substring
 

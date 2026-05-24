@@ -210,9 +210,22 @@ impl ChunkedTranscript {
 
     fn push(&mut self, text: String) {
         self.chunks_processed += 1;
-        if !text.is_empty() {
-            self.texts.push(text);
+        if text.is_empty() {
+            return;
         }
+
+        if let Some(prev) = self.texts.last() {
+            if let Some((_prev_idx, cur_idx)) = longest_common_word_overlap(prev, &text) {
+                let cur_words: Vec<&str> = text.split_whitespace().collect();
+                let deduped = cur_words[cur_idx..].join(" ");
+                if !deduped.is_empty() {
+                    self.texts.push(deduped);
+                }
+                return;
+            }
+        }
+
+        self.texts.push(text);
     }
 
     fn record_failure(&mut self) {
@@ -230,6 +243,42 @@ impl ChunkedTranscript {
     pub fn stats(&self) -> (u32, u32) {
         (self.chunks_processed, self.chunks_failed)
     }
+}
+
+fn longest_common_word_overlap(prev: &str, curr: &str) -> Option<(usize, usize)> {
+    let prev_lower = prev.to_lowercase();
+    let curr_lower = curr.to_lowercase();
+
+    let strip_punct = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_punctuation() { ' ' } else { c })
+            .collect()
+    };
+
+    let prev_clean = strip_punct(&prev_lower);
+    let curr_clean = strip_punct(&curr_lower);
+
+    let prev_words: Vec<&str> = prev_clean.split_whitespace().collect();
+    let curr_words: Vec<&str> = curr_clean.split_whitespace().collect();
+
+    let plen = prev_words.len();
+    let clen = curr_words.len();
+
+    if plen < 2 || clen < 2 {
+        return None;
+    }
+
+    // Find longest suffix of prev that matches a prefix of curr
+    let max_overlap = plen.min(clen);
+    for overlap_len in (2..=max_overlap).rev() {
+        let prev_suffix = &prev_words[plen - overlap_len..];
+        let curr_prefix = &curr_words[..overlap_len];
+        if prev_suffix == curr_prefix {
+            return Some((plen - overlap_len, overlap_len));
+        }
+    }
+
+    None
 }
 
 pub struct RecordingHandle {
@@ -908,5 +957,55 @@ mod tests {
         let p = audio_dir();
         assert!(p.to_string_lossy().contains("com.koko.quick-capture"));
         assert!(p.to_string_lossy().ends_with("audio"));
+    }
+
+    #[test]
+    fn overlap_dedup_no_overlap() {
+        assert_eq!(longest_common_word_overlap("hello world", "foo bar"), None);
+    }
+
+    #[test]
+    fn overlap_dedup_basic() {
+        let result = longest_common_word_overlap("one two three four", "three four five six");
+        assert_eq!(result, Some((2, 2)));
+    }
+
+    #[test]
+    fn overlap_dedup_case_insensitive() {
+        let result = longest_common_word_overlap("Hello World", "hello world again");
+        assert_eq!(result, Some((0, 2)));
+    }
+
+    #[test]
+    fn overlap_dedup_punctuation_insensitive() {
+        let result = longest_common_word_overlap("end of sentence.", "sentence. Start of next");
+        assert_eq!(result, None); // only 1 word overlap - below minimum
+    }
+
+    #[test]
+    fn overlap_dedup_single_word_ignored() {
+        assert_eq!(longest_common_word_overlap("foo bar", "bar baz"), None);
+    }
+
+    #[test]
+    fn overlap_dedup_full_overlap() {
+        let result = longest_common_word_overlap("a b", "a b");
+        assert_eq!(result, Some((0, 2)));
+    }
+
+    #[test]
+    fn chunked_transcript_dedup() {
+        let mut t = ChunkedTranscript::new();
+        t.push("one two three four".to_string());
+        t.push("three four five six".to_string());
+        assert_eq!(t.merged(), "one two three four five six");
+    }
+
+    #[test]
+    fn chunked_transcript_no_overlap() {
+        let mut t = ChunkedTranscript::new();
+        t.push("hello world".to_string());
+        t.push("foo bar".to_string());
+        assert_eq!(t.merged(), "hello world foo bar");
     }
 }
