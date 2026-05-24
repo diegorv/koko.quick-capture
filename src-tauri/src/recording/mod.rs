@@ -10,6 +10,7 @@ use whisper_rs::WhisperContext;
 use crate::audio::denoise::Denoiser;
 use crate::audio::filter::HighPassFilter;
 use crate::audio::normalize::LoudnessNormalizer;
+use crate::audio::vad::ContinuousVadProcessor;
 use crate::audio::{
     resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, PersistentResampler,
     SelectedDevice,
@@ -25,9 +26,8 @@ const VAD_MODEL_FILENAME: &str = "ggml-silero-v6.2.0.bin";
 const VAD_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-v6.2.0.bin";
 
-const CHUNK_INTERVAL_SECS: u64 = 20;
-const SILENCE_SCAN_WINDOW_MS: usize = 20;
-const SILENCE_SCAN_TAIL_SECS: f32 = 1.5;
+const VAD_REDEMPTION_TIME_MS: u32 = 400;
+const FALLBACK_CHUNK_SECS: u64 = 20;
 
 pub fn models_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -115,7 +115,7 @@ pub async fn download_model(
 
     let tmp_path = dir.join(format!("{MODEL_FILENAME}.tmp"));
 
-    let resp = reqwest::get(MODEL_URL).await?;
+    let resp = reqwest::get(MODEL_URL).await?; // privacy-ok: downloads Whisper model from HuggingFace
     let total = resp.content_length().unwrap_or(0);
 
     use futures::StreamExt;
@@ -140,7 +140,7 @@ pub async fn download_model(
     let vad_path = dir.join(VAD_MODEL_FILENAME);
     if !vad_path.exists() {
         let vad_tmp = dir.join(format!("{VAD_MODEL_FILENAME}.tmp"));
-        let vad_resp = reqwest::get(VAD_MODEL_URL).await?;
+        let vad_resp = reqwest::get(VAD_MODEL_URL).await?; // privacy-ok: downloads Silero VAD model from HuggingFace
         let mut vad_file = std::fs::File::create(&vad_tmp)?;
         let mut vad_stream = vad_resp.bytes_stream();
         while let Some(chunk) = vad_stream.next().await {
@@ -407,48 +407,106 @@ impl RecordingHandle {
     }
 }
 
-/// Find the best split point near the end of a buffer by scanning for the
-/// quietest 20ms window in the last 1.5s. Returns the sample index to split at,
-/// or `nominal` if no quiet window is found. Technique from buzz.
-fn find_silence_split(buffer: &[f32], sample_rate: u32, nominal: usize) -> usize {
-    let window_samples = (sample_rate as usize * SILENCE_SCAN_WINDOW_MS) / 1000;
-    let tail_samples = (sample_rate as f32 * SILENCE_SCAN_TAIL_SECS) as usize;
-    let scan_start = nominal.saturating_sub(tail_samples);
+fn run_dsp(
+    raw: &mut [f32],
+    hp_filter: &mut HighPassFilter,
+    denoiser: &mut Denoiser,
+    normalizer: &mut LoudnessNormalizer,
+    resampler_48k: &mut Option<PersistentResampler>,
+    resampler_16k: &mut Option<PersistentResampler>,
+    sample_rate: u32,
+) -> Option<Vec<f32>> {
+    hp_filter.process(raw);
 
-    if scan_start + window_samples > buffer.len() || window_samples == 0 {
-        return nominal.min(buffer.len());
-    }
-
-    let scan_end = nominal.min(buffer.len());
-    let mean_rms = {
-        let total: f32 = buffer[scan_start..scan_end]
-            .chunks(window_samples)
-            .map(|w| (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt())
-            .sum();
-        let n = (scan_end - scan_start) / window_samples;
-        if n == 0 { return nominal.min(buffer.len()); }
-        total / n as f32
+    let mut s48 = if let Some(ref mut r) = resampler_48k {
+        match r.process(raw) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 48kHz failed: {e}");
+                return None;
+            }
+        }
+    } else {
+        match resample_to_48khz(raw, sample_rate) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 48kHz failed: {e}");
+                return None;
+            }
+        }
     };
 
-    let mut best_idx = nominal.min(buffer.len());
-    let mut best_rms = f32::MAX;
+    denoiser.process(&mut s48);
+    normalizer.process(&mut s48);
 
-    let mut i = scan_start;
-    while i + window_samples <= scan_end {
-        let rms = (buffer[i..i + window_samples]
-            .iter()
-            .map(|s| s * s)
-            .sum::<f32>()
-            / window_samples as f32)
-            .sqrt();
-        if rms < 0.5 * mean_rms && rms < best_rms {
-            best_rms = rms;
-            best_idx = i + window_samples;
+    let s16 = if let Some(ref mut r) = resampler_16k {
+        match r.process(&s48) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 16kHz failed: {e}");
+                return None;
+            }
         }
-        i += window_samples;
+    } else {
+        match resample_to_16khz(&s48, 48000) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 16kHz failed: {e}");
+                return None;
+            }
+        }
+    };
+
+    Some(s16)
+}
+
+fn transcribe_segment(
+    samples_16k: &[f32],
+    whisper_ctx: &WhisperContext,
+    transcript: &Mutex<ChunkedTranscript>,
+    language: &str,
+    use_whisper_vad: bool,
+) {
+    if samples_16k.is_empty() {
+        return;
     }
 
-    best_idx
+    let rms = (samples_16k.iter().map(|s| s * s).sum::<f32>() / samples_16k.len() as f32).sqrt();
+    if rms < 0.01 {
+        eprintln!("[recording] segment skipped (silence)");
+        return;
+    }
+
+    let prev = transcript.lock().expect("transcript mutex").last_chunk();
+    let vad_path = if use_whisper_vad {
+        resolve_vad_path()
+    } else {
+        None
+    };
+    match transcription::transcribe_with_language(
+        whisper_ctx,
+        samples_16k,
+        language,
+        prev.as_deref(),
+        vad_path.as_deref(),
+    ) {
+        Ok(text) => {
+            if !text.is_empty() {
+                eprintln!(
+                    "[recording] segment transcribed: {}...",
+                    &text[..text.len().min(60)]
+                );
+            }
+            transcript.lock().expect("transcript mutex").push(text);
+        }
+        Err(e) => {
+            eprintln!("[recording] segment transcription failed: {e}");
+            transcript
+                .lock()
+                .expect("transcript mutex")
+                .record_failure();
+        }
+    }
 }
 
 fn chunker_loop(
@@ -460,8 +518,6 @@ fn chunker_loop(
     sample_rate: u32,
     language: &str,
 ) {
-    let mut buffer: Vec<f32> = Vec::new();
-    let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = Denoiser::new();
     let mut normalizer = LoudnessNormalizer::new(48000);
@@ -480,132 +536,141 @@ fn chunker_loop(
         }
     };
 
+    let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
+        Ok(v) => {
+            eprintln!("[recording] VAD-driven chunking active ({}ms redemption)", VAD_REDEMPTION_TIME_MS);
+            Some(v)
+        }
+        Err(e) => {
+            eprintln!("[recording] VAD unavailable ({e}), using fixed-interval fallback");
+            None
+        }
+    };
+
+    let fallback_chunk_16k = (16000u64 * FALLBACK_CHUNK_SECS) as usize;
+    let mut fallback_buffer: Vec<f32> = Vec::new();
+
     loop {
+        let mut raw_batch: Vec<f32> = Vec::new();
         while let Ok(chunk) = rx.try_recv() {
-            buffer.extend(chunk);
+            raw_batch.extend(chunk);
         }
 
-        if buffer.len() >= chunk_samples {
-            let split = find_silence_split(&buffer, sample_rate, chunk_samples);
-            let mut chunk_data: Vec<f32> = buffer.drain(..split).collect();
-            hp_filter.process(&mut chunk_data);
-            process_chunk(
-                &chunk_data,
-                sample_rate,
-                &whisper_ctx,
-                &transcript,
-                &all_samples_16k,
-                language,
+        if !raw_batch.is_empty() {
+            if let Some(samples_16k) = run_dsp(
+                &mut raw_batch,
+                &mut hp_filter,
                 &mut denoiser,
                 &mut normalizer,
                 &mut resampler_to_48k,
                 &mut resampler_to_16k,
-            );
+                sample_rate,
+            ) {
+                {
+                    let mut guard = all_samples_16k.lock().expect("samples mutex");
+                    guard.extend(&samples_16k);
+                }
+
+                if let Some(ref mut vad_proc) = vad {
+                    match vad_proc.process_audio(&samples_16k) {
+                        Ok(segments) => {
+                            for seg in segments {
+                                if seg.samples.len() < 800 {
+                                    continue;
+                                }
+                                transcribe_segment(
+                                    &seg.samples,
+                                    &whisper_ctx,
+                                    &transcript,
+                                    language,
+                                    false,
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("[recording] VAD error: {e}"),
+                    }
+                } else {
+                    fallback_buffer.extend(&samples_16k);
+                    while fallback_buffer.len() >= fallback_chunk_16k {
+                        let chunk_data: Vec<f32> =
+                            fallback_buffer.drain(..fallback_chunk_16k).collect();
+                        transcribe_segment(
+                            &chunk_data,
+                            &whisper_ctx,
+                            &transcript,
+                            language,
+                            true,
+                        );
+                    }
+                }
+            }
         }
 
         if !is_recording.load(Ordering::Relaxed) {
-            if !buffer.is_empty() {
-                let mut remaining = std::mem::take(&mut buffer);
-                hp_filter.process(&mut remaining);
-                process_chunk(
-                    &remaining,
-                    sample_rate,
-                    &whisper_ctx,
-                    &transcript,
-                    &all_samples_16k,
-                    language,
+            // Final drain
+            let mut remaining: Vec<f32> = Vec::new();
+            while let Ok(chunk) = rx.try_recv() {
+                remaining.extend(chunk);
+            }
+            if !remaining.is_empty() {
+                if let Some(samples_16k) = run_dsp(
+                    &mut remaining,
+                    &mut hp_filter,
                     &mut denoiser,
                     &mut normalizer,
                     &mut resampler_to_48k,
                     &mut resampler_to_16k,
-                );
+                    sample_rate,
+                ) {
+                    all_samples_16k.lock().expect("samples mutex").extend(&samples_16k);
+
+                    if let Some(ref mut vad_proc) = vad {
+                        if let Ok(segments) = vad_proc.process_audio(&samples_16k) {
+                            for seg in segments {
+                                if seg.samples.len() >= 800 {
+                                    transcribe_segment(
+                                        &seg.samples,
+                                        &whisper_ctx,
+                                        &transcript,
+                                        language,
+                                        false,
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        fallback_buffer.extend(&samples_16k);
+                    }
+                }
             }
+
+            // Flush VAD or fallback remainder
+            if let Some(ref mut vad_proc) = vad {
+                match vad_proc.flush() {
+                    Ok(segments) => {
+                        for seg in segments {
+                            if seg.samples.len() >= 800 {
+                                transcribe_segment(
+                                    &seg.samples,
+                                    &whisper_ctx,
+                                    &transcript,
+                                    language,
+                                    false,
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("[recording] VAD flush error: {e}"),
+                }
+            } else if !fallback_buffer.is_empty() {
+                let remainder = std::mem::take(&mut fallback_buffer);
+                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true);
+            }
+
             break;
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-}
-
-fn process_chunk(
-    raw_samples: &[f32],
-    sample_rate: u32,
-    whisper_ctx: &WhisperContext,
-    transcript: &Mutex<ChunkedTranscript>,
-    all_samples_16k: &Mutex<Vec<f32>>,
-    language: &str,
-    denoiser: &mut Denoiser,
-    normalizer: &mut LoudnessNormalizer,
-    resampler_48k: &mut Option<PersistentResampler>,
-    resampler_16k: &mut Option<PersistentResampler>,
-) {
-    let mut samples_48k = if let Some(ref mut r) = resampler_48k {
-        match r.process(raw_samples) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[recording] persistent resample to 48kHz failed: {e}");
-                return;
-            }
-        }
-    } else {
-        match resample_to_48khz(raw_samples, sample_rate) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[recording] resample to 48kHz failed: {e}");
-                return;
-            }
-        }
-    };
-    denoiser.process(&mut samples_48k);
-    normalizer.process(&mut samples_48k);
-
-    let resampled = if let Some(ref mut r) = resampler_16k {
-        match r.process(&samples_48k) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[recording] persistent resample to 16kHz failed: {e}");
-                return;
-            }
-        }
-    } else {
-        match resample_to_16khz(&samples_48k, 48000) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[recording] resample to 16kHz failed: {e}");
-                return;
-            }
-        }
-    };
-
-    {
-        let mut guard = all_samples_16k.lock().expect("samples mutex");
-        guard.extend(&resampled);
-    }
-
-    if resampled.is_empty() {
-        return;
-    }
-
-    // RMS silence check
-    let rms = (resampled.iter().map(|s| s * s).sum::<f32>() / resampled.len() as f32).sqrt();
-    if rms < 0.01 {
-        eprintln!("[recording] chunk skipped (silence)");
-        return;
-    }
-
-    let prev = transcript.lock().expect("transcript mutex").last_chunk();
-    let vad_path = resolve_vad_path();
-    match transcription::transcribe_with_language(whisper_ctx, &resampled, language, prev.as_deref(), vad_path.as_deref()) {
-        Ok(text) => {
-            if !text.is_empty() {
-                eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);
-            }
-            transcript.lock().expect("transcript mutex").push(text);
-        }
-        Err(e) => {
-            eprintln!("[recording] chunk transcription failed: {e}");
-            transcript.lock().expect("transcript mutex").record_failure();
-        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
