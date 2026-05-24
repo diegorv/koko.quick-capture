@@ -10,7 +10,10 @@ use whisper_rs::WhisperContext;
 use crate::audio::denoise::Denoiser;
 use crate::audio::filter::HighPassFilter;
 use crate::audio::normalize::LoudnessNormalizer;
-use crate::audio::{resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, SelectedDevice};
+use crate::audio::{
+    resample_to_16khz, resample_to_48khz, save_wav, AudioCapture, PersistentResampler,
+    SelectedDevice,
+};
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
 
@@ -397,6 +400,20 @@ fn chunker_loop(
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = Denoiser::new();
     let mut normalizer = LoudnessNormalizer::new(48000);
+    let mut resampler_to_48k = match PersistentResampler::new(sample_rate, 48000) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            eprintln!("[recording] failed to create 48kHz resampler: {e}");
+            None
+        }
+    };
+    let mut resampler_to_16k = match PersistentResampler::new(48000, 16000) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            eprintln!("[recording] failed to create 16kHz resampler: {e}");
+            None
+        }
+    };
 
     loop {
         while let Ok(chunk) = rx.try_recv() {
@@ -416,6 +433,8 @@ fn chunker_loop(
                 language,
                 &mut denoiser,
                 &mut normalizer,
+                &mut resampler_to_48k,
+                &mut resampler_to_16k,
             );
         }
 
@@ -432,6 +451,8 @@ fn chunker_loop(
                     language,
                     &mut denoiser,
                     &mut normalizer,
+                    &mut resampler_to_48k,
+                    &mut resampler_to_16k,
                 );
             }
             break;
@@ -450,22 +471,44 @@ fn process_chunk(
     language: &str,
     denoiser: &mut Denoiser,
     normalizer: &mut LoudnessNormalizer,
+    resampler_48k: &mut Option<PersistentResampler>,
+    resampler_16k: &mut Option<PersistentResampler>,
 ) {
-    let mut samples_48k = match resample_to_48khz(raw_samples, sample_rate) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[recording] resample to 48kHz failed: {e}");
-            return;
+    let mut samples_48k = if let Some(ref mut r) = resampler_48k {
+        match r.process(raw_samples) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] persistent resample to 48kHz failed: {e}");
+                return;
+            }
+        }
+    } else {
+        match resample_to_48khz(raw_samples, sample_rate) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 48kHz failed: {e}");
+                return;
+            }
         }
     };
     denoiser.process(&mut samples_48k);
     normalizer.process(&mut samples_48k);
 
-    let resampled = match resample_to_16khz(&samples_48k, 48000) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[recording] resample to 16kHz failed: {e}");
-            return;
+    let resampled = if let Some(ref mut r) = resampler_16k {
+        match r.process(&samples_48k) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] persistent resample to 16kHz failed: {e}");
+                return;
+            }
+        }
+    } else {
+        match resample_to_16khz(&samples_48k, 48000) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[recording] resample to 16kHz failed: {e}");
+                return;
+            }
         }
     };
 

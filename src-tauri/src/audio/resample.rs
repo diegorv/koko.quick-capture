@@ -1,4 +1,79 @@
 use anyhow::Result;
+use rubato::{
+    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
+};
+
+const SINC_PARAMS: SincInterpolationParameters = SincInterpolationParameters {
+    sinc_len: 256,
+    f_cutoff: 0.95,
+    interpolation: SincInterpolationType::Linear,
+    oversampling_factor: 256,
+    window: WindowFunction::BlackmanHarris2,
+};
+
+const CHUNK_SIZE: usize = 4096;
+
+pub struct PersistentResampler {
+    resampler: Async<f32>,
+    from_rate: u32,
+    to_rate: u32,
+}
+
+impl PersistentResampler {
+    pub fn new(from_rate: u32, to_rate: u32) -> Result<Self> {
+        let resampler = Async::<f32>::new_sinc(
+            to_rate as f64 / from_rate as f64,
+            2.0,
+            &SINC_PARAMS,
+            CHUNK_SIZE,
+            1,
+            FixedAsync::Input,
+        )?;
+        Ok(Self {
+            resampler,
+            from_rate,
+            to_rate,
+        })
+    }
+
+    pub fn process(&mut self, samples: &[f32]) -> Result<Vec<f32>> {
+        if self.from_rate == self.to_rate {
+            return Ok(samples.to_vec());
+        }
+
+        use audioadapter_buffers::direct::SequentialSliceOfVecs;
+
+        let mut output = Vec::new();
+        for chunk in samples.chunks(CHUNK_SIZE) {
+            let padded;
+            let input = if chunk.len() < CHUNK_SIZE {
+                padded = {
+                    let mut v = chunk.to_vec();
+                    v.resize(CHUNK_SIZE, 0.0);
+                    v
+                };
+                &padded
+            } else {
+                chunk
+            };
+
+            let data = vec![input.to_vec()];
+            let waves_in = SequentialSliceOfVecs::new(&data[..], 1, CHUNK_SIZE)
+                .map_err(|e| anyhow::anyhow!("Buffer error: {}", e))?;
+            let waves_out = self.resampler.process(&waves_in, 0, None)?;
+            let out_data = waves_out.take_data();
+
+            if chunk.len() < CHUNK_SIZE {
+                let expected = (chunk.len() as f64 * self.to_rate as f64 / self.from_rate as f64) as usize;
+                output.extend_from_slice(&out_data[..expected.min(out_data.len())]);
+            } else {
+                output.extend_from_slice(&out_data);
+            }
+        }
+        Ok(output)
+    }
+}
 
 pub(super) fn audio_to_mono(data: &[f32], channels: u16) -> Vec<f32> {
     if channels == 1 {
@@ -22,23 +97,10 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
         return Ok(samples.to_vec());
     }
 
-    use rubato::{
-        Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
-    };
-
-    let params = SincInterpolationParameters {
-        sinc_len: 256,
-        f_cutoff: 0.95,
-        interpolation: SincInterpolationType::Linear,
-        oversampling_factor: 256,
-        window: WindowFunction::BlackmanHarris2,
-    };
-
     let mut resampler = Async::<f32>::new_sinc(
         to_rate as f64 / from_rate as f64,
         2.0,
-        &params,
+        &SINC_PARAMS,
         samples.len(),
         1,
         FixedAsync::Input,
