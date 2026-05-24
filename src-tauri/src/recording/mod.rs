@@ -159,17 +159,28 @@ pub async fn download_model(
 /// Accumulated transcript chunks from the background chunker thread.
 pub struct ChunkedTranscript {
     texts: Vec<String>,
+    chunks_processed: u32,
+    chunks_failed: u32,
 }
 
 impl ChunkedTranscript {
     fn new() -> Self {
-        Self { texts: Vec::new() }
+        Self {
+            texts: Vec::new(),
+            chunks_processed: 0,
+            chunks_failed: 0,
+        }
     }
 
     fn push(&mut self, text: String) {
+        self.chunks_processed += 1;
         if !text.is_empty() {
             self.texts.push(text);
         }
+    }
+
+    fn record_failure(&mut self) {
+        self.chunks_failed += 1;
     }
 
     fn merged(&self) -> String {
@@ -178,6 +189,10 @@ impl ChunkedTranscript {
 
     fn last_chunk(&self) -> Option<String> {
         self.texts.last().cloned()
+    }
+
+    pub fn stats(&self) -> (u32, u32) {
+        (self.chunks_processed, self.chunks_failed)
     }
 }
 
@@ -280,6 +295,10 @@ impl RecordingHandle {
 
     pub fn partial_transcript(&self) -> String {
         self.transcript.lock().expect("transcript mutex").merged()
+    }
+
+    pub fn chunk_stats(&self) -> (u32, u32) {
+        self.transcript.lock().expect("transcript mutex").stats()
     }
 
     pub fn stop_and_transcribe(
@@ -580,11 +599,12 @@ fn process_chunk(
         Ok(text) => {
             if !text.is_empty() {
                 eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);
-                transcript.lock().expect("transcript mutex").push(text);
             }
+            transcript.lock().expect("transcript mutex").push(text);
         }
         Err(e) => {
             eprintln!("[recording] chunk transcription failed: {e}");
+            transcript.lock().expect("transcript mutex").record_failure();
         }
     }
 }

@@ -29,6 +29,8 @@ pub struct RecordingStatus {
     pub sys_peak: f32,
     pub sys_active: bool,
     pub partial_transcript: String,
+    pub chunks_processed: u32,
+    pub chunks_failed: u32,
 }
 
 #[tauri::command]
@@ -233,14 +235,19 @@ pub fn get_recording_status(
 ) -> RecordingStatus {
     let guard = rec_state.0.lock().expect("recording mutex poisoned");
     match guard.as_ref() {
-        Some(handle) => RecordingStatus {
-            active: true,
-            elapsed_secs: handle.elapsed_secs(),
-            mic_peak: handle.take_mic_peak(),
-            sys_peak: handle.take_sys_peak(),
-            sys_active: handle.sys_active,
-            partial_transcript: handle.partial_transcript(),
-        },
+        Some(handle) => {
+            let (chunks_processed, chunks_failed) = handle.chunk_stats();
+            RecordingStatus {
+                active: true,
+                elapsed_secs: handle.elapsed_secs(),
+                mic_peak: handle.take_mic_peak(),
+                sys_peak: handle.take_sys_peak(),
+                sys_active: handle.sys_active,
+                partial_transcript: handle.partial_transcript(),
+                chunks_processed,
+                chunks_failed,
+            }
+        }
         None => RecordingStatus {
             active: false,
             elapsed_secs: 0.0,
@@ -248,6 +255,8 @@ pub fn get_recording_status(
             sys_peak: 0.0,
             sys_active: false,
             partial_transcript: String::new(),
+            chunks_processed: 0,
+            chunks_failed: 0,
         },
     }
 }
