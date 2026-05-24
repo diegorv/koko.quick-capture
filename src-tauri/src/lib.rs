@@ -784,6 +784,7 @@ pub fn run() {
             commands::reveal_wikilink_source_folder,
             commands::list_capture_mentions,
             commands::update_channel::check_for_update_on_channel,
+            commands::recording::list_audio_devices,
             commands::recording::get_model_status,
             commands::recording::download_model,
             commands::recording::start_recording,

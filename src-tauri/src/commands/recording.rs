@@ -26,6 +26,11 @@ pub struct RecordingStatus {
 }
 
 #[tauri::command]
+pub fn list_audio_devices() -> Result<Vec<crate::audio::AudioDevice>, String> {
+    crate::audio::list_input_devices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_model_status() -> ModelStatus {
     ModelStatus {
         downloaded: recording::is_model_downloaded(),

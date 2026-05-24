@@ -7,11 +7,13 @@
   import DestinationsSection from "$lib/destinations/DestinationsSection.svelte";
   import WikilinkFolderSection from "$lib/wikilink/WikilinkFolderSection.svelte";
   import UpdatesSection from "$lib/settings/UpdatesSection.svelte";
+  import TranscriptionSection from "$lib/settings/TranscriptionSection.svelte";
 
   type SectionId =
     | "shortcuts"
     | "destinations"
     | "wikilink"
+    | "transcription"
     | "storage"
     | "updates";
 
@@ -19,6 +21,7 @@
     { id: "shortcuts", label: "Shortcuts", group: "General" },
     { id: "destinations", label: "Destinations", group: "Capture" },
     { id: "wikilink", label: "Wikilink folder", group: "Capture" },
+    { id: "transcription", label: "Transcription", group: "Capture" },
     { id: "storage", label: "Storage", group: "Advanced" },
     { id: "updates", label: "Updates", group: "Advanced" },
   ];
@@ -122,6 +125,8 @@
       <DestinationsSection />
     {:else if activeSection === "wikilink"}
       <WikilinkFolderSection />
+    {:else if activeSection === "transcription"}
+      <TranscriptionSection />
     {:else if activeSection === "storage"}
       <section class="section">
         <h2>Storage</h2>
