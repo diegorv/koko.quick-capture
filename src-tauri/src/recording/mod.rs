@@ -7,6 +7,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use whisper_rs::WhisperContext;
 
+use crate::audio::filter::HighPassFilter;
 use crate::audio::{resample_to_16khz, save_wav, AudioCapture, SelectedDevice};
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
@@ -259,8 +260,9 @@ impl RecordingHandle {
             guard.clone()
         };
 
-        // Resample and transcribe any remaining raw samples
         if !remaining_raw.is_empty() {
+            let mut hp = HighPassFilter::new(80.0, self.sample_rate);
+            hp.process(&mut remaining_raw);
             if let Ok(resampled) = resample_to_16khz(&remaining_raw, self.sample_rate) {
                 if !resampled.is_empty() {
                     // RMS silence check
@@ -378,16 +380,17 @@ fn chunker_loop(
 ) {
     let mut buffer: Vec<f32> = Vec::new();
     let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
+    let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
 
     loop {
-        // Drain available samples (non-blocking)
         while let Ok(chunk) = rx.try_recv() {
             buffer.extend(chunk);
         }
 
         if buffer.len() >= chunk_samples {
             let split = find_silence_split(&buffer, sample_rate, chunk_samples);
-            let chunk_data: Vec<f32> = buffer.drain(..split).collect();
+            let mut chunk_data: Vec<f32> = buffer.drain(..split).collect();
+            hp_filter.process(&mut chunk_data);
             process_chunk(
                 &chunk_data,
                 sample_rate,
@@ -400,8 +403,10 @@ fn chunker_loop(
 
         if !is_recording.load(Ordering::Relaxed) {
             if !buffer.is_empty() {
+                let mut remaining = std::mem::take(&mut buffer);
+                hp_filter.process(&mut remaining);
                 process_chunk(
-                    &buffer,
+                    &remaining,
                     sample_rate,
                     &whisper_ctx,
                     &transcript,

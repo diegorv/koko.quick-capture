@@ -1,4 +1,5 @@
 mod devices;
+pub mod filter;
 mod resample;
 mod stream;
 
