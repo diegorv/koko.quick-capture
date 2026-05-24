@@ -238,6 +238,7 @@ pub struct RecordingHandle {
     pub sys_active: bool,
     pub started_at: Instant,
     sample_rate: u32,
+    sys_sample_rate: Option<u32>,
     language: String,
     rx: mpsc::UnboundedReceiver<AudioChunk>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
@@ -266,23 +267,23 @@ impl RecordingHandle {
         let audio_thread = std::thread::spawn(move || {
             match AudioCapture::start(tx, is_rec.clone(), mic_device, mic_pk, false) {
                 Ok((_mic_stream, capture)) => {
-                    let (_sys_stream, sys_started) = if let Some(sys_dev) = sys_device {
+                    let (_sys_stream, sys_started, sys_rate) = if let Some(sys_dev) = sys_device {
                         let sys_rec = is_rec.clone();
                         match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_pk, true) {
-                            Ok((stream, _)) => {
-                                eprintln!("[recording] System audio stream started");
-                                (Some(stream), true)
+                            Ok((stream, sys_capture)) => {
+                                eprintln!("[recording] System audio stream started ({}Hz)", sys_capture.sample_rate);
+                                (Some(stream), true, Some(sys_capture.sample_rate))
                             }
                             Err(e) => {
                                 eprintln!("[recording] System audio failed (continuing with mic only): {e}");
-                                (None, false)
+                                (None, false, None)
                             }
                         }
                     } else {
-                        (None, false)
+                        (None, false, None)
                     };
 
-                    let _ = result_tx.send(Ok((capture.sample_rate, sys_started)));
+                    let _ = result_tx.send(Ok((capture.sample_rate, sys_started, sys_rate)));
                     while is_rec.load(Ordering::Relaxed) {
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
@@ -293,7 +294,7 @@ impl RecordingHandle {
             }
         });
 
-        let (sample_rate, sys_active) = result_rx
+        let (sample_rate, sys_active, sys_sample_rate) = result_rx
             .recv()
             .map_err(|_| anyhow::anyhow!("Audio thread died before reporting sample rate"))??;
 
@@ -307,6 +308,7 @@ impl RecordingHandle {
             sys_active,
             started_at: Instant::now(),
             sample_rate,
+            sys_sample_rate,
             language,
             rx,
             transcript,
@@ -431,6 +433,7 @@ impl RecordingHandle {
         let transcript = self.transcript.clone();
         let all_samples = self.all_samples_16k.clone();
         let sample_rate = self.sample_rate;
+        let sys_sample_rate = self.sys_sample_rate;
         let language = self.language.clone();
         let sys_active = self.sys_active;
 
@@ -442,7 +445,7 @@ impl RecordingHandle {
         let thread = std::thread::spawn(move || {
             chunker_loop(
                 rx, is_rec, whisper_ctx, transcript, all_samples,
-                sample_rate, &language, sys_active,
+                sample_rate, sys_sample_rate, &language, sys_active,
             );
         });
 
@@ -583,6 +586,7 @@ fn chunker_loop(
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
+    sys_sample_rate: Option<u32>,
     language: &str,
     sys_active: bool,
 ) {
@@ -604,7 +608,7 @@ fn chunker_loop(
         }
     };
 
-    let mut mixer = AudioMixerRingBuffer::new(sample_rate, sys_active);
+    let mut mixer = AudioMixerRingBuffer::new(sample_rate, sys_sample_rate, sys_active);
 
     let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
         Ok(v) => {

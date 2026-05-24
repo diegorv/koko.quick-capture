@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 
+use super::PersistentResampler;
+
 pub struct AudioMixerRingBuffer {
     mic_buffer: VecDeque<f32>,
     sys_buffer: VecDeque<f32>,
     window_samples: usize,
-    max_buffer_samples: usize,
+    pub(crate) max_buffer_samples: usize,
     has_system: bool,
+    sys_resampler: Option<PersistentResampler>,
     pub(crate) overflow_mic: u32,
     pub(crate) overflow_sys: u32,
     pub(crate) zero_pad_count: u32,
@@ -13,15 +16,36 @@ pub struct AudioMixerRingBuffer {
 }
 
 impl AudioMixerRingBuffer {
-    pub fn new(sample_rate: u32, has_system: bool) -> Self {
-        let window_samples = (sample_rate as f32 * 0.6) as usize; // 600ms
+    pub fn new(mic_rate: u32, sys_rate: Option<u32>, has_system: bool) -> Self {
+        let window_samples = (mic_rate as f32 * 0.6) as usize; // 600ms
         let max_buffer_samples = window_samples * 8; // ~4.8s overflow protection
+
+        let sys_resampler = match sys_rate {
+            Some(sr) if sr != mic_rate && has_system => {
+                match PersistentResampler::new(sr, mic_rate) {
+                    Ok(r) => {
+                        eprintln!(
+                            "[mixer] system audio resampler: {}Hz -> {}Hz",
+                            sr, mic_rate
+                        );
+                        Some(r)
+                    }
+                    Err(e) => {
+                        eprintln!("[mixer] failed to create system resampler: {e}");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
         Self {
             mic_buffer: VecDeque::with_capacity(window_samples * 2),
             sys_buffer: VecDeque::with_capacity(window_samples * 2),
             window_samples,
             max_buffer_samples,
             has_system,
+            sys_resampler,
             overflow_mic: 0,
             overflow_sys: 0,
             zero_pad_count: 0,
@@ -35,7 +59,17 @@ impl AudioMixerRingBuffer {
     }
 
     pub fn push_system(&mut self, samples: &[f32]) {
-        self.sys_buffer.extend(samples);
+        if let Some(ref mut resampler) = self.sys_resampler {
+            match resampler.process(samples) {
+                Ok(resampled) => self.sys_buffer.extend(resampled),
+                Err(e) => {
+                    eprintln!("[mixer] system resample failed: {e}");
+                    self.sys_buffer.extend(samples);
+                }
+            }
+        } else {
+            self.sys_buffer.extend(samples);
+        }
         self.trim_overflow(&Source::System);
     }
 
@@ -171,7 +205,7 @@ mod tests {
 
     #[test]
     fn mic_only_passthrough() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, false);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, false);
         let samples = vec![0.5f32; 9600]; // 600ms at 16kHz
         mixer.push_mic(&samples);
         let out = mixer.extract_mixed().unwrap();
@@ -181,14 +215,14 @@ mod tests {
 
     #[test]
     fn mic_only_returns_none_when_insufficient() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, false);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, false);
         mixer.push_mic(&vec![0.1; 100]);
         assert!(mixer.extract_mixed().is_none());
     }
 
     #[test]
     fn equal_signals_sum() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         let window = (16000.0 * 0.6) as usize;
         mixer.push_mic(&vec![0.3; window]);
         mixer.push_system(&vec![0.2; window]);
@@ -199,7 +233,7 @@ mod tests {
 
     #[test]
     fn soft_clipping_prevents_overflow() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         let window = (16000.0 * 0.6) as usize;
         mixer.push_mic(&vec![0.8; window]);
         mixer.push_system(&vec![0.8; window]);
@@ -211,7 +245,7 @@ mod tests {
 
     #[test]
     fn zero_padding_when_system_behind() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         let window = (16000.0 * 0.6) as usize;
         mixer.push_mic(&vec![0.5; window]);
         // system has nothing -> zero-padded
@@ -223,7 +257,7 @@ mod tests {
 
     #[test]
     fn overflow_trims_oldest() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         // Push way more than max_buffer
         let huge = vec![0.1; mixer.max_buffer_samples + 5000];
         mixer.push_mic(&huge);
@@ -232,7 +266,7 @@ mod tests {
 
     #[test]
     fn drain_remaining_mixes_uneven_buffers() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         mixer.push_mic(&vec![0.4; 1000]);
         mixer.push_system(&vec![0.3; 500]);
         let out = mixer.drain_remaining();
@@ -253,7 +287,7 @@ mod tests {
 
     #[test]
     fn health_counters_track_overflow_and_pads() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         let huge = vec![0.1; mixer.max_buffer_samples + 5000];
         mixer.push_mic(&huge);
         assert!(mixer.overflow_mic > 0);
@@ -268,7 +302,7 @@ mod tests {
 
     #[test]
     fn multiple_windows_extracted_sequentially() {
-        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let mut mixer = AudioMixerRingBuffer::new(16000, None, true);
         let window = (16000.0 * 0.6) as usize;
         mixer.push_mic(&vec![0.1; window * 3]);
         mixer.push_system(&vec![0.2; window * 3]);
@@ -280,5 +314,30 @@ mod tests {
         assert_eq!(out2.len(), window);
         assert_eq!(out3.len(), window);
         assert!(mixer.extract_mixed().is_none());
+    }
+
+    #[test]
+    fn cross_rate_resampling_48k_system_to_16k_mic() {
+        // Mic at 16kHz, system at 48kHz - system should be resampled
+        let mut mixer = AudioMixerRingBuffer::new(16000, Some(48000), true);
+        assert!(mixer.sys_resampler.is_some());
+
+        let mic_window = (16000.0 * 0.6) as usize; // 9600 samples
+        let sys_1sec = 48000usize; // 1s at 48kHz -> should become ~16000 samples at 16kHz
+
+        mixer.push_mic(&vec![0.3; mic_window]);
+        mixer.push_system(&vec![0.2; sys_1sec]);
+
+        let out = mixer.extract_mixed().unwrap();
+        assert_eq!(out.len(), mic_window);
+        // Mixed signal should be non-zero (both sources contribute)
+        let mean: f32 = out.iter().sum::<f32>() / out.len() as f32;
+        assert!(mean > 0.4, "expected mixed signal > 0.4, got {}", mean);
+    }
+
+    #[test]
+    fn same_rate_skips_resampler() {
+        let mixer = AudioMixerRingBuffer::new(48000, Some(48000), true);
+        assert!(mixer.sys_resampler.is_none());
     }
 }
