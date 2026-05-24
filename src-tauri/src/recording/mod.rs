@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -15,6 +15,8 @@ const MODEL_FILENAME: &str = "ggml-large-v3-turbo-q5_0.bin";
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
+const CHUNK_INTERVAL_SECS: u64 = 30;
+
 pub fn models_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("com.koko.quick-capture").join("models")
@@ -26,6 +28,11 @@ pub fn model_path() -> PathBuf {
 
 pub fn is_model_downloaded() -> bool {
     model_path().exists()
+}
+
+pub fn audio_dir() -> PathBuf {
+    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("com.koko.quick-capture").join("audio")
 }
 
 pub async fn download_model(
@@ -64,24 +71,43 @@ pub async fn download_model(
     Ok(path)
 }
 
-/// Handle to a recording running on a dedicated thread.
-/// `cpal::Stream` is `!Send`, so we keep the stream on the thread
-/// that created it and communicate via atomics + channels.
+/// Accumulated transcript chunks from the background chunker thread.
+pub struct ChunkedTranscript {
+    texts: Vec<String>,
+}
+
+impl ChunkedTranscript {
+    fn new() -> Self {
+        Self { texts: Vec::new() }
+    }
+
+    fn push(&mut self, text: String) {
+        if !text.is_empty() {
+            self.texts.push(text);
+        }
+    }
+
+    fn merged(&self) -> String {
+        self.texts.join(" ").trim().to_string()
+    }
+}
+
 pub struct RecordingHandle {
     pub is_recording: Arc<AtomicBool>,
     pub peak_level: Arc<AtomicU32>,
     pub started_at: Instant,
     sample_rate: u32,
     rx: mpsc::UnboundedReceiver<Vec<f32>>,
-    _thread: std::thread::JoinHandle<()>,
+    transcript: Arc<Mutex<ChunkedTranscript>>,
+    all_samples_16k: Arc<Mutex<Vec<f32>>>,
+    _audio_thread: std::thread::JoinHandle<()>,
+    _chunker_thread: Option<std::thread::JoinHandle<()>>,
 }
 
-// SAFETY: The `!Send` cpal::Stream lives on the spawned thread, not
-// in this struct. Everything here is Send-safe.
 unsafe impl Send for RecordingHandle {}
 
 impl RecordingHandle {
-    pub fn start() -> Result<Self> {
+    pub fn start(_whisper_ctx: Option<Arc<WhisperContext>>) -> Result<Self> {
         let is_recording = Arc::new(AtomicBool::new(true));
         let peak_level = Arc::new(AtomicU32::new(0));
         let (tx, rx) = mpsc::unbounded_channel();
@@ -91,12 +117,10 @@ impl RecordingHandle {
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
-        let thread = std::thread::spawn(move || {
+        let audio_thread = std::thread::spawn(move || {
             match AudioCapture::start(tx, is_rec.clone(), None, peak) {
                 Ok((_stream, capture)) => {
                     let _ = result_tx.send(Ok(capture.sample_rate));
-                    // Keep thread alive while recording — stream is dropped
-                    // when this thread exits.
                     while is_rec.load(Ordering::Relaxed) {
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
@@ -111,13 +135,19 @@ impl RecordingHandle {
             .recv()
             .map_err(|_| anyhow::anyhow!("Audio thread died before reporting sample rate"))??;
 
+        let transcript = Arc::new(Mutex::new(ChunkedTranscript::new()));
+        let all_samples_16k = Arc::new(Mutex::new(Vec::<f32>::new()));
+
         Ok(RecordingHandle {
             is_recording,
             peak_level,
             started_at: Instant::now(),
             sample_rate,
             rx,
-            _thread: thread,
+            transcript,
+            all_samples_16k,
+            _audio_thread: audio_thread,
+            _chunker_thread: None,
         })
     }
 
@@ -130,6 +160,10 @@ impl RecordingHandle {
         f32::from_bits(bits)
     }
 
+    pub fn partial_transcript(&self) -> String {
+        self.transcript.lock().expect("transcript mutex").merged()
+    }
+
     pub fn stop_and_transcribe(
         mut self,
         whisper_ctx: &WhisperContext,
@@ -138,31 +172,159 @@ impl RecordingHandle {
         let duration_secs = self.elapsed_secs();
 
         self.is_recording.store(false, Ordering::Relaxed);
-
-        // Give the audio thread a moment to flush remaining samples
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        let mut all_samples: Vec<f32> = Vec::new();
+        // Drain remaining samples from channel
+        let mut remaining_raw: Vec<f32> = Vec::new();
         while let Ok(chunk) = self.rx.try_recv() {
-            all_samples.extend(chunk);
+            remaining_raw.extend(chunk);
         }
 
-        if all_samples.is_empty() {
+        // Collect all accumulated 16k samples
+        let mut all_16k = {
+            let guard = self.all_samples_16k.lock().expect("samples mutex");
+            guard.clone()
+        };
+
+        // Resample and transcribe any remaining raw samples
+        if !remaining_raw.is_empty() {
+            if let Ok(resampled) = resample_to_16khz(&remaining_raw, self.sample_rate) {
+                // RMS silence check
+                let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
+                    / resampled.len() as f32)
+                    .sqrt();
+                if rms >= 0.01 {
+                    let text = transcription::transcribe(whisper_ctx, &resampled)
+                        .unwrap_or_default();
+                    self.transcript.lock().expect("transcript mutex").push(text);
+                }
+                all_16k.extend(resampled);
+            }
+        }
+
+        if all_16k.is_empty() {
             return Err(anyhow::anyhow!("No audio captured"));
         }
 
-        let resampled = resample_to_16khz(&all_samples, self.sample_rate)?;
-
+        // Save full recording WAV
         std::fs::create_dir_all(audio_dir)?;
-        let audio_path = audio_dir.join(format!(
-            "{}.wav",
-            ulid::Ulid::new()
-        ));
-        save_wav(&audio_path, &resampled)?;
+        let audio_path = audio_dir.join(format!("{}.wav", ulid::Ulid::new()));
+        save_wav(&audio_path, &all_16k)?;
 
-        let text = transcription::transcribe(whisper_ctx, &resampled)?;
+        let text = self.transcript.lock().expect("transcript mutex").merged();
 
         Ok((text, audio_path, duration_secs))
+    }
+
+    /// Start background chunker that drains audio samples every
+    /// CHUNK_INTERVAL_SECS, resamples to 16kHz, and runs whisper
+    /// inference on each chunk. Call after start() when whisper
+    /// context is available.
+    pub fn start_chunker(&mut self, whisper_ctx: Arc<WhisperContext>) {
+        let is_rec = self.is_recording.clone();
+        let transcript = self.transcript.clone();
+        let all_samples = self.all_samples_16k.clone();
+        let sample_rate = self.sample_rate;
+
+        // Move the receiver to the chunker thread so it owns the
+        // drain loop.
+        let rx = std::mem::replace(&mut self.rx, {
+            let (_tx, rx) = mpsc::unbounded_channel();
+            rx
+        });
+
+        let thread = std::thread::spawn(move || {
+            chunker_loop(rx, is_rec, whisper_ctx, transcript, all_samples, sample_rate);
+        });
+
+        self._chunker_thread = Some(thread);
+    }
+}
+
+fn chunker_loop(
+    mut rx: mpsc::UnboundedReceiver<Vec<f32>>,
+    is_recording: Arc<AtomicBool>,
+    whisper_ctx: Arc<WhisperContext>,
+    transcript: Arc<Mutex<ChunkedTranscript>>,
+    all_samples_16k: Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+) {
+    let mut buffer: Vec<f32> = Vec::new();
+    let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
+
+    loop {
+        // Drain available samples (non-blocking)
+        while let Ok(chunk) = rx.try_recv() {
+            buffer.extend(chunk);
+        }
+
+        // Process chunk if we have enough samples
+        if buffer.len() >= chunk_samples {
+            let chunk_data: Vec<f32> = buffer.drain(..chunk_samples).collect();
+            process_chunk(
+                &chunk_data,
+                sample_rate,
+                &whisper_ctx,
+                &transcript,
+                &all_samples_16k,
+            );
+        }
+
+        if !is_recording.load(Ordering::Relaxed) {
+            // Process remaining buffer
+            if !buffer.is_empty() {
+                process_chunk(
+                    &buffer,
+                    sample_rate,
+                    &whisper_ctx,
+                    &transcript,
+                    &all_samples_16k,
+                );
+            }
+            break;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+fn process_chunk(
+    raw_samples: &[f32],
+    sample_rate: u32,
+    whisper_ctx: &WhisperContext,
+    transcript: &Mutex<ChunkedTranscript>,
+    all_samples_16k: &Mutex<Vec<f32>>,
+) {
+    let resampled = match resample_to_16khz(raw_samples, sample_rate) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[recording] resample failed: {e}");
+            return;
+        }
+    };
+
+    {
+        let mut guard = all_samples_16k.lock().expect("samples mutex");
+        guard.extend(&resampled);
+    }
+
+    // RMS silence check
+    let rms = (resampled.iter().map(|s| s * s).sum::<f32>() / resampled.len() as f32).sqrt();
+    if rms < 0.01 {
+        eprintln!("[recording] chunk skipped (silence)");
+        return;
+    }
+
+    match transcription::transcribe(whisper_ctx, &resampled) {
+        Ok(text) => {
+            if !text.is_empty() {
+                eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);
+                transcript.lock().expect("transcript mutex").push(text);
+            }
+        }
+        Err(e) => {
+            eprintln!("[recording] chunk transcription failed: {e}");
+        }
     }
 }
 

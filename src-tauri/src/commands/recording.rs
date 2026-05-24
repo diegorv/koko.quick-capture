@@ -22,6 +22,7 @@ pub struct RecordingStatus {
     pub active: bool,
     pub elapsed_secs: f64,
     pub peak_level: f32,
+    pub partial_transcript: String,
 }
 
 #[tauri::command]
@@ -64,12 +65,17 @@ fn ensure_whisper_loaded(whisper: &WhisperState) -> Result<std::sync::Arc<Whispe
 #[tauri::command]
 pub fn start_recording(
     rec_state: State<'_, RecordingState>,
+    whisper: State<'_, WhisperState>,
 ) -> Result<(), String> {
     let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
     if guard.is_some() {
         return Err("Already recording".to_string());
     }
-    let handle = RecordingHandle::start().map_err(|e| e.to_string())?;
+
+    let ctx = ensure_whisper_loaded(&whisper)?;
+    let mut handle = RecordingHandle::start(Some(ctx.clone()))
+        .map_err(|e| e.to_string())?;
+    handle.start_chunker(ctx);
     *guard = Some(handle);
     Ok(())
 }
@@ -84,11 +90,13 @@ pub fn get_recording_status(
             active: true,
             elapsed_secs: handle.elapsed_secs(),
             peak_level: handle.take_peak(),
+            partial_transcript: handle.partial_transcript(),
         },
         None => RecordingStatus {
             active: false,
             elapsed_secs: 0.0,
             peak_level: 0.0,
+            partial_transcript: String::new(),
         },
     }
 }
@@ -107,11 +115,7 @@ pub async fn stop_recording(
         guard.take().ok_or("Not recording")?
     };
 
-    let audio_dir = recording::model_path()
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("audio"))
-        .unwrap_or_else(|| std::path::PathBuf::from("audio"));
+    let audio_dir = recording::audio_dir();
 
     let (text, audio_path, duration_secs) = tauri::async_runtime::spawn_blocking(move || {
         handle.stop_and_transcribe(&ctx, &audio_dir)
