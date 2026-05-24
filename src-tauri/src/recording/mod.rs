@@ -551,14 +551,29 @@ fn transcribe_segment(
     }
 }
 
-fn drain_chunks_to_mixer(
+fn process_and_route_chunks(
     rx: &mut mpsc::UnboundedReceiver<AudioChunk>,
     mixer: &mut AudioMixerRingBuffer,
+    hp_filter: &mut HighPassFilter,
+    denoiser: &mut Denoiser,
+    normalizer: &mut LoudnessNormalizer,
+    resampler_48k: &mut Option<PersistentResampler>,
+    resampler_16k: &mut Option<PersistentResampler>,
+    sample_rate: u32,
 ) {
     while let Ok(chunk) = rx.try_recv() {
         match chunk {
-            AudioChunk::Mic(samples) => mixer.push_mic(&samples),
-            AudioChunk::System(samples) => mixer.push_system(&samples),
+            AudioChunk::Mic(mut samples) => {
+                if let Some(s16) = run_dsp(
+                    &mut samples, hp_filter, denoiser, normalizer,
+                    resampler_48k, resampler_16k, sample_rate,
+                ) {
+                    mixer.push_mic(&s16);
+                }
+            }
+            AudioChunk::System(samples) => {
+                mixer.push_system(&samples);
+            }
         }
     }
 }
@@ -608,7 +623,8 @@ fn chunker_loop(
         }
     };
 
-    let mut mixer = AudioMixerRingBuffer::new(sample_rate, sys_sample_rate, sys_active);
+    // Mixer at 16kHz: mic arrives pre-processed (DSP → 16k), system resampled internally
+    let mut mixer = AudioMixerRingBuffer::new(16000, sys_sample_rate, sys_active);
 
     let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
         Ok(v) => {
@@ -626,64 +642,51 @@ fn chunker_loop(
     let mut stats = ChunkerStats::new();
 
     loop {
-        drain_chunks_to_mixer(&mut rx, &mut mixer);
+        process_and_route_chunks(
+            &mut rx, &mut mixer,
+            &mut hp_filter, &mut denoiser, &mut normalizer,
+            &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
+        );
 
-        while let Some(mut mixed) = mixer.extract_mixed() {
-            if let Some(samples_16k) = run_dsp(
-                &mut mixed,
-                &mut hp_filter,
-                &mut denoiser,
-                &mut normalizer,
-                &mut resampler_to_48k,
-                &mut resampler_to_16k,
-                sample_rate,
-            ) {
-                all_samples_16k.lock().expect("samples mutex").extend(&samples_16k);
+        while let Some(mixed_16k) = mixer.extract_mixed() {
+            all_samples_16k.lock().expect("samples mutex").extend(&mixed_16k);
 
-                if let Some(ref mut vad_proc) = vad {
-                    match vad_proc.process_audio(&samples_16k) {
-                        Ok(segments) => {
-                            process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
-                        }
-                        Err(e) => eprintln!("[recording] VAD error: {e}"),
+            if let Some(ref mut vad_proc) = vad {
+                match vad_proc.process_audio(&mixed_16k) {
+                    Ok(segments) => {
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
                     }
-                } else {
-                    fallback_buffer.extend(&samples_16k);
-                    while fallback_buffer.len() >= fallback_chunk_16k {
-                        let chunk_data: Vec<f32> =
-                            fallback_buffer.drain(..fallback_chunk_16k).collect();
-                        transcribe_segment(
-                            &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats,
-                        );
-                    }
+                    Err(e) => eprintln!("[recording] VAD error: {e}"),
+                }
+            } else {
+                fallback_buffer.extend(&mixed_16k);
+                while fallback_buffer.len() >= fallback_chunk_16k {
+                    let chunk_data: Vec<f32> =
+                        fallback_buffer.drain(..fallback_chunk_16k).collect();
+                    transcribe_segment(
+                        &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats,
+                    );
                 }
             }
         }
 
         if !is_recording.load(Ordering::Relaxed) {
             // Final drain
-            drain_chunks_to_mixer(&mut rx, &mut mixer);
-            let remaining = mixer.drain_remaining();
-            if !remaining.is_empty() {
-                let mut remaining = remaining;
-                if let Some(samples_16k) = run_dsp(
-                    &mut remaining,
-                    &mut hp_filter,
-                    &mut denoiser,
-                    &mut normalizer,
-                    &mut resampler_to_48k,
-                    &mut resampler_to_16k,
-                    sample_rate,
-                ) {
-                    all_samples_16k.lock().expect("samples mutex").extend(&samples_16k);
+            process_and_route_chunks(
+                &mut rx, &mut mixer,
+                &mut hp_filter, &mut denoiser, &mut normalizer,
+                &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
+            );
+            let remaining_16k = mixer.drain_remaining();
+            if !remaining_16k.is_empty() {
+                all_samples_16k.lock().expect("samples mutex").extend(&remaining_16k);
 
-                    if let Some(ref mut vad_proc) = vad {
-                        if let Ok(segments) = vad_proc.process_audio(&samples_16k) {
-                            process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
-                        }
-                    } else {
-                        fallback_buffer.extend(&samples_16k);
+                if let Some(ref mut vad_proc) = vad {
+                    if let Ok(segments) = vad_proc.process_audio(&remaining_16k) {
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
                     }
+                } else {
+                    fallback_buffer.extend(&remaining_16k);
                 }
             }
 
