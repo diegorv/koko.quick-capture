@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Mic-only DSP with system audio passthrough
 

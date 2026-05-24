@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Buffer health monitoring in mixer and chunker
 

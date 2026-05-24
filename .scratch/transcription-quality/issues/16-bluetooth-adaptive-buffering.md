@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Bluetooth-adaptive buffering in mixer
 

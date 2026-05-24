@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Log batching on recording hot paths
 
