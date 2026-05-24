@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Surface chunk transcription errors to frontend
 

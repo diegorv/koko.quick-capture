@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Add English hallucination patterns to filter
 
