@@ -39,6 +39,7 @@
     onStopRecording?: () => Promise<void>;
     recordingActive?: boolean;
     recordingElapsed?: number;
+    partialTranscript?: string;
   }
 
   let {
@@ -50,6 +51,7 @@
     onStopRecording,
     recordingActive = false,
     recordingElapsed = 0,
+    partialTranscript = "",
   }: Props = $props();
 
   let host: HTMLDivElement | undefined = $state();
@@ -176,8 +178,13 @@
 <div class="composer" class:saved data-tauri-drag-region>
   {#if recordingActive}
     <div class="recording-overlay">
-      <div class="recording-pulse"></div>
-      <span class="recording-timer">{formatElapsed(recordingElapsed)}</span>
+      <div class="recording-header">
+        <div class="recording-pulse"></div>
+        <span class="recording-timer">{formatElapsed(recordingElapsed)}</span>
+      </div>
+      {#if partialTranscript}
+        <p class="partial-transcript">{partialTranscript}</p>
+      {/if}
       <button type="button" class="stop-btn" onclick={() => onStopRecording?.()}>
         Stop
       </button>
@@ -340,7 +347,25 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
+    gap: 0.75rem;
+    overflow: hidden;
+  }
+
+  .recording-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .partial-transcript {
+    font-size: 0.8rem;
+    opacity: 0.6;
+    text-align: center;
+    max-height: 3.5rem;
+    overflow-y: auto;
+    padding: 0 0.5rem;
+    margin: 0;
+    line-height: 1.3;
   }
 
   .recording-pulse {

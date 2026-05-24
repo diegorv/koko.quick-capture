@@ -9,6 +9,7 @@
   let unlisten: UnlistenFn | undefined;
   let recordingActive = $state(false);
   let recordingElapsed = $state(0);
+  let partialTranscript = $state("");
   let recordingTimer: ReturnType<typeof setInterval> | undefined;
 
   async function save(text: string) {
@@ -42,10 +43,15 @@
       await invoke("start_recording");
       recordingActive = true;
       recordingElapsed = 0;
+      partialTranscript = "";
       recordingTimer = setInterval(async () => {
         try {
-          const s = await invoke<{ elapsed_secs: number }>("get_recording_status");
+          const s = await invoke<{
+            elapsed_secs: number;
+            partial_transcript: string;
+          }>("get_recording_status");
           recordingElapsed = s.elapsed_secs;
+          partialTranscript = s.partial_transcript;
         } catch {
           recordingElapsed += 1;
         }
@@ -67,6 +73,7 @@
     }
     recordingActive = false;
     recordingElapsed = 0;
+    partialTranscript = "";
     try {
       await invoke("dismiss_composer");
     } catch (err) {
@@ -98,4 +105,5 @@
   onStopRecording={stopRecording}
   {recordingActive}
   {recordingElapsed}
+  {partialTranscript}
 />
