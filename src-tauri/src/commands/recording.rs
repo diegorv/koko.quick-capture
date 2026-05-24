@@ -69,6 +69,7 @@ fn ensure_whisper_loaded(whisper: &WhisperState) -> Result<std::sync::Arc<Whispe
     }
     let ctx = crate::transcription::create_whisper_context(&path)
         .map_err(|e| e.to_string())?;
+    crate::transcription::warmup(&ctx);
     *guard = Some(ctx.clone());
     Ok(ctx)
 }
@@ -88,7 +89,9 @@ pub async fn start_recording(
             return Err("Model not downloaded. Call download_model first.".to_string());
         }
         let ctx = tauri::async_runtime::spawn_blocking(move || {
-            crate::transcription::create_whisper_context(&path)
+            let ctx = crate::transcription::create_whisper_context(&path)?;
+            crate::transcription::warmup(&ctx);
+            Ok::<_, anyhow::Error>(ctx)
         })
         .await
         .map_err(|e| e.to_string())?

@@ -31,6 +31,12 @@ fn pad_audio(samples: &[f32]) -> Vec<f32> {
     padded
 }
 
+pub fn warmup(ctx: &WhisperContext) {
+    let silence = vec![0.0f32; 16_000];
+    let _ = transcribe(ctx, &silence);
+    eprintln!("[transcription] warmup complete");
+}
+
 pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
     transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None, None)
 }
