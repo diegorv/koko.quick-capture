@@ -18,6 +18,7 @@
     Image as ImageIcon,
     File as FileIcon,
     StickyNote,
+    Mic,
     MousePointerClick,
     type Icon as IconType,
   } from "@lucide/svelte";
@@ -28,6 +29,7 @@
     Shot: ImageIcon,
     File: FileIcon,
     Note: StickyNote,
+    Transcription: Mic,
   };
 
   interface Props {
@@ -275,7 +277,7 @@
           Open in Browser
         </button>
       </footer>
-    {:else if capture.kind === "Clip" || capture.kind === "Note"}
+    {:else if capture.kind === "Clip" || capture.kind === "Note" || capture.kind === "Transcription"}
       {@const text = str(capture.payload.text) ?? ""}
       {@const segments = parseMentionSegments(text)}
       <section class="body">

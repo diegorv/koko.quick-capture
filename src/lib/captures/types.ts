@@ -4,7 +4,7 @@
 // on the Rust side must be added here or `pnpm check` will start
 // flagging the inbox UI.
 
-export type CaptureKind = "Link" | "Clip" | "Shot" | "File" | "Note";
+export type CaptureKind = "Link" | "Clip" | "Shot" | "File" | "Note" | "Transcription";
 
 export interface Capture {
   id: string;
