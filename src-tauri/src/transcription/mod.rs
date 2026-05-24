@@ -7,6 +7,14 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 const MIN_AUDIO_SAMPLES_16KHZ: usize = 16_000;
 pub const DEFAULT_LANGUAGE: &str = "pt";
 
+pub fn language_seed_prompt(language: &str) -> Option<&'static str> {
+    match language {
+        "pt" => Some("Ol\u{e1}, como voc\u{ea} est\u{e1}? Prazer em conhec\u{ea}-lo."),
+        "en" => Some("Hello, how are you doing? Nice to meet you."),
+        _ => None,
+    }
+}
+
 pub fn create_whisper_context(model_path: &Path) -> Result<Arc<WhisperContext>> {
     let mut ctx_params = WhisperContextParameters::default();
     ctx_params.use_gpu(true);
@@ -87,10 +95,11 @@ pub fn transcribe_full(
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
 
-    if let Some(prompt) = initial_prompt {
-        if !prompt.is_empty() {
-            params.set_initial_prompt(prompt);
-        }
+    let effective_prompt = initial_prompt
+        .filter(|p| !p.is_empty())
+        .or_else(|| language_seed_prompt(language));
+    if let Some(prompt) = effective_prompt {
+        params.set_initial_prompt(prompt);
     }
 
     if let Some(vad_path) = vad_model_path {
@@ -375,6 +384,21 @@ mod tests {
     fn strip_leading_exclamation() {
         let result = strip_hallucination_artifacts("! Some text here");
         assert_eq!(result, "Some text here");
+    }
+
+    #[test]
+    fn seed_prompt_pt_returns_portuguese() {
+        assert!(language_seed_prompt("pt").unwrap().contains("Ol"));
+    }
+
+    #[test]
+    fn seed_prompt_en_returns_english() {
+        assert!(language_seed_prompt("en").unwrap().contains("Hello"));
+    }
+
+    #[test]
+    fn seed_prompt_unknown_returns_none() {
+        assert!(language_seed_prompt("de").is_none());
     }
 
     #[test]
