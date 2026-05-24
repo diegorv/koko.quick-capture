@@ -79,13 +79,6 @@ pub async fn start_recording(
     whisper: State<'_, WhisperState>,
     store: State<'_, Store>,
 ) -> Result<(), String> {
-    {
-        let guard = rec_state.0.lock().expect("recording mutex poisoned");
-        if guard.is_some() {
-            return Err("Already recording".to_string());
-        }
-    }
-
     let whisper_clone = whisper.0.lock().expect("whisper mutex").clone();
     let ctx = if let Some(ctx) = whisper_clone {
         ctx
@@ -141,11 +134,16 @@ pub async fn start_recording(
         .flatten()
         .unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string());
 
+    // Atomic check-and-set: hold lock from guard check through handle assignment
+    let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
+    if guard.is_some() {
+        return Err("Already recording".to_string());
+    }
+
     let mut handle = RecordingHandle::start(mic_device, sys_device, language)
         .map_err(|e| e.to_string())?;
     handle.start_chunker(ctx);
 
-    let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
     *guard = Some(handle);
     Ok(())
 }
