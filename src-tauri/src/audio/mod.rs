@@ -4,6 +4,7 @@ pub mod filter;
 pub mod normalize;
 mod resample;
 mod stream;
+pub mod vad;
 
 pub use devices::{list_input_devices, AudioDevice, DeviceType, SelectedDevice};
 pub use resample::{resample_to_16khz, resample_to_48khz, PersistentResampler};
