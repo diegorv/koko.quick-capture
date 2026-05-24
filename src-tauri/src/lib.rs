@@ -337,6 +337,7 @@ fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
         ShortcutId::CaptureClipboard => commands::capture_clipboard_and_broadcast(app),
         ShortcutId::OpenInbox => commands::show_inbox(app),
         ShortcutId::OpenArchive => commands::show_archive(app),
+        ShortcutId::OpenRecording => commands::show_recording(app),
     }
 }
 
@@ -503,6 +504,24 @@ pub fn run() {
             .build()?;
             intercept_close_as_hide(&composer_window, || {});
             apply_move_to_active_space(&composer_window);
+
+            let recording_window = WebviewWindowBuilder::new(
+                app,
+                "recording",
+                WebviewUrl::App("/recording".into()),
+            )
+            .visible(false)
+            .title("")
+            .inner_size(600.0, 280.0)
+            .decorations(false)
+            .transparent(true)
+            .resizable(false)
+            .skip_taskbar(true)
+            .shadow(true)
+            .center()
+            .build()?;
+            intercept_close_as_hide(&recording_window, || {});
+            apply_move_to_active_space(&recording_window);
 
             // Settings window. Standard decorated window, hidden at
             // startup, summoned by the tray menu "Settings…" item.
