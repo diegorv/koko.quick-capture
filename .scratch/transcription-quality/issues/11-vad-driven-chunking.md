@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Replace time-based chunking with VAD-driven chunking
 

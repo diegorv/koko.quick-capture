@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Synchronize mic + system audio mixing
 
