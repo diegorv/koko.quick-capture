@@ -1,6 +1,6 @@
 {
   "name": "quick-capture",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Frictionless macOS capture inbox",
   "private": true,
   "type": "module",
