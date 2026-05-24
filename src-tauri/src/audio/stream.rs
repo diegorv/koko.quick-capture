@@ -53,7 +53,11 @@ impl AudioCapture {
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 let mono = audio_to_mono(data, channels);
                 let peak = mono.iter().fold(0.0f32, |max, &s| max.max(s.abs()));
-                peak_level.fetch_max(peak.to_bits(), Ordering::Relaxed);
+                let prev = peak_level.load(Ordering::Relaxed);
+                let prev_f = f32::from_bits(prev);
+                if peak > prev_f {
+                    peak_level.store(peak.to_bits(), Ordering::Relaxed);
+                }
 
                 if !is_recording.load(Ordering::Relaxed) {
                     return;

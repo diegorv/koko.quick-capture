@@ -34,7 +34,7 @@ pub struct DockMenuBinding {
 /// differs.
 pub fn default_context_menu() -> Vec<DockMenuBinding> {
     let tray = default_menu();
-    debug_assert_eq!(tray.len(), 5, "tray menu shape changed; update dock menu");
+    assert_eq!(tray.len(), 5, "tray menu shape changed; update dock menu");
     vec![
         DockMenuBinding {
             tray: tray[0].clone(),
