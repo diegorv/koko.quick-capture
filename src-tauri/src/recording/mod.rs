@@ -15,6 +15,10 @@ const MODEL_FILENAME: &str = "ggml-large-v3-turbo-q5_0.bin";
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
+const VAD_MODEL_FILENAME: &str = "ggml-silero-v6.2.0.bin";
+const VAD_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-v6.2.0.bin";
+
 const CHUNK_INTERVAL_SECS: u64 = 20;
 const SILENCE_SCAN_WINDOW_MS: usize = 20;
 const SILENCE_SCAN_TAIL_SECS: f32 = 1.5;
@@ -26,6 +30,15 @@ pub fn models_dir() -> PathBuf {
 
 pub fn model_path() -> PathBuf {
     models_dir().join(MODEL_FILENAME)
+}
+
+pub fn vad_model_path() -> PathBuf {
+    models_dir().join(VAD_MODEL_FILENAME)
+}
+
+fn resolve_vad_path() -> Option<String> {
+    let p = vad_model_path();
+    if p.exists() { p.to_str().map(|s| s.to_string()) } else { None }
 }
 
 pub fn is_model_downloaded() -> bool {
@@ -70,6 +83,24 @@ pub async fn download_model(
     drop(file);
 
     std::fs::rename(&tmp_path, &path)?;
+
+    // Also download VAD model (864KB, negligible)
+    let vad_path = dir.join(VAD_MODEL_FILENAME);
+    if !vad_path.exists() {
+        let vad_tmp = dir.join(format!("{VAD_MODEL_FILENAME}.tmp"));
+        let vad_resp = reqwest::get(VAD_MODEL_URL).await?;
+        let mut vad_file = std::fs::File::create(&vad_tmp)?;
+        let mut vad_stream = vad_resp.bytes_stream();
+        while let Some(chunk) = vad_stream.next().await {
+            let chunk = chunk?;
+            vad_file.write_all(&chunk)?;
+        }
+        vad_file.flush()?;
+        drop(vad_file);
+        std::fs::rename(&vad_tmp, &vad_path)?;
+        eprintln!("[recording] VAD model downloaded");
+    }
+
     Ok(path)
 }
 
@@ -238,11 +269,13 @@ impl RecordingHandle {
                         .sqrt();
                     if rms >= 0.01 {
                         let prev = self.transcript.lock().expect("transcript mutex").last_chunk();
+                        let vad_path = resolve_vad_path();
                         let text = transcription::transcribe_with_language(
                             whisper_ctx,
                             &resampled,
                             &self.language,
                             prev.as_deref(),
+                            vad_path.as_deref(),
                         )
                         .unwrap_or_default();
                         self.transcript.lock().expect("transcript mutex").push(text);
@@ -416,7 +449,8 @@ fn process_chunk(
     }
 
     let prev = transcript.lock().expect("transcript mutex").last_chunk();
-    match transcription::transcribe_with_language(whisper_ctx, &resampled, language, prev.as_deref()) {
+    let vad_path = resolve_vad_path();
+    match transcription::transcribe_with_language(whisper_ctx, &resampled, language, prev.as_deref(), vad_path.as_deref()) {
         Ok(text) => {
             if !text.is_empty() {
                 eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);

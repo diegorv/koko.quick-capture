@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams};
 
 const MIN_AUDIO_SAMPLES_16KHZ: usize = 16_000;
 pub const DEFAULT_LANGUAGE: &str = "pt";
@@ -32,7 +32,7 @@ fn pad_audio(samples: &[f32]) -> Vec<f32> {
 }
 
 pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
-    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None)
+    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None, None)
 }
 
 pub fn transcribe_with_language(
@@ -40,6 +40,7 @@ pub fn transcribe_with_language(
     audio_data: &[f32],
     language: &str,
     initial_prompt: Option<&str>,
+    vad_model_path: Option<&str>,
 ) -> Result<String> {
     let mut state = ctx
         .create_state()
@@ -72,6 +73,18 @@ pub fn transcribe_with_language(
         if !prompt.is_empty() {
             params.set_initial_prompt(prompt);
         }
+    }
+
+    if let Some(vad_path) = vad_model_path {
+        params.set_vad_model_path(Some(vad_path));
+        let mut vad_params = WhisperVadParams::new();
+        vad_params.set_threshold(0.5);
+        vad_params.set_min_speech_duration(250);
+        vad_params.set_min_silence_duration(100);
+        vad_params.set_speech_pad(30);
+        vad_params.set_samples_overlap(0.1);
+        params.set_vad_params(vad_params);
+        params.enable_vad(true);
     }
 
     let audio_ctx = ((1500 * audio.len()) / (16_000 * 30) + 128).min(1500) as i32;
