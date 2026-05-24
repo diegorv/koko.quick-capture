@@ -9,6 +9,7 @@ pub const DEFAULT_LANGUAGE: &str = "pt";
 pub fn create_whisper_context(model_path: &Path) -> Result<Arc<WhisperContext>> {
     let mut ctx_params = WhisperContextParameters::default();
     ctx_params.use_gpu(true);
+    ctx_params.flash_attn(true);
 
     let ctx = WhisperContext::new_with_params(
         model_path
