@@ -43,6 +43,19 @@ ulid = "1"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 mime_guess = "2"
+
+# Voice transcription (ported from koko/whipser)
+whisper-rs = { version = "0.16", features = ["metal"] }
+cpal = { git = "https://github.com/screenpipe/cpal.git", branch = "main" }
+rubato = "3.0"
+hound = "3.5"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["stream"] }
+futures = "0.3"
+audioadapter-buffers = "3.0.0"
+dirs = "6"
+anyhow = "1"
+log = "0.4"
 # Tray icon rendering: rasterize an inline Lucide SVG to a template-mode
 # RGBA buffer at startup. `resvg` is the maintained pure-Rust renderer;
 # `usvg` parses the SVG into a tree; `tiny-skia` is the pixmap backend
