@@ -478,6 +478,16 @@ fn schedule_refocus_after_space_move(window: tauri::WebviewWindow) {
 /// future entry point. Records the prior frontmost macOS app FIRST
 /// so `dismiss_composer` can hand focus back, then hops to the main
 /// thread for `show + set_focus` (macOS requires both on main).
+#[tauri::command]
+pub fn dismiss_recording(app: AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("recording") {
+            let _ = window.hide();
+        }
+    });
+}
+
 pub fn show_recording(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
