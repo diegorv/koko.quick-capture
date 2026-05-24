@@ -1682,3 +1682,371 @@ pub fn default_db_path() -> Result<PathBuf, StoreError> {
         .join("com.koko.quick-capture")
         .join("captures.db"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- build_fts_match ---
+
+    #[test]
+    fn fts_match_simple_word() {
+        assert_eq!(build_fts_match("hello"), Some("hello*".into()));
+    }
+
+    #[test]
+    fn fts_match_multiple_words_anded() {
+        assert_eq!(
+            build_fts_match("hello world"),
+            Some("hello* world*".into())
+        );
+    }
+
+    #[test]
+    fn fts_match_url_splits_on_punctuation() {
+        assert_eq!(
+            build_fts_match("https://example.com"),
+            Some("https* example* com*".into())
+        );
+    }
+
+    #[test]
+    fn fts_match_empty_string_returns_none() {
+        assert_eq!(build_fts_match(""), None);
+    }
+
+    #[test]
+    fn fts_match_only_punctuation_returns_none() {
+        assert_eq!(build_fts_match("://...,"), None);
+    }
+
+    #[test]
+    fn fts_match_whitespace_only_returns_none() {
+        assert_eq!(build_fts_match("   \t\n  "), None);
+    }
+
+    #[test]
+    fn fts_match_strips_quotes_and_special_chars() {
+        assert_eq!(
+            build_fts_match(r#""hello" 'world'"#),
+            Some("hello* world*".into())
+        );
+    }
+
+    // --- searchable_text_for_input ---
+
+    #[test]
+    fn searchable_text_note() {
+        let input = CaptureInput::Note {
+            text: "my note".into(),
+        };
+        assert_eq!(searchable_text_for_input(&input), "my note");
+    }
+
+    #[test]
+    fn searchable_text_clip() {
+        let input = CaptureInput::Clip {
+            text: "copied text".into(),
+        };
+        assert_eq!(searchable_text_for_input(&input), "copied text");
+    }
+
+    #[test]
+    fn searchable_text_link_deduplicates_url() {
+        let input = CaptureInput::Link {
+            url: "https://example.com".into(),
+            raw_text: "https://example.com".into(),
+            title: None,
+        };
+        assert_eq!(searchable_text_for_input(&input), "https://example.com");
+    }
+
+    #[test]
+    fn searchable_text_link_includes_raw_and_title_when_different() {
+        let input = CaptureInput::Link {
+            url: "https://example.com".into(),
+            raw_text: "www.example.com".into(),
+            title: Some("Example".into()),
+        };
+        assert_eq!(
+            searchable_text_for_input(&input),
+            "https://example.com www.example.com Example"
+        );
+    }
+
+    #[test]
+    fn searchable_text_file_includes_name_and_path() {
+        let input = CaptureInput::File {
+            source_path: "/tmp/notes.pdf".into(),
+            mime: "application/pdf".into(),
+            original_name: Some("notes.pdf".into()),
+        };
+        assert_eq!(
+            searchable_text_for_input(&input),
+            "notes.pdf /tmp/notes.pdf"
+        );
+    }
+
+    #[test]
+    fn searchable_text_shot_bytes_is_empty() {
+        let input = CaptureInput::Shot {
+            source: ShotSource::Bytes {
+                bytes: vec![1, 2, 3],
+                mime: "image/png".into(),
+            },
+            width: None,
+            height: None,
+        };
+        assert_eq!(searchable_text_for_input(&input), "");
+    }
+
+    #[test]
+    fn searchable_text_shot_path() {
+        let input = CaptureInput::Shot {
+            source: ShotSource::Path {
+                source_path: "/tmp/screenshot.png".into(),
+                mime: "image/png".into(),
+            },
+            width: None,
+            height: None,
+        };
+        assert_eq!(searchable_text_for_input(&input), "/tmp/screenshot.png");
+    }
+
+    #[test]
+    fn searchable_text_transcription() {
+        let input = CaptureInput::Transcription {
+            text: "hello world".into(),
+            audio_path: "/tmp/audio.wav".into(),
+            duration_secs: 5.0,
+        };
+        assert_eq!(searchable_text_for_input(&input), "hello world");
+    }
+
+    // --- extension_for_mime ---
+
+    #[test]
+    fn extension_for_known_mimes() {
+        assert_eq!(extension_for_mime("image/png"), "png");
+        assert_eq!(extension_for_mime("image/jpeg"), "jpg");
+        assert_eq!(extension_for_mime("image/gif"), "gif");
+        assert_eq!(extension_for_mime("image/webp"), "webp");
+        assert_eq!(extension_for_mime("image/heic"), "heic");
+        assert_eq!(extension_for_mime("image/tiff"), "tiff");
+    }
+
+    #[test]
+    fn extension_for_unknown_mime_falls_back_to_bin() {
+        assert_eq!(extension_for_mime("application/pdf"), "bin");
+        assert_eq!(extension_for_mime("text/plain"), "bin");
+        assert_eq!(extension_for_mime(""), "bin");
+    }
+
+    // --- normalize_color ---
+
+    #[test]
+    fn normalize_color_trims_and_keeps_non_empty() {
+        assert_eq!(normalize_color(Some("red")), Some("red".into()));
+        assert_eq!(normalize_color(Some("  teal  ")), Some("teal".into()));
+    }
+
+    #[test]
+    fn normalize_color_drops_blank_and_none() {
+        assert_eq!(normalize_color(None), None);
+        assert_eq!(normalize_color(Some("")), None);
+        assert_eq!(normalize_color(Some("   ")), None);
+    }
+
+    // --- normalize_destination_config ---
+
+    #[test]
+    fn normalize_config_label_rejects_non_empty_config() {
+        let err = normalize_destination_config(DestinationKind::Label, Some(r#"{"x":1}"#));
+        assert!(matches!(err, Err(StoreError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn normalize_config_label_accepts_none_and_blank() {
+        assert_eq!(
+            normalize_destination_config(DestinationKind::Label, None).unwrap(),
+            None
+        );
+        assert_eq!(
+            normalize_destination_config(DestinationKind::Label, Some("")).unwrap(),
+            None
+        );
+        assert_eq!(
+            normalize_destination_config(DestinationKind::Label, Some("  ")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_config_kokobrain_requires_vault() {
+        let err = normalize_destination_config(DestinationKind::Kokobrain, None);
+        assert!(matches!(err, Err(StoreError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn normalize_config_kokobrain_rejects_blank_vault() {
+        let err =
+            normalize_destination_config(DestinationKind::Kokobrain, Some(r#"{"vault":""}"#));
+        assert!(matches!(err, Err(StoreError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn normalize_config_kokobrain_normalizes_vault_and_strips_empty_tags() {
+        let result = normalize_destination_config(
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"  My Vault  ","tags":["a","  ","b"]}"#),
+        )
+        .unwrap()
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["vault"], "My Vault");
+        let tags = parsed["tags"].as_array().unwrap();
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], "a");
+        assert_eq!(tags[1], "b");
+    }
+
+    #[test]
+    fn normalize_config_kokobrain_omits_tags_when_all_empty() {
+        let result = normalize_destination_config(
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"V","tags":["  ",""]}"#),
+        )
+        .unwrap()
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed.get("tags").is_none());
+    }
+
+    #[test]
+    fn normalize_config_kokobrain_rejects_non_string_tags() {
+        let err = normalize_destination_config(
+            DestinationKind::Kokobrain,
+            Some(r#"{"vault":"V","tags":[42]}"#),
+        );
+        assert!(matches!(err, Err(StoreError::InvalidArgument(_))));
+    }
+
+    // --- cursor_for_archive / parse_archive_cursor ---
+
+    #[test]
+    fn archive_cursor_roundtrip() {
+        let capture = Capture {
+            id: "01H00000TEST".into(),
+            kind: CaptureKind::Note,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            payload: serde_json::json!({}),
+            source_app: None,
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: None,
+            source_url: None,
+            destination_id: Some("dest1".into()),
+            routed_at: Some("2026-01-02T00:00:00Z".into()),
+        };
+        let cursor = cursor_for_archive(&capture).unwrap();
+        let parsed = parse_archive_cursor(Some(&cursor)).unwrap().unwrap();
+        assert_eq!(parsed.0, "2026-01-02T00:00:00Z");
+        assert_eq!(parsed.1, "01H00000TEST");
+    }
+
+    #[test]
+    fn archive_cursor_none_when_not_routed() {
+        let capture = Capture {
+            id: "01H00000TEST".into(),
+            kind: CaptureKind::Note,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            payload: serde_json::json!({}),
+            source_app: None,
+            starred: false,
+            deleted_at: None,
+            read_at: None,
+            source_title: None,
+            source_url: None,
+            destination_id: None,
+            routed_at: None,
+        };
+        assert!(cursor_for_archive(&capture).is_none());
+    }
+
+    #[test]
+    fn parse_archive_cursor_none_input() {
+        assert!(parse_archive_cursor(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_archive_cursor_invalid_format() {
+        let err = parse_archive_cursor(Some("no-pipe-here"));
+        assert!(matches!(err, Err(StoreError::Decode(_))));
+    }
+
+    // --- civil_from_days ---
+
+    #[test]
+    fn civil_from_days_epoch() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn civil_from_days_known_dates() {
+        // 2025-05-24 is day 20232 since epoch
+        assert_eq!(civil_from_days(20232), (2025, 5, 24));
+        // 2000-01-01 is day 10957
+        assert_eq!(civil_from_days(10957), (2000, 1, 1));
+        // 1999-12-31 is day 10956
+        assert_eq!(civil_from_days(10956), (1999, 12, 31));
+    }
+
+    #[test]
+    fn civil_from_days_leap_day() {
+        // 2024-02-29 is day 19782
+        assert_eq!(civil_from_days(19782), (2024, 2, 29));
+    }
+
+    // --- CaptureKind roundtrip ---
+
+    #[test]
+    fn capture_kind_roundtrip() {
+        let kinds = [
+            CaptureKind::Link,
+            CaptureKind::Clip,
+            CaptureKind::Shot,
+            CaptureKind::File,
+            CaptureKind::Note,
+            CaptureKind::Transcription,
+        ];
+        for kind in &kinds {
+            let s = kind.as_str();
+            let parsed = CaptureKind::parse(s).unwrap();
+            assert_eq!(*kind, parsed);
+        }
+    }
+
+    #[test]
+    fn capture_kind_parse_unknown_errors() {
+        let err = CaptureKind::parse("Unknown");
+        assert!(matches!(err, Err(StoreError::Decode(_))));
+    }
+
+    // --- DestinationKind roundtrip ---
+
+    #[test]
+    fn destination_kind_roundtrip() {
+        for kind in &[DestinationKind::Label, DestinationKind::Kokobrain] {
+            let s = kind.as_str();
+            let parsed = DestinationKind::parse(s).unwrap();
+            assert_eq!(*kind, parsed);
+        }
+    }
+
+    #[test]
+    fn destination_kind_parse_unknown_errors() {
+        let err = DestinationKind::parse("webhook");
+        assert!(matches!(err, Err(StoreError::Decode(_))));
+    }
+}
