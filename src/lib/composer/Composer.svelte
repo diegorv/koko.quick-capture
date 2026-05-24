@@ -40,6 +40,7 @@
     recordingActive?: boolean;
     recordingElapsed?: number;
     partialTranscript?: string;
+    peakLevel?: number;
   }
 
   let {
@@ -52,6 +53,7 @@
     recordingActive = false,
     recordingElapsed = 0,
     partialTranscript = "",
+    peakLevel = 0,
   }: Props = $props();
 
   let host: HTMLDivElement | undefined = $state();
@@ -181,6 +183,9 @@
       <div class="recording-header">
         <div class="recording-pulse"></div>
         <span class="recording-timer">{formatElapsed(recordingElapsed)}</span>
+      </div>
+      <div class="vu-bar">
+        <div class="vu-fill" style="width: {Math.min(peakLevel * 100, 100)}%"></div>
       </div>
       {#if partialTranscript}
         <p class="partial-transcript">{partialTranscript}</p>
@@ -355,6 +360,21 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  .vu-bar {
+    width: 80%;
+    height: 4px;
+    background: rgba(128, 128, 128, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .vu-fill {
+    height: 100%;
+    background: #22c55e;
+    border-radius: 2px;
+    transition: width 100ms ease-out;
   }
 
   .partial-transcript {

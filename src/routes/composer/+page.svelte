@@ -10,6 +10,7 @@
   let recordingActive = $state(false);
   let recordingElapsed = $state(0);
   let partialTranscript = $state("");
+  let peakLevel = $state(0);
   let recordingTimer: ReturnType<typeof setInterval> | undefined;
 
   async function save(text: string) {
@@ -49,9 +50,11 @@
           const s = await invoke<{
             elapsed_secs: number;
             partial_transcript: string;
+            peak_level: number;
           }>("get_recording_status");
           recordingElapsed = s.elapsed_secs;
           partialTranscript = s.partial_transcript;
+          peakLevel = s.peak_level;
         } catch {
           recordingElapsed += 1;
         }
@@ -106,4 +109,5 @@
   {recordingActive}
   {recordingElapsed}
   {partialTranscript}
+  {peakLevel}
 />
