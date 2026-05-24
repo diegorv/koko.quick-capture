@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Fix TOCTOU race in start_recording
 

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Fix sys_active flag when system audio capture fails
 

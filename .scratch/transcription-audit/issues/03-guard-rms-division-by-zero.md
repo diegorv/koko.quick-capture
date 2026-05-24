@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Guard against division-by-zero in RMS calculation
 
