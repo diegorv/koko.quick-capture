@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams};
 
@@ -48,6 +49,17 @@ pub fn transcribe_with_language(
     initial_prompt: Option<&str>,
     vad_model_path: Option<&str>,
 ) -> Result<String> {
+    transcribe_full(ctx, audio_data, language, initial_prompt, vad_model_path, None)
+}
+
+pub fn transcribe_full(
+    ctx: &WhisperContext,
+    audio_data: &[f32],
+    language: &str,
+    initial_prompt: Option<&str>,
+    vad_model_path: Option<&str>,
+    abort_flag: Option<Arc<AtomicBool>>,
+) -> Result<String> {
     let mut state = ctx
         .create_state()
         .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
@@ -91,6 +103,10 @@ pub fn transcribe_with_language(
         vad_params.set_samples_overlap(0.1);
         params.set_vad_params(vad_params);
         params.enable_vad(true);
+    }
+
+    if let Some(flag) = abort_flag {
+        params.set_abort_callback_safe(move || !flag.load(Ordering::Relaxed));
     }
 
     let audio_ctx = ((1500 * audio.len()) / (16_000 * 30) + 128).min(1500) as i32;
