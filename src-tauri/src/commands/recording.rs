@@ -31,6 +31,7 @@ pub struct RecordingStatus {
     pub partial_transcript: String,
     pub chunks_processed: u32,
     pub chunks_failed: u32,
+    pub error_count: u32,
 }
 
 #[tauri::command]
@@ -271,6 +272,7 @@ pub fn get_recording_status(
                 partial_transcript: handle.partial_transcript(),
                 chunks_processed,
                 chunks_failed,
+                error_count: handle.error_count(),
             }
         }
         None => RecordingStatus {
@@ -282,6 +284,7 @@ pub fn get_recording_status(
             partial_transcript: String::new(),
             chunks_processed: 0,
             chunks_failed: 0,
+            error_count: 0,
         },
     }
 }

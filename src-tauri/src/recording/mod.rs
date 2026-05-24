@@ -29,6 +29,7 @@ const VAD_MODEL_URL: &str =
 
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
 const FALLBACK_CHUNK_SECS: u64 = 20;
+const MAX_ERRORS: u32 = 15;
 
 struct ChunkerStats {
     segments_transcribed: u32,
@@ -237,6 +238,7 @@ pub struct RecordingHandle {
     pub sys_peak: Arc<AtomicU32>,
     pub sys_active: bool,
     pub started_at: Instant,
+    error_count: Arc<AtomicU32>,
     sample_rate: u32,
     sys_sample_rate: Option<u32>,
     mic_bluetooth: bool,
@@ -321,6 +323,7 @@ impl RecordingHandle {
             sys_sample_rate,
             mic_bluetooth,
             language,
+            error_count: Arc::new(AtomicU32::new(0)),
             denoise_enabled: true,
             rx,
             transcript,
@@ -348,6 +351,10 @@ impl RecordingHandle {
 
     pub fn chunk_stats(&self) -> (u32, u32) {
         self.transcript.lock().expect("transcript mutex").stats()
+    }
+
+    pub fn error_count(&self) -> u32 {
+        self.error_count.load(Ordering::Relaxed)
     }
 
     pub fn stop_and_transcribe(
@@ -447,6 +454,7 @@ impl RecordingHandle {
         let is_rec = self.is_recording.clone();
         let transcript = self.transcript.clone();
         let all_samples = self.all_samples_16k.clone();
+        let error_count = self.error_count.clone();
         let sample_rate = self.sample_rate;
         let sys_sample_rate = self.sys_sample_rate;
         let mic_bluetooth = self.mic_bluetooth;
@@ -460,7 +468,7 @@ impl RecordingHandle {
 
         let thread = std::thread::spawn(move || {
             chunker_loop(
-                rx, is_rec, whisper_ctx, transcript, all_samples,
+                rx, is_rec, whisper_ctx, transcript, all_samples, error_count,
                 sample_rate, sys_sample_rate, &language, sys_active, mic_bluetooth,
                 denoise_enabled,
             );
@@ -532,6 +540,7 @@ fn transcribe_segment(
     language: &str,
     use_whisper_vad: bool,
     stats: &mut ChunkerStats,
+    error_count: &AtomicU32,
 ) {
     if samples_16k.is_empty() {
         return;
@@ -562,6 +571,7 @@ fn transcribe_segment(
         }
         Err(e) => {
             eprintln!("[recording] segment transcription failed: {e}");
+            error_count.fetch_add(1, Ordering::Relaxed);
             transcript
                 .lock()
                 .expect("transcript mutex")
@@ -603,10 +613,11 @@ fn process_vad_segments(
     transcript: &Mutex<ChunkedTranscript>,
     language: &str,
     stats: &mut ChunkerStats,
+    error_count: &AtomicU32,
 ) {
     for seg in segments {
         if seg.samples.len() >= 800 {
-            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false, stats);
+            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false, stats, error_count);
         } else {
             stats.segments_skipped_short += 1;
         }
@@ -619,6 +630,7 @@ fn chunker_loop(
     whisper_ctx: Arc<WhisperContext>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
+    error_count: Arc<AtomicU32>,
     sample_rate: u32,
     sys_sample_rate: Option<u32>,
     language: &str,
@@ -675,9 +687,12 @@ fn chunker_loop(
             if let Some(ref mut vad_proc) = vad {
                 match vad_proc.process_audio(&mixed_16k) {
                     Ok(segments) => {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
                     }
-                    Err(e) => eprintln!("[recording] VAD error: {e}"),
+                    Err(e) => {
+                        eprintln!("[recording] VAD error: {e}");
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             } else {
                 fallback_buffer.extend(&mixed_16k);
@@ -685,10 +700,16 @@ fn chunker_loop(
                     let chunk_data: Vec<f32> =
                         fallback_buffer.drain(..fallback_chunk_16k).collect();
                     transcribe_segment(
-                        &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats,
+                        &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats, &error_count,
                     );
                 }
             }
+        }
+
+        let errors = error_count.load(Ordering::Relaxed);
+        if errors >= MAX_ERRORS {
+            eprintln!("[recording] auto-stopping: {errors} errors exceeded threshold ({MAX_ERRORS})");
+            is_recording.store(false, Ordering::Relaxed);
         }
 
         if !is_recording.load(Ordering::Relaxed) {
@@ -704,7 +725,7 @@ fn chunker_loop(
 
                 if let Some(ref mut vad_proc) = vad {
                     if let Ok(segments) = vad_proc.process_audio(&remaining_16k) {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
                     }
                 } else {
                     fallback_buffer.extend(&remaining_16k);
@@ -715,13 +736,13 @@ fn chunker_loop(
             if let Some(ref mut vad_proc) = vad {
                 match vad_proc.flush() {
                     Ok(segments) => {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats);
+                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
                     }
                     Err(e) => eprintln!("[recording] VAD flush error: {e}"),
                 }
             } else if !fallback_buffer.is_empty() {
                 let remainder = std::mem::take(&mut fallback_buffer);
-                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true, &mut stats);
+                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true, &mut stats, &error_count);
             }
 
             break;

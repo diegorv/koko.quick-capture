@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # 19 - Error count thresholds for auto-stop recording
 
