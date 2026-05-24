@@ -51,6 +51,7 @@ rubato = "3.0"
 nnnoiseless = "0.5"
 ebur128 = "0.1"
 hound = "3.5"
+silero = { git = "https://github.com/emotechlab/silero-rs", rev = "197601138e6b7760cdfde6911b4b40a2cd3c487e", package = "silero" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["stream"] }
 futures = "0.3"
