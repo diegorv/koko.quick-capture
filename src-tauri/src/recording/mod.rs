@@ -109,7 +109,8 @@ unsafe impl Send for RecordingHandle {}
 
 impl RecordingHandle {
     pub fn start(
-        device: Option<SelectedDevice>,
+        mic_device: Option<SelectedDevice>,
+        sys_device: Option<SelectedDevice>,
         language: String,
     ) -> Result<Self> {
         let is_recording = Arc::new(AtomicBool::new(true));
@@ -118,12 +119,31 @@ impl RecordingHandle {
 
         let is_rec = is_recording.clone();
         let peak = peak_level.clone();
+        let sys_tx = tx.clone();
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         let audio_thread = std::thread::spawn(move || {
-            match AudioCapture::start(tx, is_rec.clone(), device, peak) {
-                Ok((_stream, capture)) => {
+            match AudioCapture::start(tx, is_rec.clone(), mic_device, peak) {
+                Ok((_mic_stream, capture)) => {
+                    // Optionally start system audio on the same thread
+                    let _sys_stream = if let Some(sys_dev) = sys_device {
+                        let sys_peak = Arc::new(AtomicU32::new(0));
+                        let sys_rec = is_rec.clone();
+                        match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_peak) {
+                            Ok((stream, _)) => {
+                                eprintln!("[recording] System audio stream started");
+                                Some(stream)
+                            }
+                            Err(e) => {
+                                eprintln!("[recording] System audio failed (continuing with mic only): {e}");
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
                     let _ = result_tx.send(Ok(capture.sample_rate));
                     while is_rec.load(Ordering::Relaxed) {
                         std::thread::sleep(std::time::Duration::from_millis(100));

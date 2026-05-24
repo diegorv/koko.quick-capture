@@ -6,7 +6,10 @@ use whisper_rs::WhisperContext;
 use crate::audio::{DeviceType, SelectedDevice};
 use crate::events::{CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT};
 use crate::recording::{self, RecordingHandle};
-use crate::store::{Store, SETTING_MIC_DEVICE, SETTING_TRANSCRIPTION_LANGUAGE};
+use crate::store::{
+    Store, SETTING_MIC_DEVICE, SETTING_SYS_AUDIO_DEVICE, SETTING_SYS_AUDIO_ENABLED,
+    SETTING_TRANSCRIPTION_LANGUAGE,
+};
 
 pub struct RecordingState(pub Mutex<Option<RecordingHandle>>);
 
@@ -81,14 +84,36 @@ pub fn start_recording(
 
     let ctx = ensure_whisper_loaded(&whisper)?;
 
-    let device = store
+    let mic_device = store
         .settings_get(SETTING_MIC_DEVICE)
         .ok()
         .flatten()
+        .filter(|s| !s.is_empty())
         .map(|name| SelectedDevice {
             name,
             device_type: DeviceType::Input,
         });
+
+    let sys_enabled = store
+        .settings_get(SETTING_SYS_AUDIO_ENABLED)
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    let sys_device = if sys_enabled {
+        store
+            .settings_get(SETTING_SYS_AUDIO_DEVICE)
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .map(|name| SelectedDevice {
+                name,
+                device_type: DeviceType::System,
+            })
+    } else {
+        None
+    };
 
     let language = store
         .settings_get(SETTING_TRANSCRIPTION_LANGUAGE)
@@ -96,7 +121,7 @@ pub fn start_recording(
         .flatten()
         .unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string());
 
-    let mut handle = RecordingHandle::start(device, language)
+    let mut handle = RecordingHandle::start(mic_device, sys_device, language)
         .map_err(|e| e.to_string())?;
     handle.start_chunker(ctx);
     *guard = Some(handle);
@@ -138,6 +163,44 @@ pub fn get_transcription_language(store: State<'_, Store>) -> Result<String, Str
     store
         .settings_get(SETTING_TRANSCRIPTION_LANGUAGE)
         .map(|v| v.unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string()))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_sys_audio_device(
+    name: Option<String>,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    match name {
+        Some(n) => store.settings_set(SETTING_SYS_AUDIO_DEVICE, &n),
+        None => store.settings_set(SETTING_SYS_AUDIO_DEVICE, ""),
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_sys_audio_device(store: State<'_, Store>) -> Result<Option<String>, String> {
+    store
+        .settings_get(SETTING_SYS_AUDIO_DEVICE)
+        .map(|v| v.filter(|s| !s.is_empty()))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_sys_audio_enabled(
+    enabled: bool,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    store
+        .settings_set(SETTING_SYS_AUDIO_ENABLED, if enabled { "true" } else { "false" })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_sys_audio_enabled(store: State<'_, Store>) -> Result<bool, String> {
+    store
+        .settings_get(SETTING_SYS_AUDIO_ENABLED)
+        .map(|v| v.map(|s| s == "true").unwrap_or(false))
         .map_err(|e| e.to_string())
 }
 

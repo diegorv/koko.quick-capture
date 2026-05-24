@@ -27,6 +27,8 @@ pub const SETTING_WIKILINK_SOURCE_FOLDER: &str = "wikilink_source_folder";
 
 pub const SETTING_TRANSCRIPTION_LANGUAGE: &str = "transcription_language";
 pub const SETTING_MIC_DEVICE: &str = "mic_device";
+pub const SETTING_SYS_AUDIO_DEVICE: &str = "sys_audio_device";
+pub const SETTING_SYS_AUDIO_ENABLED: &str = "sys_audio_enabled";
 
 /// ULID min (26 zero characters). Used as the default `count_after`
 /// cursor when `SETTING_LAST_INBOX_OPEN_ID` has never been written, so

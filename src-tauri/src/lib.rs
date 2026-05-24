@@ -794,6 +794,10 @@ pub fn run() {
             commands::recording::get_mic_device,
             commands::recording::set_transcription_language,
             commands::recording::get_transcription_language,
+            commands::recording::set_sys_audio_device,
+            commands::recording::get_sys_audio_device,
+            commands::recording::set_sys_audio_enabled,
+            commands::recording::get_sys_audio_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
