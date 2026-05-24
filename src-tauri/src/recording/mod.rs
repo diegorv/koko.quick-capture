@@ -44,11 +44,53 @@ pub fn vad_model_path() -> PathBuf {
 
 fn resolve_vad_path() -> Option<String> {
     let p = vad_model_path();
-    if p.exists() { p.to_str().map(|s| s.to_string()) } else { None }
+    if p.exists() && validate_model_file(&p, VAD_MIN_SIZE) {
+        p.to_str().map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
+const WHISPER_MIN_SIZE: u64 = 500_000_000;
+const VAD_MIN_SIZE: u64 = 800_000;
+const GGML_MAGIC: [u8; 4] = [0x67, 0x67, 0x6d, 0x6c];
+const GGUF_MAGIC: [u8; 4] = [0x47, 0x47, 0x55, 0x46];
+
+fn validate_model_file(path: &std::path::Path, min_size: u64) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if meta.len() < min_size {
+        eprintln!(
+            "[recording] model {} too small: {} bytes (min {})",
+            path.display(),
+            meta.len(),
+            min_size
+        );
+        return false;
+    }
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    use std::io::Read;
+    let mut magic = [0u8; 4];
+    if f.read_exact(&mut magic).is_err() {
+        return false;
+    }
+    if magic != GGML_MAGIC && magic != GGUF_MAGIC {
+        eprintln!(
+            "[recording] model {} has invalid magic: {:02x?}",
+            path.display(),
+            magic
+        );
+        return false;
+    }
+    true
 }
 
 pub fn is_model_downloaded() -> bool {
-    model_path().exists()
+    let path = model_path();
+    path.exists() && validate_model_file(&path, WHISPER_MIN_SIZE)
 }
 
 pub fn audio_dir() -> PathBuf {
@@ -63,8 +105,12 @@ pub async fn download_model(
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(MODEL_FILENAME);
 
-    if path.exists() {
+    if path.exists() && validate_model_file(&path, WHISPER_MIN_SIZE) {
         return Ok(path);
+    }
+    if path.exists() {
+        eprintln!("[recording] corrupt model detected, re-downloading");
+        let _ = std::fs::remove_file(&path);
     }
 
     let tmp_path = dir.join(format!("{MODEL_FILENAME}.tmp"));
