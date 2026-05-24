@@ -6,6 +6,7 @@
 //! for `invoke()`. The real logic is in the helper functions below so
 //! tests can drive them without a Tauri runtime.
 
+pub mod recording;
 pub mod update_channel;
 
 use std::path::{Path, PathBuf};
@@ -1001,7 +1002,7 @@ pub fn reveal_capture_with(
                 Err("Shot capture missing both source_path and blob_path".to_string())
             }
         }
-        CaptureKind::Clip | CaptureKind::Note => {
+        CaptureKind::Clip | CaptureKind::Note | CaptureKind::Transcription => {
             Err(format!("cannot reveal {:?} capture", capture.kind))
         }
     }
