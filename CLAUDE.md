@@ -64,6 +64,19 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## 5. Commit Discipline
+
+**Small, contained commits. One logical change per commit.**
+
+Multi-step features must be committed incrementally as each layer passes verification:
+- Add deps -> commit
+- Add module with no callers -> commit
+- Wire module to callers -> commit
+- Add frontend types -> commit
+- Add UI -> commit
+
+Never batch an entire feature into one commit. Each commit must compile and pass tests independently.
+
 ## Agent skills
 
 ### Issue tracker
