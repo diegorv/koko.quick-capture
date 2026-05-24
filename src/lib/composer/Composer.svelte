@@ -374,7 +374,6 @@
     height: 100%;
     background: #22c55e;
     border-radius: 2px;
-    transition: width 100ms ease-out;
   }
 
   .partial-transcript {

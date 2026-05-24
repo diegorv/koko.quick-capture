@@ -12,6 +12,7 @@
   let partialTranscript = $state("");
   let peakLevel = $state(0);
   let recordingTimer: ReturnType<typeof setInterval> | undefined;
+  let vuTimer: ReturnType<typeof setInterval> | undefined;
 
   async function save(text: string) {
     try {
@@ -54,11 +55,18 @@
           }>("get_recording_status");
           recordingElapsed = s.elapsed_secs;
           partialTranscript = s.partial_transcript;
-          peakLevel = s.peak_level;
         } catch {
           recordingElapsed += 1;
         }
-      }, 1000);
+      }, 2000);
+      vuTimer = setInterval(async () => {
+        try {
+          const s = await invoke<{ peak_level: number }>("get_recording_status");
+          peakLevel = s.peak_level;
+        } catch {
+          // ignore
+        }
+      }, 100);
     } catch (err) {
       console.error("start_recording failed", err);
     }
@@ -68,6 +76,10 @@
     if (recordingTimer) {
       clearInterval(recordingTimer);
       recordingTimer = undefined;
+    }
+    if (vuTimer) {
+      clearInterval(vuTimer);
+      vuTimer = undefined;
     }
     try {
       await invoke("stop_recording");
@@ -97,6 +109,7 @@
   onDestroy(() => {
     unlisten?.();
     if (recordingTimer) clearInterval(recordingTimer);
+    if (vuTimer) clearInterval(vuTimer);
   });
 </script>
 
