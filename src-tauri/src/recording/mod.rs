@@ -94,7 +94,9 @@ impl ChunkedTranscript {
 
 pub struct RecordingHandle {
     pub is_recording: Arc<AtomicBool>,
-    pub peak_level: Arc<AtomicU32>,
+    pub mic_peak: Arc<AtomicU32>,
+    pub sys_peak: Arc<AtomicU32>,
+    pub sys_active: bool,
     pub started_at: Instant,
     sample_rate: u32,
     language: String,
@@ -114,23 +116,24 @@ impl RecordingHandle {
         language: String,
     ) -> Result<Self> {
         let is_recording = Arc::new(AtomicBool::new(true));
-        let peak_level = Arc::new(AtomicU32::new(0));
+        let mic_peak = Arc::new(AtomicU32::new(0));
+        let sys_peak = Arc::new(AtomicU32::new(0));
         let (tx, rx) = mpsc::unbounded_channel();
 
         let is_rec = is_recording.clone();
-        let peak = peak_level.clone();
+        let mic_pk = mic_peak.clone();
+        let sys_pk = sys_peak.clone();
         let sys_tx = tx.clone();
+        let has_sys = sys_device.is_some();
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         let audio_thread = std::thread::spawn(move || {
-            match AudioCapture::start(tx, is_rec.clone(), mic_device, peak) {
+            match AudioCapture::start(tx, is_rec.clone(), mic_device, mic_pk) {
                 Ok((_mic_stream, capture)) => {
-                    // Optionally start system audio on the same thread
                     let _sys_stream = if let Some(sys_dev) = sys_device {
-                        let sys_peak = Arc::new(AtomicU32::new(0));
                         let sys_rec = is_rec.clone();
-                        match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_peak) {
+                        match AudioCapture::start(sys_tx, sys_rec, Some(sys_dev), sys_pk) {
                             Ok((stream, _)) => {
                                 eprintln!("[recording] System audio stream started");
                                 Some(stream)
@@ -164,7 +167,9 @@ impl RecordingHandle {
 
         Ok(RecordingHandle {
             is_recording,
-            peak_level,
+            mic_peak,
+            sys_peak,
+            sys_active: has_sys,
             started_at: Instant::now(),
             sample_rate,
             language,
@@ -180,9 +185,12 @@ impl RecordingHandle {
         self.started_at.elapsed().as_secs_f64()
     }
 
-    pub fn take_peak(&self) -> f32 {
-        let bits = self.peak_level.swap(0, Ordering::Relaxed);
-        f32::from_bits(bits)
+    pub fn take_mic_peak(&self) -> f32 {
+        f32::from_bits(self.mic_peak.swap(0, Ordering::Relaxed))
+    }
+
+    pub fn take_sys_peak(&self) -> f32 {
+        f32::from_bits(self.sys_peak.swap(0, Ordering::Relaxed))
     }
 
     pub fn partial_transcript(&self) -> String {

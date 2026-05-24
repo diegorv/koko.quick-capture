@@ -25,7 +25,9 @@ pub struct ModelStatus {
 pub struct RecordingStatus {
     pub active: bool,
     pub elapsed_secs: f64,
-    pub peak_level: f32,
+    pub mic_peak: f32,
+    pub sys_peak: f32,
+    pub sys_active: bool,
     pub partial_transcript: String,
 }
 
@@ -213,13 +215,17 @@ pub fn get_recording_status(
         Some(handle) => RecordingStatus {
             active: true,
             elapsed_secs: handle.elapsed_secs(),
-            peak_level: handle.take_peak(),
+            mic_peak: handle.take_mic_peak(),
+            sys_peak: handle.take_sys_peak(),
+            sys_active: handle.sys_active,
             partial_transcript: handle.partial_transcript(),
         },
         None => RecordingStatus {
             active: false,
             elapsed_secs: 0.0,
-            peak_level: 0.0,
+            mic_peak: 0.0,
+            sys_peak: 0.0,
+            sys_active: false,
             partial_transcript: String::new(),
         },
     }
