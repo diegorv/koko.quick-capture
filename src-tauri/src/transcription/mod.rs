@@ -42,7 +42,10 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
 
     let audio = pad_audio_to_min_length(audio_data, MIN_AUDIO_SAMPLES_16KHZ);
 
-    params.set_n_threads(2);
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4);
+    params.set_n_threads(cpus.saturating_sub(2).clamp(1, 8));
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
