@@ -24,6 +24,8 @@
   let downloadProgress = $state({ downloaded: 0, total: 0 });
   let devices = $state<AudioDevice[]>([]);
   let selectedMic = $state<string | null>(null);
+  let selectedSysDevice = $state<string | null>(null);
+  let sysAudioEnabled = $state(false);
   let selectedLanguage = $state("pt");
   let unlistenProgress: UnlistenFn | undefined;
 
@@ -54,6 +56,18 @@
       selectedMic = await invoke<string | null>("get_mic_device");
     } catch {
       selectedMic = null;
+    }
+
+    try {
+      selectedSysDevice = await invoke<string | null>("get_sys_audio_device");
+    } catch {
+      selectedSysDevice = null;
+    }
+
+    try {
+      sysAudioEnabled = await invoke<boolean>("get_sys_audio_enabled");
+    } catch {
+      sysAudioEnabled = false;
     }
 
     try {
@@ -104,6 +118,27 @@
       await invoke("set_transcription_language", { language: value });
     } catch (err) {
       console.error("set_transcription_language failed", err);
+    }
+  }
+
+  async function onSysDeviceChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    const name = value === "" ? null : value;
+    selectedSysDevice = name;
+    try {
+      await invoke("set_sys_audio_device", { name });
+    } catch (err) {
+      console.error("set_sys_audio_device failed", err);
+    }
+  }
+
+  async function onSysEnabledChange(e: Event) {
+    const checked = (e.target as HTMLInputElement).checked;
+    sysAudioEnabled = checked;
+    try {
+      await invoke("set_sys_audio_enabled", { enabled: checked });
+    } catch (err) {
+      console.error("set_sys_audio_enabled failed", err);
     }
   }
 
@@ -175,13 +210,22 @@
     {#if devices.filter((d) => d.device_type === "System").length === 0}
       <p class="status missing">Not available (requires macOS 13+ and Screen Recording permission)</p>
     {:else}
-      <ul class="device-list">
-        {#each devices.filter((d) => d.device_type === "System") as device}
-          <li>
-            <span class="device-name">{device.name}</span>
-          </li>
-        {/each}
-      </ul>
+      <label class="toggle-row">
+        <input
+          type="checkbox"
+          checked={sysAudioEnabled}
+          onchange={onSysEnabledChange}
+        />
+        <span>Capture system audio alongside microphone</span>
+      </label>
+      {#if sysAudioEnabled}
+        <select class="select" value={selectedSysDevice ?? ""} onchange={onSysDeviceChange}>
+          <option value="">First available</option>
+          {#each devices.filter((d) => d.device_type === "System") as device}
+            <option value={device.name}>{device.name}</option>
+          {/each}
+        </select>
+      {/if}
     {/if}
   </div>
 </section>
@@ -317,31 +361,17 @@
     }
   }
 
-  .device-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
-  .device-list li {
+  .toggle-row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     font-size: 0.82rem;
-    padding: 0.3rem 0.5rem;
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.03);
-  }
-  @media (prefers-color-scheme: dark) {
-    .device-list li {
-      background: rgba(255, 255, 255, 0.04);
-    }
+    margin-bottom: 0.5rem;
+    cursor: pointer;
   }
 
-  .device-name {
-    flex: 1;
+  .toggle-row input[type="checkbox"] {
+    accent-color: rgba(79, 70, 229, 0.85);
   }
+
 </style>
