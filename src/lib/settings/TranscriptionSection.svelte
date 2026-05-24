@@ -14,10 +14,17 @@
     is_default: boolean;
   }
 
+  const LANGUAGES: Array<{ code: string; label: string }> = [
+    { code: "pt", label: "Portuguese" },
+    { code: "en", label: "English" },
+  ];
+
   let modelStatus = $state<ModelStatus | null>(null);
   let downloading = $state(false);
   let downloadProgress = $state({ downloaded: 0, total: 0 });
   let devices = $state<AudioDevice[]>([]);
+  let selectedMic = $state<string | null>(null);
+  let selectedLanguage = $state("pt");
   let unlistenProgress: UnlistenFn | undefined;
 
   onMount(async () => {
@@ -42,6 +49,18 @@
     }
 
     await refreshDevices();
+
+    try {
+      selectedMic = await invoke<string | null>("get_mic_device");
+    } catch {
+      selectedMic = null;
+    }
+
+    try {
+      selectedLanguage = await invoke<string>("get_transcription_language");
+    } catch {
+      selectedLanguage = "pt";
+    }
   });
 
   onDestroy(() => {
@@ -65,6 +84,27 @@
       console.error("download_model failed", err);
     }
     downloading = false;
+  }
+
+  async function onMicChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    const name = value === "" ? null : value;
+    selectedMic = name;
+    try {
+      await invoke("set_mic_device", { name });
+    } catch (err) {
+      console.error("set_mic_device failed", err);
+    }
+  }
+
+  async function onLanguageChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    selectedLanguage = value;
+    try {
+      await invoke("set_transcription_language", { language: value });
+    } catch (err) {
+      console.error("set_transcription_language failed", err);
+    }
   }
 
   function formatBytes(bytes: number): string {
@@ -106,18 +146,39 @@
   </div>
 
   <div class="subsection">
-    <h3>Audio devices</h3>
-    {#if devices.length === 0}
-      <p class="status missing">No devices found</p>
+    <h3>Language</h3>
+    <select class="select" value={selectedLanguage} onchange={onLanguageChange}>
+      {#each LANGUAGES as lang}
+        <option value={lang.code}>{lang.label}</option>
+      {/each}
+    </select>
+  </div>
+
+  <div class="subsection">
+    <h3>Microphone</h3>
+    {#if devices.filter((d) => d.device_type === "Input").length === 0}
+      <p class="status missing">No microphones found</p>
+    {:else}
+      <select class="select" value={selectedMic ?? ""} onchange={onMicChange}>
+        <option value="">System default</option>
+        {#each devices.filter((d) => d.device_type === "Input") as mic}
+          <option value={mic.name}>
+            {mic.name}{mic.is_default ? " (default)" : ""}
+          </option>
+        {/each}
+      </select>
+    {/if}
+  </div>
+
+  <div class="subsection">
+    <h3>System audio</h3>
+    {#if devices.filter((d) => d.device_type === "System").length === 0}
+      <p class="status missing">Not available (requires macOS 13+ and Screen Recording permission)</p>
     {:else}
       <ul class="device-list">
-        {#each devices as device}
-          <li class:default={device.is_default}>
+        {#each devices.filter((d) => d.device_type === "System") as device}
+          <li>
             <span class="device-name">{device.name}</span>
-            <span class="device-type">{device.device_type === "Input" ? "Mic" : "System"}</span>
-            {#if device.is_default}
-              <span class="device-badge">Default</span>
-            {/if}
           </li>
         {/each}
       </ul>
@@ -237,6 +298,25 @@
     }
   }
 
+  .select {
+    appearance: none;
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font: inherit;
+    font-size: 0.82rem;
+    color: inherit;
+    width: 100%;
+    cursor: pointer;
+  }
+  @media (prefers-color-scheme: dark) {
+    .select {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+  }
+
   .device-list {
     list-style: none;
     padding: 0;
@@ -263,27 +343,5 @@
 
   .device-name {
     flex: 1;
-  }
-
-  .device-type {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    opacity: 0.5;
-  }
-
-  .device-badge {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.35rem;
-    background: rgba(79, 70, 229, 0.15);
-    color: rgba(79, 70, 229, 1);
-    border-radius: 4px;
-    font-weight: 600;
-  }
-  @media (prefers-color-scheme: dark) {
-    .device-badge {
-      background: rgba(167, 139, 250, 0.2);
-      color: rgba(167, 139, 250, 1);
-    }
   }
 </style>
