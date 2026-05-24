@@ -6,6 +6,10 @@ pub struct AudioMixerRingBuffer {
     window_samples: usize,
     max_buffer_samples: usize,
     has_system: bool,
+    pub(crate) overflow_mic: u32,
+    pub(crate) overflow_sys: u32,
+    pub(crate) zero_pad_count: u32,
+    last_health_report: std::time::Instant,
 }
 
 impl AudioMixerRingBuffer {
@@ -18,6 +22,10 @@ impl AudioMixerRingBuffer {
             window_samples,
             max_buffer_samples,
             has_system,
+            overflow_mic: 0,
+            overflow_sys: 0,
+            zero_pad_count: 0,
+            last_health_report: std::time::Instant::now(),
         }
     }
 
@@ -93,7 +101,29 @@ impl AudioMixerRingBuffer {
             window.resize(self.window_samples, 0.0);
             window
         } else {
+            self.zero_pad_count += 1;
             vec![0.0; self.window_samples]
+        }
+    }
+
+    pub fn maybe_report_health(&mut self) {
+        if self.last_health_report.elapsed().as_secs() >= 30 {
+            let mic_fill = self.mic_buffer.len();
+            let sys_fill = self.sys_buffer.len();
+            let any_activity = self.overflow_mic > 0 || self.overflow_sys > 0 || self.zero_pad_count > 0;
+            if any_activity || mic_fill > 0 || sys_fill > 0 {
+                eprintln!(
+                    "[mixer] health: mic_buf={}/{} sys_buf={}/{} overflows={}mic/{}sys zero_pads={}",
+                    mic_fill, self.max_buffer_samples,
+                    sys_fill, self.max_buffer_samples,
+                    self.overflow_mic, self.overflow_sys,
+                    self.zero_pad_count
+                );
+            }
+            self.overflow_mic = 0;
+            self.overflow_sys = 0;
+            self.zero_pad_count = 0;
+            self.last_health_report = std::time::Instant::now();
         }
     }
 
@@ -113,6 +143,10 @@ impl AudioMixerRingBuffer {
                 overflow
             );
             buf.drain(..overflow);
+            match source {
+                Source::Mic => self.overflow_mic += 1,
+                Source::System => self.overflow_sys += 1,
+            }
         }
     }
 }
@@ -215,6 +249,21 @@ mod tests {
         assert!((soft_clip(1.5) - 1.0).abs() < 1e-6);
         assert!((soft_clip(-1.5) - (-1.0)).abs() < 1e-6);
         assert!((soft_clip(0.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn health_counters_track_overflow_and_pads() {
+        let mut mixer = AudioMixerRingBuffer::new(16000, true);
+        let huge = vec![0.1; mixer.max_buffer_samples + 5000];
+        mixer.push_mic(&huge);
+        assert!(mixer.overflow_mic > 0);
+        assert_eq!(mixer.overflow_sys, 0);
+
+        // Extract window with empty system -> zero pad
+        let window = (16000.0 * 0.6) as usize;
+        mixer.push_mic(&vec![0.5; window]);
+        let _ = mixer.extract_mixed();
+        assert!(mixer.zero_pad_count > 0);
     }
 
     #[test]
