@@ -227,14 +227,16 @@ impl RecordingHandle {
         // Resample and transcribe any remaining raw samples
         if !remaining_raw.is_empty() {
             if let Ok(resampled) = resample_to_16khz(&remaining_raw, self.sample_rate) {
-                // RMS silence check
-                let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
-                    / resampled.len() as f32)
-                    .sqrt();
-                if rms >= 0.01 {
-                    let text = transcription::transcribe_with_language(whisper_ctx, &resampled, &self.language)
-                        .unwrap_or_default();
-                    self.transcript.lock().expect("transcript mutex").push(text);
+                if !resampled.is_empty() {
+                    // RMS silence check
+                    let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
+                        / resampled.len() as f32)
+                        .sqrt();
+                    if rms >= 0.01 {
+                        let text = transcription::transcribe_with_language(whisper_ctx, &resampled, &self.language)
+                            .unwrap_or_default();
+                        self.transcript.lock().expect("transcript mutex").push(text);
+                    }
                 }
                 all_16k.extend(resampled);
             }
@@ -346,6 +348,10 @@ fn process_chunk(
     {
         let mut guard = all_samples_16k.lock().expect("samples mutex");
         guard.extend(&resampled);
+    }
+
+    if resampled.is_empty() {
+        return;
     }
 
     // RMS silence check
