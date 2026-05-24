@@ -35,12 +35,6 @@
     focusKey?: number;
     /** Test seam: receives the live EditorView once it mounts. */
     oneditorReady?: (view: EditorView) => void;
-    onStartRecording?: () => void;
-    onStopRecording?: () => Promise<void>;
-    recordingActive?: boolean;
-    recordingElapsed?: number;
-    partialTranscript?: string;
-    peakLevel?: number;
   }
 
   let {
@@ -48,12 +42,6 @@
     onclose,
     focusKey = 0,
     oneditorReady,
-    onStartRecording,
-    onStopRecording,
-    recordingActive = false,
-    recordingElapsed = 0,
-    partialTranscript = "",
-    peakLevel = 0,
   }: Props = $props();
 
   let host: HTMLDivElement | undefined = $state();
@@ -83,12 +71,6 @@
     }
     onclose?.();
     return true;
-  }
-
-  function formatElapsed(secs: number): string {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   function handleEscape(): boolean {
@@ -178,38 +160,8 @@
 </script>
 
 <div class="composer" class:saved data-tauri-drag-region>
-  {#if recordingActive}
-    <div class="recording-overlay">
-      <div class="recording-header">
-        <div class="recording-pulse"></div>
-        <span class="recording-timer">{formatElapsed(recordingElapsed)}</span>
-      </div>
-      <div class="vu-bar">
-        <div class="vu-fill" style="width: {Math.min(peakLevel * 100, 100)}%"></div>
-      </div>
-      {#if partialTranscript}
-        <p class="partial-transcript">{partialTranscript}</p>
-      {/if}
-      <button type="button" class="stop-btn" onclick={() => onStopRecording?.()}>
-        Stop
-      </button>
-    </div>
-  {:else}
-    <div class="editor" bind:this={host}></div>
-    <div class="bottom-bar">
-      {#if onStartRecording}
-        <button
-          type="button"
-          class="mic-btn"
-          title="Record voice note"
-          onclick={() => onStartRecording?.()}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-        </button>
-      {/if}
-      <div class="hint">ESC cancels · ⌘↩ saves</div>
-    </div>
-  {/if}
+  <div class="editor" bind:this={host}></div>
+  <div class="hint">ESC cancels · ⌘↩ saves</div>
 </div>
 
 <style>
@@ -315,111 +267,12 @@
     opacity: 0.95;
   }
 
-  .bottom-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
   .hint {
-    flex: 1;
+    margin-top: 0.5rem;
     font-size: 0.75rem;
     opacity: 0.45;
     user-select: none;
     text-align: right;
-  }
-
-  .mic-btn {
-    background: none;
-    border: 1px solid rgba(128, 128, 128, 0.25);
-    border-radius: 6px;
-    padding: 0.25rem 0.4rem;
-    cursor: pointer;
-    color: inherit;
-    opacity: 0.5;
-    transition: opacity 100ms;
-    display: flex;
-    align-items: center;
-  }
-  .mic-btn:hover {
-    opacity: 0.9;
-  }
-
-  .recording-overlay {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    overflow: hidden;
-  }
-
-  .recording-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .vu-bar {
-    width: 80%;
-    height: 4px;
-    background: rgba(128, 128, 128, 0.2);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .vu-fill {
-    height: 100%;
-    background: #22c55e;
-    border-radius: 2px;
-  }
-
-  .partial-transcript {
-    font-size: 0.8rem;
-    opacity: 0.6;
-    text-align: center;
-    max-height: 3.5rem;
-    overflow-y: auto;
-    padding: 0 0.5rem;
-    margin: 0;
-    line-height: 1.3;
-  }
-
-  .recording-pulse {
-    width: 1rem;
-    height: 1rem;
-    border-radius: 50%;
-    background: #ef4444;
-    animation: pulse 1.2s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.3); }
-  }
-
-  .recording-timer {
-    font-size: 1.8rem;
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
-    opacity: 0.8;
-  }
-
-  .stop-btn {
-    background: #ef4444;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 0.5rem 1.5rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 100ms;
-  }
-  .stop-btn:hover {
-    background: #dc2626;
   }
 
   @media (prefers-color-scheme: dark) {

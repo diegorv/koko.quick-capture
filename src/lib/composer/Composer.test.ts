@@ -97,35 +97,4 @@ describe("Composer", () => {
     expect(view.hasFocus).toBe(true);
   });
 
-  it("renders a mic button when onStartRecording is provided", async () => {
-    const { container } = await renderWithView({
-      save: vi.fn(),
-      onclose: vi.fn(),
-    });
-    // Without onStartRecording, no mic button
-    expect(container.querySelector(".mic-btn")).toBeNull();
-
-    const result = render(Composer, {
-      props: {
-        save: vi.fn(),
-        onStartRecording: vi.fn(),
-      },
-    });
-    expect(result.container.querySelector(".mic-btn")).toBeTruthy();
-  });
-
-  it("shows recording overlay when recordingActive is true", () => {
-    const { container, getByText } = render(Composer, {
-      props: {
-        save: vi.fn(),
-        recordingActive: true,
-        recordingElapsed: 65,
-        onStopRecording: vi.fn(),
-      },
-    });
-    expect(getByText("1:05")).toBeTruthy();
-    expect(getByText("Stop")).toBeTruthy();
-    expect(container.querySelector(".recording-pulse")).toBeTruthy();
-    expect(container.querySelector(".editor")).toBeNull();
-  });
 });
