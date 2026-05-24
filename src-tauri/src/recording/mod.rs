@@ -15,7 +15,7 @@ const MODEL_FILENAME: &str = "ggml-large-v3-turbo-q5_0.bin";
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
-const CHUNK_INTERVAL_SECS: u64 = 30;
+const CHUNK_INTERVAL_SECS: u64 = 20;
 
 pub fn models_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
