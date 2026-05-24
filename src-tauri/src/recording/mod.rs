@@ -107,8 +107,6 @@ pub struct RecordingHandle {
     _chunker_thread: Option<std::thread::JoinHandle<()>>,
 }
 
-unsafe impl Send for RecordingHandle {}
-
 impl RecordingHandle {
     pub fn start(
         mic_device: Option<SelectedDevice>,
