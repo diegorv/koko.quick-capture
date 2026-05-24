@@ -54,8 +54,11 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
     params.set_token_timestamps(false);
     params.set_language(Some(language));
     params.set_translate(false);
+    params.set_temperature(0.0);
+    params.set_temperature_inc(0.2);
     params.set_no_speech_thold(0.55);
     params.set_entropy_thold(2.4);
+    params.set_logprob_thold(-1.0);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
 
