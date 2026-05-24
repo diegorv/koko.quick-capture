@@ -25,6 +25,9 @@ pub const SETTING_LAST_INBOX_OPEN_ID: &str = "last_inbox_open_id";
 /// user clears the path.
 pub const SETTING_WIKILINK_SOURCE_FOLDER: &str = "wikilink_source_folder";
 
+pub const SETTING_TRANSCRIPTION_LANGUAGE: &str = "transcription_language";
+pub const SETTING_MIC_DEVICE: &str = "mic_device";
+
 /// ULID min (26 zero characters). Used as the default `count_after`
 /// cursor when `SETTING_LAST_INBOX_OPEN_ID` has never been written, so
 /// the first-launch badge equals the total non-deleted capture count.

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const MIN_AUDIO_SAMPLES_16KHZ: usize = 16_000;
-const WHISPER_LANGUAGE: &str = "pt";
+pub const DEFAULT_LANGUAGE: &str = "pt";
 
 pub fn create_whisper_context(model_path: &Path) -> Result<Arc<WhisperContext>> {
     let mut ctx_params = WhisperContextParameters::default();
@@ -30,6 +30,10 @@ fn pad_audio_to_min_length(samples: &[f32], min_samples: usize) -> Vec<f32> {
 }
 
 pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
+    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE)
+}
+
+pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], language: &str) -> Result<String> {
     let mut state = ctx
         .create_state()
         .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
@@ -44,7 +48,7 @@ pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
     params.set_token_timestamps(false);
-    params.set_language(Some(WHISPER_LANGUAGE));
+    params.set_language(Some(language));
     params.set_translate(false);
     params.set_no_speech_thold(0.6);
     params.set_entropy_thold(2.4);

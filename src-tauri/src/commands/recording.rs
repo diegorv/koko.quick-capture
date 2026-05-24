@@ -3,9 +3,10 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use whisper_rs::WhisperContext;
 
+use crate::audio::{DeviceType, SelectedDevice};
 use crate::events::{CAPTURES_CHANGED as CAPTURES_CHANGED_EVENT, DOCK_PULSE as DOCK_PULSE_EVENT};
 use crate::recording::{self, RecordingHandle};
-use crate::store::Store;
+use crate::store::{Store, SETTING_MIC_DEVICE, SETTING_TRANSCRIPTION_LANGUAGE};
 
 pub struct RecordingState(pub Mutex<Option<RecordingHandle>>);
 
@@ -71,6 +72,7 @@ fn ensure_whisper_loaded(whisper: &WhisperState) -> Result<std::sync::Arc<Whispe
 pub fn start_recording(
     rec_state: State<'_, RecordingState>,
     whisper: State<'_, WhisperState>,
+    store: State<'_, Store>,
 ) -> Result<(), String> {
     let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
     if guard.is_some() {
@@ -78,11 +80,65 @@ pub fn start_recording(
     }
 
     let ctx = ensure_whisper_loaded(&whisper)?;
-    let mut handle = RecordingHandle::start(Some(ctx.clone()))
+
+    let device = store
+        .settings_get(SETTING_MIC_DEVICE)
+        .ok()
+        .flatten()
+        .map(|name| SelectedDevice {
+            name,
+            device_type: DeviceType::Input,
+        });
+
+    let language = store
+        .settings_get(SETTING_TRANSCRIPTION_LANGUAGE)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string());
+
+    let mut handle = RecordingHandle::start(device, language)
         .map_err(|e| e.to_string())?;
     handle.start_chunker(ctx);
     *guard = Some(handle);
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_mic_device(
+    name: Option<String>,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    match name {
+        Some(n) => store.settings_set(SETTING_MIC_DEVICE, &n),
+        None => store.settings_set(SETTING_MIC_DEVICE, ""),
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_mic_device(store: State<'_, Store>) -> Result<Option<String>, String> {
+    store
+        .settings_get(SETTING_MIC_DEVICE)
+        .map(|v| v.filter(|s| !s.is_empty()))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_transcription_language(
+    language: String,
+    store: State<'_, Store>,
+) -> Result<(), String> {
+    store
+        .settings_set(SETTING_TRANSCRIPTION_LANGUAGE, &language)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_transcription_language(store: State<'_, Store>) -> Result<String, String> {
+    store
+        .settings_get(SETTING_TRANSCRIPTION_LANGUAGE)
+        .map(|v| v.unwrap_or_else(|| crate::transcription::DEFAULT_LANGUAGE.to_string()))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

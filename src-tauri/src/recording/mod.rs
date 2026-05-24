@@ -7,7 +7,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use whisper_rs::WhisperContext;
 
-use crate::audio::{resample_to_16khz, save_wav, AudioCapture};
+use crate::audio::{resample_to_16khz, save_wav, AudioCapture, SelectedDevice};
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
 
@@ -97,6 +97,7 @@ pub struct RecordingHandle {
     pub peak_level: Arc<AtomicU32>,
     pub started_at: Instant,
     sample_rate: u32,
+    language: String,
     rx: mpsc::UnboundedReceiver<Vec<f32>>,
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
@@ -107,7 +108,10 @@ pub struct RecordingHandle {
 unsafe impl Send for RecordingHandle {}
 
 impl RecordingHandle {
-    pub fn start(_whisper_ctx: Option<Arc<WhisperContext>>) -> Result<Self> {
+    pub fn start(
+        device: Option<SelectedDevice>,
+        language: String,
+    ) -> Result<Self> {
         let is_recording = Arc::new(AtomicBool::new(true));
         let peak_level = Arc::new(AtomicU32::new(0));
         let (tx, rx) = mpsc::unbounded_channel();
@@ -118,7 +122,7 @@ impl RecordingHandle {
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         let audio_thread = std::thread::spawn(move || {
-            match AudioCapture::start(tx, is_rec.clone(), None, peak) {
+            match AudioCapture::start(tx, is_rec.clone(), device, peak) {
                 Ok((_stream, capture)) => {
                     let _ = result_tx.send(Ok(capture.sample_rate));
                     while is_rec.load(Ordering::Relaxed) {
@@ -143,6 +147,7 @@ impl RecordingHandle {
             peak_level,
             started_at: Instant::now(),
             sample_rate,
+            language,
             rx,
             transcript,
             all_samples_16k,
@@ -194,7 +199,7 @@ impl RecordingHandle {
                     / resampled.len() as f32)
                     .sqrt();
                 if rms >= 0.01 {
-                    let text = transcription::transcribe(whisper_ctx, &resampled)
+                    let text = transcription::transcribe_with_language(whisper_ctx, &resampled, &self.language)
                         .unwrap_or_default();
                     self.transcript.lock().expect("transcript mutex").push(text);
                 }
@@ -225,16 +230,15 @@ impl RecordingHandle {
         let transcript = self.transcript.clone();
         let all_samples = self.all_samples_16k.clone();
         let sample_rate = self.sample_rate;
+        let language = self.language.clone();
 
-        // Move the receiver to the chunker thread so it owns the
-        // drain loop.
         let rx = std::mem::replace(&mut self.rx, {
             let (_tx, rx) = mpsc::unbounded_channel();
             rx
         });
 
         let thread = std::thread::spawn(move || {
-            chunker_loop(rx, is_rec, whisper_ctx, transcript, all_samples, sample_rate);
+            chunker_loop(rx, is_rec, whisper_ctx, transcript, all_samples, sample_rate, &language);
         });
 
         self._chunker_thread = Some(thread);
@@ -248,6 +252,7 @@ fn chunker_loop(
     transcript: Arc<Mutex<ChunkedTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
+    language: &str,
 ) {
     let mut buffer: Vec<f32> = Vec::new();
     let chunk_samples = (sample_rate as u64 * CHUNK_INTERVAL_SECS) as usize;
@@ -267,11 +272,11 @@ fn chunker_loop(
                 &whisper_ctx,
                 &transcript,
                 &all_samples_16k,
+                language,
             );
         }
 
         if !is_recording.load(Ordering::Relaxed) {
-            // Process remaining buffer
             if !buffer.is_empty() {
                 process_chunk(
                     &buffer,
@@ -279,6 +284,7 @@ fn chunker_loop(
                     &whisper_ctx,
                     &transcript,
                     &all_samples_16k,
+                    language,
                 );
             }
             break;
@@ -294,6 +300,7 @@ fn process_chunk(
     whisper_ctx: &WhisperContext,
     transcript: &Mutex<ChunkedTranscript>,
     all_samples_16k: &Mutex<Vec<f32>>,
+    language: &str,
 ) {
     let resampled = match resample_to_16khz(raw_samples, sample_rate) {
         Ok(r) => r,
@@ -315,7 +322,7 @@ fn process_chunk(
         return;
     }
 
-    match transcription::transcribe(whisper_ctx, &resampled) {
+    match transcription::transcribe_with_language(whisper_ctx, &resampled, language) {
         Ok(text) => {
             if !text.is_empty() {
                 eprintln!("[recording] chunk transcribed: {}...", &text[..text.len().min(60)]);
