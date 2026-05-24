@@ -22,11 +22,12 @@ pub fn create_whisper_context(model_path: &Path) -> Result<Arc<WhisperContext>> 
     Ok(Arc::new(ctx))
 }
 
-fn pad_audio_to_min_length(samples: &[f32], min_samples: usize) -> Vec<f32> {
+const TRAILING_SILENCE_SAMPLES: usize = 16_000;
+
+fn pad_audio(samples: &[f32]) -> Vec<f32> {
+    let min_len = samples.len().max(MIN_AUDIO_SAMPLES_16KHZ) + TRAILING_SILENCE_SAMPLES;
     let mut padded = samples.to_vec();
-    if padded.len() < min_samples {
-        padded.resize(min_samples, 0.0);
-    }
+    padded.resize(min_len, 0.0);
     padded
 }
 
@@ -41,7 +42,7 @@ pub fn transcribe_with_language(ctx: &WhisperContext, audio_data: &[f32], langua
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
-    let audio = pad_audio_to_min_length(audio_data, MIN_AUDIO_SAMPLES_16KHZ);
+    let audio = pad_audio(audio_data);
 
     let cpus = std::thread::available_parallelism()
         .map(|n| n.get() as i32)
@@ -212,11 +213,18 @@ mod tests {
     }
 
     #[test]
-    fn pad_audio_to_min_length_zero_pads_short_buffer() {
+    fn pad_audio_adds_trailing_silence_and_meets_minimum() {
         let input = vec![0.5f32, -0.5, 0.25];
-        let padded = pad_audio_to_min_length(&input, 8);
-        assert_eq!(padded.len(), 8);
+        let padded = pad_audio(&input);
+        assert_eq!(padded.len(), MIN_AUDIO_SAMPLES_16KHZ + TRAILING_SILENCE_SAMPLES);
         assert_eq!(&padded[..3], &input[..]);
         assert!(padded[3..].iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn pad_audio_appends_silence_to_long_buffer() {
+        let input = vec![0.1f32; MIN_AUDIO_SAMPLES_16KHZ + 100];
+        let padded = pad_audio(&input);
+        assert_eq!(padded.len(), input.len() + TRAILING_SILENCE_SAMPLES);
     }
 }
