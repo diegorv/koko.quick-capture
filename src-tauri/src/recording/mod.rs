@@ -24,8 +24,8 @@ const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
-const SYS_VAD_REDEMPTION_TIME_MS: u32 = 800;
-const SYS_MAX_SEGMENT_SAMPLES: usize = 16000 * 30; // 30s at 16kHz
+const SYS_VAD_REDEMPTION_TIME_MS: u32 = 400;
+const SYS_MAX_SEGMENT_SAMPLES: usize = 16000 * 10; // 10s at 16kHz
 const FALLBACK_CHUNK_SECS: u64 = 20;
 const MAX_ERRORS: u32 = 15;
 
