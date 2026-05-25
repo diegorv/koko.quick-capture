@@ -325,8 +325,10 @@ impl DualStreamTranscript {
                 if !result.is_empty() {
                     result.push('\n');
                 }
-                result.push_str(label);
-                result.push(' ');
+                let total_secs = seg.offset_ms / 1000;
+                let mins = total_secs / 60;
+                let secs = total_secs % 60;
+                result.push_str(&format!("[{mins}:{secs:02}] {label} "));
                 result.push_str(&seg.text);
                 current_source = Some(seg.source);
             } else {
@@ -1366,7 +1368,7 @@ mod tests {
         t.push("thanks".into(), AudioSource::Mic, 1000);
         assert_eq!(
             t.merged(),
-            "[You] hi there\n[System] welcome to the meeting\n[You] thanks"
+            "[0:00] [You] hi there\n[0:00] [System] welcome to the meeting\n[0:01] [You] thanks"
         );
     }
 
@@ -1378,7 +1380,7 @@ mod tests {
         t.push("third".into(), AudioSource::Mic, 2000);
         assert_eq!(
             t.merged(),
-            "[System] first\n[You] second third"
+            "[0:00] [System] first\n[0:01] [You] second third"
         );
     }
 
@@ -1390,7 +1392,7 @@ mod tests {
         t.push("three".into(), AudioSource::Mic, 1000);
         assert_eq!(
             t.merged(),
-            "[System] one two\n[You] three"
+            "[0:00] [System] one two\n[0:01] [You] three"
         );
     }
 
@@ -1402,7 +1404,7 @@ mod tests {
         t.push("hello world".into(), AudioSource::System, 250);
         assert_eq!(
             t.merged(),
-            "[You] one two three four\n[System] hello world\n[You] five six"
+            "[0:00] [You] one two three four\n[0:00] [System] hello world\n[0:00] [You] five six"
         );
     }
 
