@@ -674,6 +674,39 @@ fn process_and_route_chunks(
     }
 }
 
+fn flush_dsp(
+    mixer: &mut AudioMixerRingBuffer,
+    resampler_48k: &mut Option<PersistentResampler>,
+    resampler_16k: &mut Option<PersistentResampler>,
+) {
+    let flushed_48k = resampler_48k
+        .as_mut()
+        .and_then(|r| r.flush().ok())
+        .unwrap_or_default();
+
+    let mut remaining_16k = Vec::new();
+
+    if !flushed_48k.is_empty() {
+        if let Some(ref mut r16) = resampler_16k {
+            if let Ok(out) = r16.process(&flushed_48k) {
+                remaining_16k.extend(out);
+            }
+        }
+    }
+
+    if let Some(ref mut r16) = resampler_16k {
+        if let Ok(out) = r16.flush() {
+            remaining_16k.extend(out);
+        }
+    }
+
+    if !remaining_16k.is_empty() {
+        mixer.push_mic(&remaining_16k);
+    }
+
+    mixer.flush_resampler();
+}
+
 fn process_vad_segments(
     segments: Vec<crate::audio::vad::SpeechSegment>,
     whisper_ctx: &WhisperContext,
@@ -786,6 +819,7 @@ fn chunker_loop(
                 &mut hp_filter, &mut denoiser, &mut normalizer,
                 &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
             );
+            flush_dsp(&mut mixer, &mut resampler_to_48k, &mut resampler_to_16k);
             let remaining_16k = mixer.drain_remaining();
             if !remaining_16k.is_empty() {
                 all_samples_16k.lock().expect("samples mutex").extend(&remaining_16k);

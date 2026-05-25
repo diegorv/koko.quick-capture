@@ -12,12 +12,13 @@ const SINC_PARAMS: SincInterpolationParameters = SincInterpolationParameters {
     window: WindowFunction::BlackmanHarris2,
 };
 
-const CHUNK_SIZE: usize = 4096;
+const CHUNK_SIZE: usize = 512;
 
 pub struct PersistentResampler {
     resampler: Async<f32>,
     from_rate: u32,
     to_rate: u32,
+    buffer: Vec<f32>,
 }
 
 impl PersistentResampler {
@@ -34,6 +35,7 @@ impl PersistentResampler {
             resampler,
             from_rate,
             to_rate,
+            buffer: Vec::with_capacity(CHUNK_SIZE * 2),
         })
     }
 
@@ -44,34 +46,39 @@ impl PersistentResampler {
 
         use audioadapter_buffers::direct::SequentialSliceOfVecs;
 
-        let mut output = Vec::new();
-        for chunk in samples.chunks(CHUNK_SIZE) {
-            let padded;
-            let input = if chunk.len() < CHUNK_SIZE {
-                padded = {
-                    let mut v = chunk.to_vec();
-                    v.resize(CHUNK_SIZE, 0.0);
-                    v
-                };
-                &padded
-            } else {
-                chunk
-            };
+        self.buffer.extend_from_slice(samples);
 
-            let data = vec![input.to_vec()];
+        let mut output = Vec::new();
+        while self.buffer.len() >= CHUNK_SIZE {
+            let chunk: Vec<f32> = self.buffer.drain(..CHUNK_SIZE).collect();
+            let data = vec![chunk];
             let waves_in = SequentialSliceOfVecs::new(&data[..], 1, CHUNK_SIZE)
                 .map_err(|e| anyhow::anyhow!("Buffer error: {}", e))?;
             let waves_out = self.resampler.process(&waves_in, 0, None)?;
-            let out_data = waves_out.take_data();
-
-            if chunk.len() < CHUNK_SIZE {
-                let expected = (chunk.len() as f64 * self.to_rate as f64 / self.from_rate as f64) as usize;
-                output.extend_from_slice(&out_data[..expected.min(out_data.len())]);
-            } else {
-                output.extend_from_slice(&out_data);
-            }
+            output.extend_from_slice(&waves_out.take_data());
         }
         Ok(output)
+    }
+
+    pub fn flush(&mut self) -> Result<Vec<f32>> {
+        if self.from_rate == self.to_rate {
+            return Ok(self.buffer.drain(..).collect());
+        }
+        if self.buffer.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        use audioadapter_buffers::direct::SequentialSliceOfVecs;
+
+        let real_len = self.buffer.len();
+        self.buffer.resize(CHUNK_SIZE, 0.0);
+        let data = vec![self.buffer.drain(..).collect::<Vec<f32>>()];
+        let waves_in = SequentialSliceOfVecs::new(&data[..], 1, CHUNK_SIZE)
+            .map_err(|e| anyhow::anyhow!("Buffer error: {}", e))?;
+        let waves_out = self.resampler.process(&waves_in, 0, None)?;
+        let out = waves_out.take_data();
+        let expected = (real_len as f64 * self.to_rate as f64 / self.from_rate as f64) as usize;
+        Ok(out[..expected.min(out.len())].to_vec())
     }
 }
 
@@ -234,5 +241,64 @@ mod tests {
         let out2 = r.process(&chunk).unwrap();
         assert!(!out1.is_empty());
         assert!(!out2.is_empty());
+    }
+
+    #[test]
+    fn persistent_resampler_buffers_small_chunks() {
+        let mut r = PersistentResampler::new(48000, 16000).unwrap();
+        // 256 samples < CHUNK_SIZE(512) -> should buffer, return empty
+        let small = vec![0.5f32; 256];
+        let out = r.process(&small).unwrap();
+        assert!(out.is_empty(), "sub-chunk input should buffer, got {} samples", out.len());
+
+        // Another 256 -> total 512 = CHUNK_SIZE -> should produce output
+        let out = r.process(&small).unwrap();
+        assert!(!out.is_empty(), "full chunk should produce output");
+    }
+
+    #[test]
+    fn persistent_resampler_flush_drains_buffered() {
+        let mut r = PersistentResampler::new(48000, 16000).unwrap();
+        let small = vec![0.5f32; 300];
+        let out = r.process(&small).unwrap();
+        assert!(out.is_empty());
+
+        let flushed = r.flush().unwrap();
+        assert!(!flushed.is_empty(), "flush should produce output from buffered samples");
+        let expected = (300.0 * 16000.0 / 48000.0) as usize;
+        let tolerance = (expected as f32 * 0.15) as usize;
+        assert!(
+            (flushed.len() as i64 - expected as i64).unsigned_abs() <= tolerance as u64,
+            "expected ~{}, got {}", expected, flushed.len()
+        );
+    }
+
+    #[test]
+    fn persistent_resampler_small_chunks_preserve_amplitude() {
+        let freq = 440.0;
+        let duration = CHUNK_SIZE * 4;
+        let signal: Vec<f32> = (0..duration)
+            .map(|i| 0.5 * (2.0 * std::f32::consts::PI * freq * i as f32 / 48000.0).sin())
+            .collect();
+
+        // Large chunks (ideal)
+        let mut r_large = PersistentResampler::new(48000, 16000).unwrap();
+        let out_large = r_large.process(&signal).unwrap();
+        let rms_large = (out_large.iter().map(|s| s * s).sum::<f32>() / out_large.len() as f32).sqrt();
+
+        // Small 512-sample chunks (real mic callbacks)
+        let mut r_small = PersistentResampler::new(48000, 16000).unwrap();
+        let mut out_small = Vec::new();
+        for chunk in signal.chunks(512) {
+            out_small.extend(r_small.process(chunk).unwrap());
+        }
+        out_small.extend(r_small.flush().unwrap());
+        let rms_small = (out_small.iter().map(|s| s * s).sum::<f32>() / out_small.len() as f32).sqrt();
+
+        assert!(
+            rms_small > rms_large * 0.95,
+            "buffered resampling should preserve >95% amplitude, got {:.1}%",
+            (rms_small / rms_large) * 100.0
+        );
     }
 }

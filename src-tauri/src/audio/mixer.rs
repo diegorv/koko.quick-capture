@@ -167,6 +167,14 @@ impl AudioMixerRingBuffer {
         }
     }
 
+    pub fn flush_resampler(&mut self) {
+        if let Some(ref mut resampler) = self.sys_resampler {
+            if let Ok(flushed) = resampler.flush() {
+                self.sys_buffer.extend(flushed);
+            }
+        }
+    }
+
     fn trim_overflow(&mut self, source: &Source) {
         let buf = match source {
             Source::Mic => &mut self.mic_buffer,
