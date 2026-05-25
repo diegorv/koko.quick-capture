@@ -26,7 +26,7 @@
   let selectedMic = $state<string | null>(null);
   let selectedSysDevice = $state<string | null>(null);
   let sysAudioEnabled = $state(false);
-  let denoiseEnabled = $state(true);
+  let denoiseEnabled = $state(false);
   let selectedLanguage = $state("pt");
   let unlistenProgress: UnlistenFn | undefined;
 
@@ -74,7 +74,7 @@
     try {
       denoiseEnabled = await invoke<boolean>("get_denoise_enabled");
     } catch {
-      denoiseEnabled = true;
+      denoiseEnabled = false;
     }
 
     try {

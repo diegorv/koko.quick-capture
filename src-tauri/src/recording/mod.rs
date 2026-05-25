@@ -23,10 +23,6 @@ const MODEL_FILENAME: &str = "ggml-large-v3-turbo-q5_0.bin";
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
-const VAD_MODEL_FILENAME: &str = "ggml-silero-v6.2.0.bin";
-const VAD_MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-v6.2.0.bin";
-
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
 const FALLBACK_CHUNK_SECS: u64 = 20;
 const MAX_ERRORS: u32 = 15;
@@ -74,21 +70,7 @@ pub fn model_path() -> PathBuf {
     models_dir().join(MODEL_FILENAME)
 }
 
-pub fn vad_model_path() -> PathBuf {
-    models_dir().join(VAD_MODEL_FILENAME)
-}
-
-fn resolve_vad_path() -> Option<String> {
-    let p = vad_model_path();
-    if p.exists() && validate_model_file(&p, VAD_MIN_SIZE) {
-        p.to_str().map(|s| s.to_string())
-    } else {
-        None
-    }
-}
-
 const WHISPER_MIN_SIZE: u64 = 500_000_000;
-const VAD_MIN_SIZE: u64 = 800_000;
 const GGML_MAGIC: [u8; 4] = [0x6c, 0x6d, 0x67, 0x67];
 const GGUF_MAGIC: [u8; 4] = [0x47, 0x47, 0x55, 0x46];
 
@@ -171,23 +153,6 @@ pub async fn download_model(
     drop(file);
 
     std::fs::rename(&tmp_path, &path)?;
-
-    // Also download VAD model (864KB, negligible)
-    let vad_path = dir.join(VAD_MODEL_FILENAME);
-    if !vad_path.exists() {
-        let vad_tmp = dir.join(format!("{VAD_MODEL_FILENAME}.tmp"));
-        let vad_resp = reqwest::get(VAD_MODEL_URL).await?; // privacy-ok: downloads Silero VAD model from HuggingFace
-        let mut vad_file = std::fs::File::create(&vad_tmp)?;
-        let mut vad_stream = vad_resp.bytes_stream();
-        while let Some(chunk) = vad_stream.next().await {
-            let chunk = chunk?;
-            vad_file.write_all(&chunk)?;
-        }
-        vad_file.flush()?;
-        drop(vad_file);
-        std::fs::rename(&vad_tmp, &vad_path)?;
-        eprintln!("[recording] VAD model downloaded");
-    }
 
     Ok(path)
 }
@@ -482,13 +447,11 @@ impl RecordingHandle {
                         .sqrt();
                     if rms >= 0.01 {
                         let prev = self.transcript.lock().expect("transcript mutex").last_chunk();
-                        let vad_path = resolve_vad_path();
                         let text = transcription::transcribe_with_language(
                             whisper_ctx,
                             &resampled,
                             &self.language,
                             prev.as_deref(),
-                            vad_path.as_deref(),
                         )
                         .unwrap_or_default();
                         self.transcript.lock().expect("transcript mutex").push(text);
@@ -605,7 +568,6 @@ fn transcribe_segment(
     whisper_ctx: &WhisperContext,
     transcript: &Mutex<ChunkedTranscript>,
     language: &str,
-    use_whisper_vad: bool,
     stats: &mut ChunkerStats,
     error_count: &AtomicU32,
 ) {
@@ -620,17 +582,11 @@ fn transcribe_segment(
     }
 
     let prev = transcript.lock().expect("transcript mutex").last_chunk();
-    let vad_path = if use_whisper_vad {
-        resolve_vad_path()
-    } else {
-        None
-    };
     match transcription::transcribe_with_language(
         whisper_ctx,
         samples_16k,
         language,
         prev.as_deref(),
-        vad_path.as_deref(),
     ) {
         Ok(text) => {
             stats.segments_transcribed += 1;
@@ -721,7 +677,7 @@ fn process_vad_segments(
 ) {
     for seg in segments {
         if seg.samples.len() >= 800 {
-            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, false, stats, error_count);
+            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, stats, error_count);
         } else {
             stats.segments_skipped_short += 1;
         }
@@ -811,7 +767,7 @@ fn chunker_loop(
                     let chunk_data: Vec<f32> =
                         fallback_buffer.drain(..fallback_chunk_16k).collect();
                     transcribe_segment(
-                        &chunk_data, &whisper_ctx, &transcript, language, true, &mut stats, &error_count,
+                        &chunk_data, &whisper_ctx, &transcript, language, &mut stats, &error_count,
                     );
                 }
             }
@@ -855,7 +811,7 @@ fn chunker_loop(
                 }
             } else if !fallback_buffer.is_empty() {
                 let remainder = std::mem::take(&mut fallback_buffer);
-                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, true, &mut stats, &error_count);
+                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, &mut stats, &error_count);
             }
 
             break;
@@ -990,12 +946,6 @@ mod tests {
     fn model_path_ends_with_expected_filename() {
         let p = model_path();
         assert!(p.to_string_lossy().ends_with(MODEL_FILENAME));
-    }
-
-    #[test]
-    fn vad_model_path_ends_with_expected_filename() {
-        let p = vad_model_path();
-        assert!(p.to_string_lossy().ends_with(VAD_MODEL_FILENAME));
     }
 
     #[test]

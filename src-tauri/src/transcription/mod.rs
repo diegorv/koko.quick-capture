@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const MIN_AUDIO_SAMPLES_16KHZ: usize = 16_000;
 pub const DEFAULT_LANGUAGE: &str = "pt";
@@ -47,7 +47,7 @@ pub fn warmup(ctx: &WhisperContext) {
 }
 
 pub fn transcribe(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String> {
-    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None, None)
+    transcribe_with_language(ctx, audio_data, DEFAULT_LANGUAGE, None)
 }
 
 pub fn transcribe_with_language(
@@ -55,9 +55,8 @@ pub fn transcribe_with_language(
     audio_data: &[f32],
     language: &str,
     initial_prompt: Option<&str>,
-    vad_model_path: Option<&str>,
 ) -> Result<String> {
-    transcribe_full(ctx, audio_data, language, initial_prompt, vad_model_path, None)
+    transcribe_full(ctx, audio_data, language, initial_prompt, None)
 }
 
 pub fn transcribe_full(
@@ -65,7 +64,6 @@ pub fn transcribe_full(
     audio_data: &[f32],
     language: &str,
     initial_prompt: Option<&str>,
-    vad_model_path: Option<&str>,
     abort_flag: Option<Arc<AtomicBool>>,
 ) -> Result<String> {
     let mut state = ctx
@@ -100,18 +98,6 @@ pub fn transcribe_full(
         .or_else(|| language_seed_prompt(language));
     if let Some(prompt) = effective_prompt {
         params.set_initial_prompt(prompt);
-    }
-
-    if let Some(vad_path) = vad_model_path {
-        params.set_vad_model_path(Some(vad_path));
-        let mut vad_params = WhisperVadParams::new();
-        vad_params.set_threshold(0.5);
-        vad_params.set_min_speech_duration(250);
-        vad_params.set_min_silence_duration(100);
-        vad_params.set_speech_pad(30);
-        vad_params.set_samples_overlap(0.1);
-        params.set_vad_params(vad_params);
-        params.enable_vad(true);
     }
 
     if let Some(flag) = abort_flag {

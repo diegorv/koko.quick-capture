@@ -144,8 +144,8 @@ pub async fn start_recording(
         .settings_get(SETTING_DENOISE_ENABLED)
         .ok()
         .flatten()
-        .map(|v| v != "false")
-        .unwrap_or(true);
+        .map(|v| v == "true")
+        .unwrap_or(false);
 
     // Atomic check-and-set: hold lock from guard check through handle assignment
     let mut guard = rec_state.0.lock().expect("recording mutex poisoned");
@@ -251,7 +251,7 @@ pub fn set_denoise_enabled(
 pub fn get_denoise_enabled(store: State<'_, Store>) -> Result<bool, String> {
     store
         .settings_get(SETTING_DENOISE_ENABLED)
-        .map(|v| v.map(|s| s != "false").unwrap_or(true))
+        .map(|v| v.map(|s| s == "true").unwrap_or(false))
         .map_err(|e| e.to_string())
 }
 
