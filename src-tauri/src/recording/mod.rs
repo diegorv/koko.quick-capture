@@ -13,7 +13,7 @@ use crate::audio::mixer::AudioMixerRingBuffer;
 use crate::audio::normalize::LoudnessNormalizer;
 use crate::audio::vad::ContinuousVadProcessor;
 use crate::audio::{
-    is_likely_bluetooth, resample_to_16khz, resample_to_48khz, save_wav, AudioCapture,
+    is_likely_bluetooth, resample_to_16khz, resample_to_48khz, save_m4a, AudioCapture,
     AudioChunk, PersistentResampler, SelectedDevice,
 };
 use crate::store::{CaptureInput, Store};
@@ -593,10 +593,9 @@ impl RecordingHandle {
             return Err(anyhow::anyhow!("No audio captured"));
         }
 
-        // Save full recording WAV
         std::fs::create_dir_all(audio_dir)?;
-        let audio_path = audio_dir.join(format!("{}.wav", ulid::Ulid::new()));
-        save_wav(&audio_path, &all_16k)?;
+        let audio_path = audio_dir.join(format!("{}.m4a", ulid::Ulid::new()));
+        save_m4a(&audio_path, &all_16k)?;
 
         let text = self.transcript.lock().expect("transcript mutex").merged();
 
