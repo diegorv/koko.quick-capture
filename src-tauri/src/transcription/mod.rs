@@ -5,12 +5,13 @@ use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const MIN_AUDIO_SAMPLES_16KHZ: usize = 16_000;
+const NO_SPEECH_SKIP_THOLD: f32 = 0.7;
 pub const DEFAULT_LANGUAGE: &str = "pt";
 
 pub fn language_seed_prompt(language: &str) -> Option<&'static str> {
     match language {
-        "pt" => Some("Ol\u{e1}, como voc\u{ea} est\u{e1}? Prazer em conhec\u{ea}-lo."),
-        "en" => Some("Hello, how are you doing? Nice to meet you."),
+        "pt" => Some("Olá, tudo bem? Vamos conversar sobre o que aconteceu hoje. Então, o que você acha disso?"),
+        "en" => Some("Hello, how are you doing? Let's talk about what happened today. So, what do you think?"),
         _ => None,
     }
 }
@@ -93,6 +94,7 @@ pub fn transcribe_full(
     params.set_logprob_thold(-1.0);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
+    params.set_max_initial_ts(1.0);
 
     let effective_prompt = initial_prompt
         .filter(|p| !p.is_empty())
@@ -117,6 +119,10 @@ pub fn transcribe_full(
     let mut transcript = String::new();
     for i in 0..num_segments {
         if let Some(segment) = state.get_segment(i) {
+            let no_speech = segment.no_speech_probability();
+            if no_speech > NO_SPEECH_SKIP_THOLD {
+                continue;
+            }
             if let Ok(text) = segment.to_str_lossy() {
                 transcript.push_str(&text);
             }
@@ -430,7 +436,7 @@ mod tests {
 
     #[test]
     fn seed_prompt_pt_returns_portuguese() {
-        assert!(language_seed_prompt("pt").unwrap().contains("Ol"));
+        assert!(language_seed_prompt("pt").unwrap().contains("Olá"));
     }
 
     #[test]
