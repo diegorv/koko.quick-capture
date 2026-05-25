@@ -41,6 +41,8 @@ Full table and source modules in [`docs/capture-kinds.md`](docs/capture-kinds.md
 | `Ctrl+Alt+Cmd+Space` | Open / focus the Composer |
 | `Ctrl+Alt+Cmd+C` | Capture from clipboard |
 | `Ctrl+Alt+Cmd+I` | Open / focus the Inbox |
+| `Ctrl+Alt+Cmd+A` | Open / focus the Archive |
+| `Ctrl+Alt+Cmd+R` | Open / focus the Recording |
 
 ## 🛠 Stack
 
