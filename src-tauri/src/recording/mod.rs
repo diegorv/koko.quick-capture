@@ -19,9 +19,9 @@ use crate::audio::{
 use crate::store::{CaptureInput, Store};
 use crate::transcription;
 
-const MODEL_FILENAME: &str = "ggml-large-v3-turbo-q5_0.bin";
+const MODEL_FILENAME: &str = "ggml-large-v3-turbo.bin";
 const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
 const SYS_VAD_REDEMPTION_TIME_MS: u32 = 400;
@@ -74,7 +74,7 @@ pub fn model_path() -> PathBuf {
     models_dir().join(MODEL_FILENAME)
 }
 
-const WHISPER_MIN_SIZE: u64 = 500_000_000;
+const WHISPER_MIN_SIZE: u64 = 1_400_000_000;
 const GGML_MAGIC: [u8; 4] = [0x6c, 0x6d, 0x67, 0x67];
 const GGUF_MAGIC: [u8; 4] = [0x47, 0x47, 0x55, 0x46];
 
