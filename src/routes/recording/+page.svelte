@@ -133,8 +133,7 @@
 
 <svelte:window on:keydown={(e) => { if (e.key === "Escape") dismiss(); }} />
 
-<div class="recording">
-  <div class="drag-strip" data-tauri-drag-region></div>
+<div class="recording" data-tauri-drag-region>
   <div class="controls">
     <div class="toggle-row">
       <button
@@ -220,11 +219,6 @@
     color: #0f0f0f;
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     border-radius: 12px;
-  }
-
-  .drag-strip {
-    height: 12px;
-    cursor: grab;
   }
 
   .controls {
