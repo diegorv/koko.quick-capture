@@ -1,6 +1,6 @@
 [package]
 name = "quick-capture"
-version = "1.0.18"
+version = "1.0.19"
 description = "Frictionless macOS capture inbox"
 authors = ["Diego R. v."]
 edition = "2021"
