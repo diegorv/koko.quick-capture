@@ -25,14 +25,16 @@ pub fn save_wav(path: &std::path::Path, samples: &[f32]) -> Result<()> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: 16000,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
     };
     let file = std::fs::File::create(path)?;
     let buf_writer = BufWriter::new(file);
     let mut writer = hound::WavWriter::new(buf_writer, spec)?;
     for &sample in samples {
-        writer.write_sample(sample)?;
+        let clamped = sample.clamp(-1.0, 1.0);
+        let pcm = (clamped * i16::MAX as f32) as i16;
+        writer.write_sample(pcm)?;
     }
     writer.finalize()?;
     Ok(())
