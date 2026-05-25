@@ -82,7 +82,8 @@ pub fn transcribe_full(
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
-    params.set_token_timestamps(false);
+    params.set_token_timestamps(true);
+    params.set_max_len(200);
     params.set_language(Some(language));
     params.set_translate(false);
     params.set_temperature(0.0);
