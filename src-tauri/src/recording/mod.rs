@@ -24,6 +24,8 @@ const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
 
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
+const SYS_VAD_REDEMPTION_TIME_MS: u32 = 800;
+const SYS_MAX_SEGMENT_SAMPLES: usize = 16000 * 30; // 30s at 16kHz
 const FALLBACK_CHUNK_SECS: u64 = 20;
 const MAX_ERRORS: u32 = 15;
 
@@ -157,13 +159,14 @@ pub async fn download_model(
     Ok(path)
 }
 
-/// Accumulated transcript chunks from the background chunker thread.
+#[cfg(test)]
 pub struct ChunkedTranscript {
     texts: Vec<String>,
     chunks_processed: u32,
     chunks_failed: u32,
 }
 
+#[cfg(test)]
 impl ChunkedTranscript {
     fn new() -> Self {
         Self {
@@ -203,6 +206,128 @@ impl ChunkedTranscript {
 
     fn last_chunk(&self) -> Option<String> {
         self.texts.last().cloned()
+    }
+
+    pub fn stats(&self) -> (u32, u32) {
+        (self.chunks_processed, self.chunks_failed)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AudioSource {
+    Mic,
+    System,
+}
+
+struct TimestampedSegment {
+    text: String,
+    source: AudioSource,
+    offset_ms: u64,
+}
+
+pub struct DualStreamTranscript {
+    segments: Vec<TimestampedSegment>,
+    mic_last: Option<String>,
+    sys_last: Option<String>,
+    chunks_processed: u32,
+    chunks_failed: u32,
+}
+
+impl DualStreamTranscript {
+    fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+            mic_last: None,
+            sys_last: None,
+            chunks_processed: 0,
+            chunks_failed: 0,
+        }
+    }
+
+    fn push(&mut self, text: String, source: AudioSource, offset_ms: u64) {
+        self.chunks_processed += 1;
+        if text.is_empty() {
+            return;
+        }
+
+        let last = match source {
+            AudioSource::Mic => &self.mic_last,
+            AudioSource::System => &self.sys_last,
+        };
+
+        let final_text = if let Some(prev) = last {
+            if let Some((_prev_idx, cur_idx)) = longest_common_word_overlap(prev, &text) {
+                let cur_words: Vec<&str> = text.split_whitespace().collect();
+                let deduped = cur_words[cur_idx..].join(" ");
+                if deduped.is_empty() {
+                    return;
+                }
+                deduped
+            } else {
+                text
+            }
+        } else {
+            text
+        };
+
+        match source {
+            AudioSource::Mic => self.mic_last = Some(final_text.clone()),
+            AudioSource::System => self.sys_last = Some(final_text.clone()),
+        }
+
+        self.segments.push(TimestampedSegment {
+            text: final_text,
+            source,
+            offset_ms,
+        });
+    }
+
+    fn record_failure(&mut self) {
+        self.chunks_failed += 1;
+    }
+
+    fn last_chunk(&self, source: AudioSource) -> Option<String> {
+        match source {
+            AudioSource::Mic => self.mic_last.clone(),
+            AudioSource::System => self.sys_last.clone(),
+        }
+    }
+
+    pub fn merged(&self) -> String {
+        if self.segments.is_empty() {
+            return String::new();
+        }
+
+        let has_system = self.segments.iter().any(|s| s.source == AudioSource::System);
+        if !has_system {
+            return self.segments.iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_string();
+        }
+
+        let mut sorted: Vec<&TimestampedSegment> = self.segments.iter().collect();
+        sorted.sort_by_key(|s| s.offset_ms);
+
+        let mut parts: Vec<String> = Vec::new();
+        let mut current_source: Option<AudioSource> = None;
+
+        for seg in sorted {
+            if current_source != Some(seg.source) {
+                let label = match seg.source {
+                    AudioSource::Mic => "[You]",
+                    AudioSource::System => "[System]",
+                };
+                parts.push(format!("{} {}", label, seg.text));
+                current_source = Some(seg.source);
+            } else {
+                parts.push(seg.text.clone());
+            }
+        }
+
+        parts.join(" ").trim().to_string()
     }
 
     pub fn stats(&self) -> (u32, u32) {
@@ -259,7 +384,7 @@ pub struct RecordingHandle {
     language: String,
     denoise_enabled: bool,
     rx: mpsc::UnboundedReceiver<AudioChunk>,
-    transcript: Arc<Mutex<ChunkedTranscript>>,
+    transcript: Arc<Mutex<DualStreamTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     _audio_thread: std::thread::JoinHandle<()>,
     _chunker_thread: Option<std::thread::JoinHandle<()>>,
@@ -324,7 +449,7 @@ impl RecordingHandle {
             .recv()
             .map_err(|_| anyhow::anyhow!("Audio thread died before reporting sample rate"))??;
 
-        let transcript = Arc::new(Mutex::new(ChunkedTranscript::new()));
+        let transcript = Arc::new(Mutex::new(DualStreamTranscript::new()));
         let all_samples_16k = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         Ok(RecordingHandle {
@@ -446,7 +571,8 @@ impl RecordingHandle {
                         / resampled.len() as f32)
                         .sqrt();
                     if rms >= 0.01 {
-                        let prev = self.transcript.lock().expect("transcript mutex").last_chunk();
+                        let prev = self.transcript.lock().expect("transcript mutex")
+                            .last_chunk(AudioSource::Mic);
                         let text = transcription::transcribe_with_language(
                             whisper_ctx,
                             &resampled,
@@ -454,7 +580,9 @@ impl RecordingHandle {
                             prev.as_deref(),
                         )
                         .unwrap_or_default();
-                        self.transcript.lock().expect("transcript mutex").push(text);
+                        let offset_ms = self.started_at.elapsed().as_millis() as u64;
+                        self.transcript.lock().expect("transcript mutex")
+                            .push(text, AudioSource::Mic, offset_ms);
                     }
                 }
                 all_16k.extend(resampled);
@@ -563,10 +691,15 @@ fn run_dsp(
     Some(s16)
 }
 
-fn transcribe_segment(
+
+
+
+fn transcribe_segment_dual(
     samples_16k: &[f32],
     whisper_ctx: &WhisperContext,
-    transcript: &Mutex<ChunkedTranscript>,
+    transcript: &Mutex<DualStreamTranscript>,
+    source: AudioSource,
+    offset_ms: u64,
     language: &str,
     stats: &mut ChunkerStats,
     error_count: &AtomicU32,
@@ -581,7 +714,7 @@ fn transcribe_segment(
         return;
     }
 
-    let prev = transcript.lock().expect("transcript mutex").last_chunk();
+    let prev = transcript.lock().expect("transcript mutex").last_chunk(source);
     match transcription::transcribe_with_language(
         whisper_ctx,
         samples_16k,
@@ -590,15 +723,36 @@ fn transcribe_segment(
     ) {
         Ok(text) => {
             stats.segments_transcribed += 1;
-            transcript.lock().expect("transcript mutex").push(text);
+            transcript.lock().expect("transcript mutex").push(text, source, offset_ms);
         }
         Err(e) => {
-            eprintln!("[recording] segment transcription failed: {e}");
+            eprintln!("[recording] {:?} segment transcription failed: {e}",
+                match source { AudioSource::Mic => "mic", AudioSource::System => "sys" });
             error_count.fetch_add(1, Ordering::Relaxed);
-            transcript
-                .lock()
-                .expect("transcript mutex")
-                .record_failure();
+            transcript.lock().expect("transcript mutex").record_failure();
+        }
+    }
+}
+
+fn process_vad_segments_dual(
+    segments: Vec<crate::audio::vad::SpeechSegment>,
+    whisper_ctx: &WhisperContext,
+    transcript: &Mutex<DualStreamTranscript>,
+    source: AudioSource,
+    base_offset_ms: u64,
+    language: &str,
+    stats: &mut ChunkerStats,
+    error_count: &AtomicU32,
+) {
+    for seg in segments {
+        if seg.samples.len() >= 800 {
+            let seg_offset_ms = base_offset_ms + seg.start_timestamp_ms as u64;
+            transcribe_segment_dual(
+                &seg.samples, whisper_ctx, transcript, source, seg_offset_ms,
+                language, stats, error_count,
+            );
+        } else {
+            stats.segments_skipped_short += 1;
         }
     }
 }
@@ -613,6 +767,9 @@ fn process_and_route_chunks(
     resampler_16k: &mut Option<PersistentResampler>,
     sample_rate: u32,
     sys_normalizer: &mut Option<LoudnessNormalizer>,
+    sys_resampler_16k: &mut Option<PersistentResampler>,
+    mic_16k_buf: &mut Vec<f32>,
+    sys_16k_buf: &mut Vec<f32>,
 ) {
     while let Ok(chunk) = rx.try_recv() {
         match chunk {
@@ -622,13 +779,28 @@ fn process_and_route_chunks(
                     resampler_48k, resampler_16k, sample_rate,
                 ) {
                     mixer.push_mic(&s16);
+                    mic_16k_buf.extend(&s16);
                 }
             }
             AudioChunk::System(mut samples) => {
                 if let Some(ref mut norm) = sys_normalizer {
                     norm.process(&mut samples);
                 }
-                mixer.push_system(&samples);
+                if let Some(ref mut r) = sys_resampler_16k {
+                    match r.process(&samples) {
+                        Ok(resampled) => {
+                            mixer.push_system_resampled(&resampled);
+                            sys_16k_buf.extend(&resampled);
+                        }
+                        Err(e) => {
+                            eprintln!("[recording] sys resample to 16kHz failed: {e}");
+                            mixer.push_system(&samples);
+                        }
+                    }
+                } else {
+                    mixer.push_system(&samples);
+                    sys_16k_buf.extend(&samples);
+                }
             }
         }
     }
@@ -667,28 +839,14 @@ fn flush_dsp(
     mixer.flush_resampler();
 }
 
-fn process_vad_segments(
-    segments: Vec<crate::audio::vad::SpeechSegment>,
-    whisper_ctx: &WhisperContext,
-    transcript: &Mutex<ChunkedTranscript>,
-    language: &str,
-    stats: &mut ChunkerStats,
-    error_count: &AtomicU32,
-) {
-    for seg in segments {
-        if seg.samples.len() >= 800 {
-            transcribe_segment(&seg.samples, whisper_ctx, transcript, language, stats, error_count);
-        } else {
-            stats.segments_skipped_short += 1;
-        }
-    }
-}
+
+
 
 fn chunker_loop(
     mut rx: mpsc::UnboundedReceiver<AudioChunk>,
     is_recording: Arc<AtomicBool>,
     whisper_ctx: Arc<WhisperContext>,
-    transcript: Arc<Mutex<ChunkedTranscript>>,
+    transcript: Arc<Mutex<DualStreamTranscript>>,
     all_samples_16k: Arc<Mutex<Vec<f32>>>,
     error_count: Arc<AtomicU32>,
     sample_rate: u32,
@@ -698,6 +856,8 @@ fn chunker_loop(
     mic_bluetooth: bool,
     denoise_enabled: bool,
 ) {
+    let started_at = Instant::now();
+
     let mut hp_filter = HighPassFilter::new(80.0, sample_rate);
     let mut denoiser = if denoise_enabled { Some(Denoiser::new()) } else { None };
     let mut normalizer = LoudnessNormalizer::new(48000);
@@ -722,53 +882,165 @@ fn chunker_loop(
         None
     };
 
-    // Mixer at 16kHz: mic arrives pre-processed (DSP → 16k), system resampled internally
-    let mut mixer = AudioMixerRingBuffer::with_bluetooth(16000, sys_sample_rate, sys_active, mic_bluetooth);
+    let mut sys_resampler_16k: Option<PersistentResampler> = if sys_active {
+        sys_sample_rate.and_then(|sr| {
+            if sr == 16000 {
+                None
+            } else {
+                match PersistentResampler::new(sr, 16000) {
+                    Ok(r) => {
+                        eprintln!("[recording] sys->16kHz resampler: {}Hz -> 16kHz", sr);
+                        Some(r)
+                    }
+                    Err(e) => {
+                        eprintln!("[recording] failed to create sys 16kHz resampler: {e}");
+                        None
+                    }
+                }
+            }
+        })
+    } else {
+        None
+    };
 
-    let mut vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
+    // Mixer at 16kHz for WAV (no internal sys resampler - we resample outside)
+    let mut mixer = AudioMixerRingBuffer::with_bluetooth(16000, None, sys_active, mic_bluetooth);
+
+    let mut mic_vad = match ContinuousVadProcessor::new(16000, VAD_REDEMPTION_TIME_MS) {
         Ok(v) => {
-            eprintln!("[recording] VAD-driven chunking active ({}ms redemption)", VAD_REDEMPTION_TIME_MS);
+            eprintln!("[recording] mic VAD active ({}ms redemption)", VAD_REDEMPTION_TIME_MS);
             Some(v)
         }
         Err(e) => {
-            eprintln!("[recording] VAD unavailable ({e}), using fixed-interval fallback");
+            eprintln!("[recording] mic VAD unavailable ({e}), fixed-interval fallback");
             None
         }
     };
 
+    let mut sys_vad = if sys_active {
+        match ContinuousVadProcessor::new(16000, SYS_VAD_REDEMPTION_TIME_MS) {
+            Ok(v) => {
+                eprintln!("[recording] sys VAD active ({}ms redemption)", SYS_VAD_REDEMPTION_TIME_MS);
+                Some(v)
+            }
+            Err(e) => {
+                eprintln!("[recording] sys VAD unavailable ({e}), fixed-interval for sys");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let fallback_chunk_16k = (16000u64 * FALLBACK_CHUNK_SECS) as usize;
-    let mut fallback_buffer: Vec<f32> = Vec::new();
+    let mut mic_fallback_buffer: Vec<f32> = Vec::new();
+    let mut sys_fallback_buffer: Vec<f32> = Vec::new();
     let mut stats = ChunkerStats::new();
+
+    let mut mic_16k_buf: Vec<f32> = Vec::new();
+    let mut sys_16k_buf: Vec<f32> = Vec::new();
+
+    let mut mic_samples_offset: u64 = 0;
+    let mut sys_samples_offset: u64 = 0;
 
     loop {
         process_and_route_chunks(
             &mut rx, &mut mixer,
             &mut hp_filter, &mut denoiser, &mut normalizer,
             &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
-            &mut sys_normalizer,
+            &mut sys_normalizer, &mut sys_resampler_16k,
+            &mut mic_16k_buf, &mut sys_16k_buf,
         );
 
+        // Feed mixer output to WAV buffer
         while let Some(mixed_16k) = mixer.extract_mixed() {
             all_samples_16k.lock().expect("samples mutex").extend(&mixed_16k);
+        }
 
-            if let Some(ref mut vad_proc) = vad {
-                match vad_proc.process_audio(&mixed_16k) {
+        // Mic transcription pipeline
+        if !mic_16k_buf.is_empty() {
+            let samples = std::mem::take(&mut mic_16k_buf);
+            let offset_ms = (started_at.elapsed().as_millis() as u64)
+                .saturating_sub(samples.len() as u64 * 1000 / 16000);
+
+            if let Some(ref mut vad_proc) = mic_vad {
+                match vad_proc.process_audio(&samples) {
                     Ok(segments) => {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
+                        process_vad_segments_dual(
+                            segments, &whisper_ctx, &transcript,
+                            AudioSource::Mic, offset_ms, language, &mut stats, &error_count,
+                        );
                     }
                     Err(e) => {
-                        eprintln!("[recording] VAD error: {e}");
+                        eprintln!("[recording] mic VAD error: {e}");
                         error_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             } else {
-                fallback_buffer.extend(&mixed_16k);
-                while fallback_buffer.len() >= fallback_chunk_16k {
+                mic_fallback_buffer.extend(&samples);
+                while mic_fallback_buffer.len() >= fallback_chunk_16k {
                     let chunk_data: Vec<f32> =
-                        fallback_buffer.drain(..fallback_chunk_16k).collect();
-                    transcribe_segment(
-                        &chunk_data, &whisper_ctx, &transcript, language, &mut stats, &error_count,
+                        mic_fallback_buffer.drain(..fallback_chunk_16k).collect();
+                    let chunk_offset_ms = mic_samples_offset * 1000 / 16000;
+                    transcribe_segment_dual(
+                        &chunk_data, &whisper_ctx, &transcript,
+                        AudioSource::Mic, chunk_offset_ms, language, &mut stats, &error_count,
                     );
+                    mic_samples_offset += fallback_chunk_16k as u64;
+                }
+            }
+        }
+
+        // System transcription pipeline
+        if sys_active && !sys_16k_buf.is_empty() {
+            let samples = std::mem::take(&mut sys_16k_buf);
+            let offset_ms = (started_at.elapsed().as_millis() as u64)
+                .saturating_sub(samples.len() as u64 * 1000 / 16000);
+
+            if let Some(ref mut vad_proc) = sys_vad {
+                match vad_proc.process_audio(&samples) {
+                    Ok(mut segments) => {
+                        // Force-split segments > 30s for Whisper quality
+                        let mut split_segments = Vec::new();
+                        for seg in segments.drain(..) {
+                            if seg.samples.len() > SYS_MAX_SEGMENT_SAMPLES {
+                                let mut pos = 0;
+                                while pos < seg.samples.len() {
+                                    let end = (pos + SYS_MAX_SEGMENT_SAMPLES).min(seg.samples.len());
+                                    split_segments.push(crate::audio::vad::SpeechSegment {
+                                        samples: seg.samples[pos..end].to_vec(),
+                                        start_timestamp_ms: seg.start_timestamp_ms
+                                            + (pos as f64 * 1000.0 / 16000.0),
+                                        end_timestamp_ms: seg.start_timestamp_ms
+                                            + (end as f64 * 1000.0 / 16000.0),
+                                    });
+                                    pos = end;
+                                }
+                            } else {
+                                split_segments.push(seg);
+                            }
+                        }
+                        process_vad_segments_dual(
+                            split_segments, &whisper_ctx, &transcript,
+                            AudioSource::System, offset_ms, language, &mut stats, &error_count,
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[recording] sys VAD error: {e}");
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            } else {
+                sys_fallback_buffer.extend(&samples);
+                while sys_fallback_buffer.len() >= fallback_chunk_16k {
+                    let chunk_data: Vec<f32> =
+                        sys_fallback_buffer.drain(..fallback_chunk_16k).collect();
+                    let chunk_offset_ms = sys_samples_offset * 1000 / 16000;
+                    transcribe_segment_dual(
+                        &chunk_data, &whisper_ctx, &transcript,
+                        AudioSource::System, chunk_offset_ms, language, &mut stats, &error_count,
+                    );
+                    sys_samples_offset += fallback_chunk_16k as u64;
                 }
             }
         }
@@ -785,33 +1057,87 @@ fn chunker_loop(
                 &mut rx, &mut mixer,
                 &mut hp_filter, &mut denoiser, &mut normalizer,
                 &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
-                &mut sys_normalizer,
+                &mut sys_normalizer, &mut sys_resampler_16k,
+                &mut mic_16k_buf, &mut sys_16k_buf,
             );
             flush_dsp(&mut mixer, &mut resampler_to_48k, &mut resampler_to_16k);
             let remaining_16k = mixer.drain_remaining();
             if !remaining_16k.is_empty() {
                 all_samples_16k.lock().expect("samples mutex").extend(&remaining_16k);
+            }
 
-                if let Some(ref mut vad_proc) = vad {
-                    if let Ok(segments) = vad_proc.process_audio(&remaining_16k) {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
+            // Process remaining mic samples
+            if !mic_16k_buf.is_empty() {
+                let samples = std::mem::take(&mut mic_16k_buf);
+                if let Some(ref mut vad_proc) = mic_vad {
+                    if let Ok(segments) = vad_proc.process_audio(&samples) {
+                        let offset_ms = started_at.elapsed().as_millis() as u64;
+                        process_vad_segments_dual(
+                            segments, &whisper_ctx, &transcript,
+                            AudioSource::Mic, offset_ms, language, &mut stats, &error_count,
+                        );
                     }
                 } else {
-                    fallback_buffer.extend(&remaining_16k);
+                    mic_fallback_buffer.extend(&samples);
                 }
             }
 
-            // Flush VAD or fallback remainder
-            if let Some(ref mut vad_proc) = vad {
+            // Process remaining sys samples
+            if sys_active && !sys_16k_buf.is_empty() {
+                let samples = std::mem::take(&mut sys_16k_buf);
+                if let Some(ref mut vad_proc) = sys_vad {
+                    if let Ok(segments) = vad_proc.process_audio(&samples) {
+                        let offset_ms = started_at.elapsed().as_millis() as u64;
+                        process_vad_segments_dual(
+                            segments, &whisper_ctx, &transcript,
+                            AudioSource::System, offset_ms, language, &mut stats, &error_count,
+                        );
+                    }
+                } else {
+                    sys_fallback_buffer.extend(&samples);
+                }
+            }
+
+            // Flush mic VAD or fallback
+            if let Some(ref mut vad_proc) = mic_vad {
                 match vad_proc.flush() {
                     Ok(segments) => {
-                        process_vad_segments(segments, &whisper_ctx, &transcript, language, &mut stats, &error_count);
+                        let offset_ms = started_at.elapsed().as_millis() as u64;
+                        process_vad_segments_dual(
+                            segments, &whisper_ctx, &transcript,
+                            AudioSource::Mic, offset_ms, language, &mut stats, &error_count,
+                        );
                     }
-                    Err(e) => eprintln!("[recording] VAD flush error: {e}"),
+                    Err(e) => eprintln!("[recording] mic VAD flush error: {e}"),
                 }
-            } else if !fallback_buffer.is_empty() {
-                let remainder = std::mem::take(&mut fallback_buffer);
-                transcribe_segment(&remainder, &whisper_ctx, &transcript, language, &mut stats, &error_count);
+            } else if !mic_fallback_buffer.is_empty() {
+                let remainder = std::mem::take(&mut mic_fallback_buffer);
+                let offset_ms = mic_samples_offset * 1000 / 16000;
+                transcribe_segment_dual(
+                    &remainder, &whisper_ctx, &transcript,
+                    AudioSource::Mic, offset_ms, language, &mut stats, &error_count,
+                );
+            }
+
+            // Flush sys VAD or fallback
+            if let Some(ref mut vad_proc) = sys_vad {
+                match vad_proc.flush() {
+                    Ok(segments) => {
+                        let offset_ms = started_at.elapsed().as_millis() as u64;
+                        process_vad_segments_dual(
+                            segments, &whisper_ctx, &transcript,
+                            AudioSource::System, offset_ms, language, &mut stats, &error_count,
+                        );
+                    }
+                    Err(e) => eprintln!("[recording] sys VAD flush error: {e}"),
+                }
+            } else if !sys_fallback_buffer.is_empty() {
+                let remainder = std::mem::take(&mut sys_fallback_buffer);
+                let offset_ms = sys_samples_offset * 1000 / 16000;
+                transcribe_segment_dual(
+                    &remainder, &whisper_ctx, &transcript,
+                    AudioSource::System, offset_ms, language, &mut stats, &error_count,
+                );
             }
 
             break;
@@ -1003,5 +1329,88 @@ mod tests {
         t.push("hello world".to_string());
         t.push("foo bar".to_string());
         assert_eq!(t.merged(), "hello world foo bar");
+    }
+
+    // --- DualStreamTranscript ---
+
+    #[test]
+    fn dual_stream_empty() {
+        let t = DualStreamTranscript::new();
+        assert_eq!(t.merged(), "");
+        assert_eq!(t.stats(), (0, 0));
+    }
+
+    #[test]
+    fn dual_stream_mic_only_no_labels() {
+        let mut t = DualStreamTranscript::new();
+        t.push("hello".into(), AudioSource::Mic, 0);
+        t.push("world".into(), AudioSource::Mic, 500);
+        assert_eq!(t.merged(), "hello world");
+    }
+
+    #[test]
+    fn dual_stream_interleaved_with_labels() {
+        let mut t = DualStreamTranscript::new();
+        t.push("hi there".into(), AudioSource::Mic, 0);
+        t.push("welcome to the meeting".into(), AudioSource::System, 200);
+        t.push("thanks".into(), AudioSource::Mic, 1000);
+        assert_eq!(
+            t.merged(),
+            "[You] hi there [System] welcome to the meeting [You] thanks"
+        );
+    }
+
+    #[test]
+    fn dual_stream_sorted_by_timestamp() {
+        let mut t = DualStreamTranscript::new();
+        t.push("second".into(), AudioSource::Mic, 1000);
+        t.push("first".into(), AudioSource::System, 100);
+        t.push("third".into(), AudioSource::Mic, 2000);
+        assert_eq!(
+            t.merged(),
+            "[System] first [You] second third"
+        );
+    }
+
+    #[test]
+    fn dual_stream_consecutive_same_source_no_repeat_label() {
+        let mut t = DualStreamTranscript::new();
+        t.push("one".into(), AudioSource::System, 0);
+        t.push("two".into(), AudioSource::System, 500);
+        t.push("three".into(), AudioSource::Mic, 1000);
+        assert_eq!(
+            t.merged(),
+            "[System] one two [You] three"
+        );
+    }
+
+    #[test]
+    fn dual_stream_dedup_per_source() {
+        let mut t = DualStreamTranscript::new();
+        t.push("one two three four".into(), AudioSource::Mic, 0);
+        t.push("three four five six".into(), AudioSource::Mic, 500);
+        t.push("hello world".into(), AudioSource::System, 250);
+        assert_eq!(
+            t.merged(),
+            "[You] one two three four [System] hello world [You] five six"
+        );
+    }
+
+    #[test]
+    fn dual_stream_empty_text_skipped() {
+        let mut t = DualStreamTranscript::new();
+        t.push("hello".into(), AudioSource::Mic, 0);
+        t.push("".into(), AudioSource::System, 100);
+        t.push("world".into(), AudioSource::Mic, 200);
+        assert_eq!(t.merged(), "hello world");
+        assert_eq!(t.stats(), (3, 0));
+    }
+
+    #[test]
+    fn dual_stream_failure_tracking() {
+        let mut t = DualStreamTranscript::new();
+        t.push("ok".into(), AudioSource::Mic, 0);
+        t.record_failure();
+        assert_eq!(t.stats(), (1, 1));
     }
 }

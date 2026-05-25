@@ -79,6 +79,11 @@ impl AudioMixerRingBuffer {
         self.trim_overflow(&Source::System);
     }
 
+    pub fn push_system_resampled(&mut self, samples_at_target_rate: &[f32]) {
+        self.sys_buffer.extend(samples_at_target_rate);
+        self.trim_overflow(&Source::System);
+    }
+
     pub fn extract_mixed(&mut self) -> Option<Vec<f32>> {
         if !self.has_system {
             if self.mic_buffer.len() >= self.window_samples {
