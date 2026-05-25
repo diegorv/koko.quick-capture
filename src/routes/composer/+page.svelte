@@ -6,6 +6,7 @@
   import { OPEN_COMPOSER } from "$lib/events";
 
   let focusKey = $state(0);
+  let initialText = $state("");
   let unlisten: UnlistenFn | undefined;
 
   async function save(text: string) {
@@ -27,7 +28,8 @@
 
   onMount(async () => {
     try {
-      unlisten = await listen(OPEN_COMPOSER, () => {
+      unlisten = await listen<string>(OPEN_COMPOSER, (evt) => {
+        initialText = evt.payload || "";
         focusKey += 1;
       });
     } catch (err) {
@@ -40,4 +42,4 @@
   });
 </script>
 
-<Composer {save} onclose={close} {focusKey} />
+<Composer {save} onclose={close} {focusKey} {initialText} />

@@ -374,7 +374,16 @@ pub fn mark_read(app: AppHandle, store: State<'_, Store>, id: String) -> Result<
 /// `run_on_main_thread`.
 #[tauri::command]
 pub fn open_composer_window(app: AppHandle) -> Result<(), String> {
-    show_composer(&app);
+    use crate::clipboard::ClipboardSnapshot;
+    let clipboard_text = SystemClipboard::new()
+        .read()
+        .ok()
+        .and_then(|snap| match snap {
+            ClipboardSnapshot::Text(t) if !t.is_empty() => Some(t),
+            _ => None,
+        })
+        .unwrap_or_default();
+    show_composer(&app, clipboard_text);
     Ok(())
 }
 
@@ -499,7 +508,7 @@ pub fn show_recording(app: &AppHandle) {
     });
 }
 
-pub fn show_composer(app: &AppHandle) {
+pub fn show_composer(app: &AppHandle, clipboard_text: String) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         record_prev_frontmost(&handle);
@@ -508,7 +517,7 @@ pub fn show_composer(app: &AppHandle) {
             let _ = window.set_focus();
             schedule_refocus_after_space_move(window);
         }
-        let _ = handle.emit(OPEN_COMPOSER, ());
+        let _ = handle.emit(OPEN_COMPOSER, clipboard_text);
     });
 }
 

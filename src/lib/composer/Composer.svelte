@@ -11,7 +11,7 @@
   // live EditorView so component tests can dispatch programmatic doc
   // changes without simulating contenteditable input (per ADR-0005).
 
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
   import {
     EditorView,
     keymap,
@@ -33,6 +33,7 @@
      * left it.
      */
     focusKey?: number;
+    initialText?: string;
     /** Test seam: receives the live EditorView once it mounts. */
     oneditorReady?: (view: EditorView) => void;
   }
@@ -41,6 +42,7 @@
     save,
     onclose,
     focusKey = 0,
+    initialText = "",
     oneditorReady,
   }: Props = $props();
 
@@ -78,10 +80,11 @@
     return true;
   }
 
-  function resetDoc() {
+  function resetDoc(text = "") {
     if (!view) return;
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: "" },
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+      selection: { anchor: text.length },
     });
     view.focus();
   }
@@ -146,13 +149,9 @@
   });
 
   $effect(() => {
-    // Re-run on every `focusKey` change. Reset the doc so each open
-    // starts from an empty draft, refocus the editor, and clear any
-    // leftover `saved` flash and the in-flight guard from a previous
-    // capture.
     focusKey;
     if (view) {
-      resetDoc();
+      resetDoc(untrack(() => initialText));
       saved = false;
       saving = false;
     }

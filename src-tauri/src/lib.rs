@@ -333,7 +333,7 @@ fn tray_menu_item_accelerator(item: TrayMenuItem) -> &'static str {
 /// `capture_clipboard` event.
 fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
     match id {
-        ShortcutId::OpenComposer => commands::show_composer(app),
+        ShortcutId::OpenComposer => commands::show_composer(app, String::new()),
         ShortcutId::CaptureClipboard => commands::capture_clipboard_and_broadcast(app),
         ShortcutId::OpenInbox => commands::show_inbox(app),
         ShortcutId::OpenArchive => commands::show_archive(app),
@@ -354,7 +354,7 @@ fn dispatch_shortcut(app: &tauri::AppHandle, id: ShortcutId) {
 /// popup with no extra wiring.
 fn dispatch_menu_item(app: &tauri::AppHandle, item: TrayMenuItem) {
     match item {
-        TrayMenuItem::OpenComposer => commands::show_composer(app),
+        TrayMenuItem::OpenComposer => commands::show_composer(app, String::new()),
         TrayMenuItem::OpenInbox => {
             let _ = app.emit(TRAY_OPEN_INBOX, ());
         }
