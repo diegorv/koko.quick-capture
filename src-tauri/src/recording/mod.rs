@@ -656,6 +656,7 @@ fn process_and_route_chunks(
     resampler_48k: &mut Option<PersistentResampler>,
     resampler_16k: &mut Option<PersistentResampler>,
     sample_rate: u32,
+    sys_normalizer: &mut Option<LoudnessNormalizer>,
 ) {
     while let Ok(chunk) = rx.try_recv() {
         match chunk {
@@ -667,7 +668,10 @@ fn process_and_route_chunks(
                     mixer.push_mic(&s16);
                 }
             }
-            AudioChunk::System(samples) => {
+            AudioChunk::System(mut samples) => {
+                if let Some(ref mut norm) = sys_normalizer {
+                    norm.process(&mut samples);
+                }
                 mixer.push_system(&samples);
             }
         }
@@ -756,6 +760,12 @@ fn chunker_loop(
         }
     };
 
+    let mut sys_normalizer = if sys_active {
+        sys_sample_rate.map(|sr| LoudnessNormalizer::new(sr))
+    } else {
+        None
+    };
+
     // Mixer at 16kHz: mic arrives pre-processed (DSP → 16k), system resampled internally
     let mut mixer = AudioMixerRingBuffer::with_bluetooth(16000, sys_sample_rate, sys_active, mic_bluetooth);
 
@@ -779,6 +789,7 @@ fn chunker_loop(
             &mut rx, &mut mixer,
             &mut hp_filter, &mut denoiser, &mut normalizer,
             &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
+            &mut sys_normalizer,
         );
 
         while let Some(mixed_16k) = mixer.extract_mixed() {
@@ -818,6 +829,7 @@ fn chunker_loop(
                 &mut rx, &mut mixer,
                 &mut hp_filter, &mut denoiser, &mut normalizer,
                 &mut resampler_to_48k, &mut resampler_to_16k, sample_rate,
+                &mut sys_normalizer,
             );
             flush_dsp(&mut mixer, &mut resampler_to_48k, &mut resampler_to_16k);
             let remaining_16k = mixer.drain_remaining();
