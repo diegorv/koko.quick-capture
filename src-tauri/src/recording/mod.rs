@@ -311,7 +311,7 @@ impl DualStreamTranscript {
         let mut sorted: Vec<&TimestampedSegment> = self.segments.iter().collect();
         sorted.sort_by_key(|s| s.offset_ms);
 
-        let mut parts: Vec<String> = Vec::new();
+        let mut result = String::new();
         let mut current_source: Option<AudioSource> = None;
 
         for seg in sorted {
@@ -320,14 +320,20 @@ impl DualStreamTranscript {
                     AudioSource::Mic => "[You]",
                     AudioSource::System => "[System]",
                 };
-                parts.push(format!("{} {}", label, seg.text));
+                if !result.is_empty() {
+                    result.push('\n');
+                }
+                result.push_str(label);
+                result.push(' ');
+                result.push_str(&seg.text);
                 current_source = Some(seg.source);
             } else {
-                parts.push(seg.text.clone());
+                result.push(' ');
+                result.push_str(&seg.text);
             }
         }
 
-        parts.join(" ").trim().to_string()
+        result.trim().to_string()
     }
 
     pub fn stats(&self) -> (u32, u32) {
@@ -1355,7 +1361,7 @@ mod tests {
         t.push("thanks".into(), AudioSource::Mic, 1000);
         assert_eq!(
             t.merged(),
-            "[You] hi there [System] welcome to the meeting [You] thanks"
+            "[You] hi there\n[System] welcome to the meeting\n[You] thanks"
         );
     }
 
@@ -1367,7 +1373,7 @@ mod tests {
         t.push("third".into(), AudioSource::Mic, 2000);
         assert_eq!(
             t.merged(),
-            "[System] first [You] second third"
+            "[System] first\n[You] second third"
         );
     }
 
@@ -1379,7 +1385,7 @@ mod tests {
         t.push("three".into(), AudioSource::Mic, 1000);
         assert_eq!(
             t.merged(),
-            "[System] one two [You] three"
+            "[System] one two\n[You] three"
         );
     }
 
@@ -1391,7 +1397,7 @@ mod tests {
         t.push("hello world".into(), AudioSource::System, 250);
         assert_eq!(
             t.merged(),
-            "[You] one two three four [System] hello world [You] five six"
+            "[You] one two three four\n[System] hello world\n[You] five six"
         );
     }
 
