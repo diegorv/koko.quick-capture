@@ -338,7 +338,7 @@ impl RecordingHandle {
             mic_bluetooth,
             language,
             error_count: Arc::new(AtomicU32::new(0)),
-            denoise_enabled: true,
+            denoise_enabled: false,
             rx,
             transcript,
             all_samples_16k,
