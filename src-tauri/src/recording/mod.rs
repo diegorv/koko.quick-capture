@@ -26,6 +26,8 @@ const MODEL_URL: &str =
 const VAD_REDEMPTION_TIME_MS: u32 = 400;
 const SYS_VAD_REDEMPTION_TIME_MS: u32 = 400;
 const SYS_MAX_SEGMENT_SAMPLES: usize = 16000 * 10; // 10s at 16kHz
+const MIC_RMS_THRESHOLD: f32 = 0.04;
+const SYS_RMS_THRESHOLD: f32 = 0.01;
 const FALLBACK_CHUNK_SECS: u64 = 20;
 const MAX_ERRORS: u32 = 15;
 
@@ -572,11 +574,10 @@ impl RecordingHandle {
             };
             if let Ok(resampled) = resampled_result {
                 if !resampled.is_empty() {
-                    // RMS silence check
                     let rms = (resampled.iter().map(|s| s * s).sum::<f32>()
                         / resampled.len() as f32)
                         .sqrt();
-                    if rms >= 0.01 {
+                    if rms >= MIC_RMS_THRESHOLD {
                         let prev = self.transcript.lock().expect("transcript mutex")
                             .last_chunk(AudioSource::Mic);
                         let text = transcription::transcribe_with_language(
@@ -714,7 +715,11 @@ fn transcribe_segment_dual(
     }
 
     let rms = (samples_16k.iter().map(|s| s * s).sum::<f32>() / samples_16k.len() as f32).sqrt();
-    if rms < 0.01 {
+    let threshold = match source {
+        AudioSource::Mic => MIC_RMS_THRESHOLD,
+        AudioSource::System => SYS_RMS_THRESHOLD,
+    };
+    if rms < threshold {
         stats.segments_skipped_silence += 1;
         return;
     }
