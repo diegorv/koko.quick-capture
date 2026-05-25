@@ -1,69 +1,71 @@
-# quick-capture
+# 📥 Quick Capture
+
+| | Status |
+|---|---|
+| **CI** | [![CI][ci-badge]][ci-url] [![Release][release-badge]][release-url] [![Nightly][nightly-badge]][nightly-url] [![Wiki Sync][wiki-badge]][wiki-url] |
+| **Security** | [![Security][security-badge]][security-url] [![Privacy][privacy-badge]][privacy-url] |
+| **Project** | [![Latest release][version-badge]][version-url] [![Platform][platform-badge]][platform-url] [![Claude Code][claude-badge]][claude-url] |
+
+A frictionless macOS capture inbox built with Svelte 5 and Tauri 2
+
+The app lives in the macOS menubar as an Accessory app - no system Dock icon by default - and only surfaces in Cmd+Tab while the Inbox window is open. Captures land in a single chronological Inbox with per-item read state. Built entirely with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and human review.
 
 > [!WARNING]
 > **Early stage project.** APIs, schemas, and behavior may change without
 > notice. Not ready for production use. Expect bugs, breaking changes,
 > and missing features.
 
-Frictionless macOS capture inbox. Tauri 2 + SvelteKit + Rust.
+## ✨ Features
 
-The app lives in the macOS menubar as an Accessory app - no system Dock
-icon by default - and only surfaces in Cmd+Tab while the Inbox window
-is open. Captures land in a single chronological Inbox with per-item
-read state.
+### 🖊 Surfaces
 
-## Surfaces
+Five interaction surfaces. Details in [`docs/surfaces.md`](docs/surfaces.md).
 
-Five surfaces. Details in [`docs/surfaces.md`](docs/surfaces.md).
+| Surface | Description |
+|---------|-------------|
+| Composer | Borderless popover for free-text notes and voice recordings |
+| Inbox | Split-pane main window: capture list + detail pane |
+| Dock | 96x96 always-on-top widget at bottom-left. Click, drop, badge |
+| Tray | Menubar item (brain-circuit glyph). Open Composer/Inbox, Quit |
+| Settings | Transcription config, updates, destinations |
 
-| Surface    | Description                                                        |
-|------------|--------------------------------------------------------------------|
-| Composer   | Borderless popover for free-text notes and voice recordings.       |
-| Inbox      | Split-pane main window: capture list + detail pane.                |
-| Dock       | 96x96 always-on-top widget at bottom-left. Click, drop, badge.    |
-| Tray       | Menubar item (brain-circuit glyph). Open Composer/Inbox, Quit.    |
-| Settings   | Transcription config, updates, destinations.                       |
+### 📎 Capture Kinds
 
-## Capture kinds
-
-Six kinds: Note, Clip, Link, Shot, File, Transcription.
+Six kinds: **Note**, **Clip**, **Link**, **Shot**, **File**, **Transcription**.
 Full table and source modules in [`docs/capture-kinds.md`](docs/capture-kinds.md).
 
-## Global shortcuts
+### ⌨️ Global Shortcuts
 
-| Shortcut              | Action                                |
-|-----------------------|---------------------------------------|
-| `Ctrl+Alt+Cmd+Space`  | Open / focus the Composer.            |
-| `Ctrl+Alt+Cmd+C`      | Capture from clipboard.               |
-| `Ctrl+Alt+Cmd+I`      | Open / focus the Inbox.               |
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Alt+Cmd+Space` | Open / focus the Composer |
+| `Ctrl+Alt+Cmd+C` | Capture from clipboard |
+| `Ctrl+Alt+Cmd+I` | Open / focus the Inbox |
 
-## Requirements
+## 🛠 Stack
 
-- macOS (Apple Silicon or Intel).
-- Rust toolchain (`rustup`).
-- Node.js + pnpm.
+**Svelte 5** + **SvelteKit** + **TypeScript** | **Tauri 2** (Rust) | **SQLite** | **shadcn-svelte** (Tailwind v4)
 
-## Dev
+## 🚀 Getting Started
+
+**Requirements:** macOS (Apple Silicon or Intel), Rust toolchain (`rustup`), Node.js + pnpm.
 
 ```sh
 pnpm install
 pnpm tauri dev
 ```
 
-Vite serves the frontend on `localhost:1420`; if the port is held by
-a previous dev process, kill it (`pkill -9 -f quick-capture`) or run
-on a different port.
+Vite serves the frontend on `localhost:1420`; if the port is held by a previous dev process, kill it (`pkill -9 -f quick-capture`) or run on a different port.
 
-## Build
+### Build
 
 ```sh
 pnpm tauri build
 ```
 
-Produces `src-tauri/target/release/bundle/macos/quick-capture.app`
-and a `.dmg` under the same directory.
+Produces `src-tauri/target/release/bundle/macos/quick-capture.app` and a `.dmg` under the same directory.
 
-## Checks
+### Checks
 
 ```sh
 pnpm test            # Vitest (Svelte components + routes)
@@ -74,7 +76,7 @@ cargo check --manifest-path src-tauri/Cargo.toml     # Rust typecheck
 
 Every slice must leave all four green before commit (see ADR-0006).
 
-## Dev tools
+### Dev Tools
 
 **Icon generation:**
 
@@ -93,11 +95,34 @@ cargo run --bin dev_list -- --limit 5
 Output: `<short-ulid>  <kind>  <created_at>  <payload preview>`.
 Flags: `--limit N` (default 20), `--db <path>`.
 
-## Docs
+## 📚 Documentation
 
-- [`CONTEXT.md`](CONTEXT.md) - domain glossary
-- [`docs/surfaces.md`](docs/surfaces.md) - surface behavior, keyboard shortcuts, read state
-- [`docs/capture-kinds.md`](docs/capture-kinds.md) - kind payloads, detection, global shortcuts
-- [`docs/verification-checklist.md`](docs/verification-checklist.md) - manual smoke test
-- [`docs/adr/`](docs/adr/) - architectural decisions
-- [`.scratch/`](.scratch/) - active PRDs and handoff docs
+| | Document | Description |
+|---|----------|-------------|
+| 📖 | [Domain Glossary](CONTEXT.md) | Core concepts and terminology |
+| 🖥 | [Surfaces](docs/surfaces.md) | Surface behavior, keyboard shortcuts, read state |
+| 📎 | [Capture Kinds](docs/capture-kinds.md) | Kind payloads, detection, global shortcuts |
+| ✅ | [Verification Checklist](docs/verification-checklist.md) | Manual smoke test |
+| 🏛 | [ADRs](docs/adr/) | Architectural decisions |
+| 📝 | [Scratch](.scratch/) | Active PRDs and handoff docs |
+
+<!-- ─── Badge reference definitions ────────────────────────────── -->
+
+[ci-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/ci.yml
+[security-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/security.yml/badge.svg
+[security-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/security.yml
+[privacy-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/privacy.yml/badge.svg
+[privacy-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/privacy.yml
+[release-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/release.yml/badge.svg
+[release-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/release.yml
+[nightly-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/nightly.yml/badge.svg
+[nightly-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/nightly.yml
+[wiki-badge]: https://github.com/diegorv/koko.quick-capture/actions/workflows/sync-wiki.yml/badge.svg
+[wiki-url]: https://github.com/diegorv/koko.quick-capture/actions/workflows/sync-wiki.yml
+[version-badge]: https://img.shields.io/github/v/release/diegorv/koko.quick-capture?include_prereleases&sort=semver&label=release&color=blue
+[version-url]: https://github.com/diegorv/koko.quick-capture/releases
+[platform-badge]: https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple&logoColor=white
+[platform-url]: https://github.com/diegorv/koko.quick-capture#-quick-capture
+[claude-badge]: https://img.shields.io/badge/built%20with-Claude%20Code-D97757?logo=anthropic&logoColor=white
+[claude-url]: https://docs.anthropic.com/en/docs/claude-code
