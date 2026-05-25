@@ -220,15 +220,33 @@ fn strip_hallucination_artifacts(text: &str) -> String {
     // Collapse 2+ consecutive identical words to one
     result = collapse_repeated_words(&result);
 
+    result = strip_filler_words(&result);
+
     result.trim().to_string()
+}
+
+const FILLER_WORDS: &[&str] = &[
+    "uh", "uhh", "uhhh", "um", "uhm", "umm", "ummm",
+    "hm", "hmm", "hmmm", "mm", "mmm", "mh",
+    "ah", "ahh", "eh", "ehh", "er", "err",
+];
+
+fn strip_filler_words(text: &str) -> String {
+    text.split_whitespace()
+        .filter(|w| {
+            let lower = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            !FILLER_WORDS.contains(&lower.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn strip_bracketed_tokens(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '[' || ch == '(' {
-            let close = if ch == '[' { ']' } else { ')' };
+        if ch == '[' || ch == '(' || ch == '{' {
+            let close = match ch { '[' => ']', '(' => ')', _ => '}' };
             let mut inside = String::new();
             let mut found_close = false;
             for inner in chars.by_ref() {
@@ -242,7 +260,6 @@ fn strip_bracketed_tokens(text: &str) -> String {
                 result.push(ch);
                 result.push_str(&inside);
             }
-            // else: drop the bracketed content
         } else {
             result.push(ch);
         }
@@ -511,5 +528,39 @@ mod tests {
     fn strip_legendas_amara() {
         let result = strip_hallucination_artifacts("Texto. Legendas pela comunidade Amara.org");
         assert_eq!(result, "Texto.");
+    }
+
+    #[test]
+    fn strip_curly_braces() {
+        assert_eq!(strip_bracketed_tokens("{inaudible} hello"), " hello");
+        assert_eq!(strip_bracketed_tokens("text {noise}"), "text ");
+    }
+
+    #[test]
+    fn strip_curly_preserves_unclosed() {
+        assert_eq!(strip_bracketed_tokens("hello {unclosed"), "hello {unclosed");
+    }
+
+    #[test]
+    fn filler_words_removed() {
+        assert_eq!(strip_filler_words("uh hello um world"), "hello world");
+        assert_eq!(strip_filler_words("hmm let me think ah yes"), "let me think yes");
+    }
+
+    #[test]
+    fn filler_words_case_insensitive_with_punctuation() {
+        assert_eq!(strip_filler_words("Uh, well then"), "well then");
+        assert_eq!(strip_filler_words("right umm... okay"), "right okay");
+    }
+
+    #[test]
+    fn filler_words_preserves_normal_text() {
+        assert_eq!(strip_filler_words("this is normal text"), "this is normal text");
+    }
+
+    #[test]
+    fn strip_artifacts_with_fillers() {
+        let result = strip_hallucination_artifacts("uh hello um world ah yes");
+        assert_eq!(result, "hello world yes");
     }
 }
