@@ -19,20 +19,34 @@ The app lives in the macOS menubar as an Accessory app - no system Dock icon by 
 
 ### 🖊 Surfaces
 
-Five interaction surfaces. Details in [`docs/surfaces.md`](docs/surfaces.md).
+Seven interaction surfaces. Details in [`docs/surfaces.md`](docs/surfaces.md).
 
 | Surface | Description |
 |---------|-------------|
 | Composer | Borderless popover for free-text notes and voice recordings |
 | Inbox | Split-pane main window: capture list + detail pane |
+| Archive | Routed captures filtered by Destination |
+| Recording | Dedicated recording UI with VU meters and live transcript |
 | Dock | 96x96 always-on-top widget at bottom-left. Click, drop, badge |
 | Tray | Menubar item (brain-circuit glyph). Open Composer/Inbox, Quit |
-| Settings | Transcription config, updates, destinations |
+| Settings | Transcription config, update channels, destinations |
 
 ### 📎 Capture Kinds
 
 Six kinds: **Note**, **Clip**, **Link**, **Shot**, **File**, **Transcription**.
 Full table and source modules in [`docs/capture-kinds.md`](docs/capture-kinds.md).
+
+### 🎙 Voice Recording
+
+Full audio pipeline: mic + system audio capture, high-pass filter, denoising, loudness normalization, VAD (voice activity detection), resampling, and local Whisper transcription. Exports to M4A.
+
+### 🔗 Integrations
+
+- **Wikilink mentions** - `[[Name]]` autocomplete in Composer from a configured source folder; person-based filtering in Inbox/Archive
+- **Destinations** - named routing targets with color swatches; captures can be routed to a Destination and browsed in Archive
+- **Kokobrain** - deep-link forwarding via `kokobrain://capture` URI scheme (ADR-0012)
+- **Drag & drop** - Finder file drops onto Dock widget auto-detect Shot vs File
+- **Update channels** - stable/nightly in-app updater with runtime channel switching
 
 ### ⌨️ Global Shortcuts
 
