@@ -70,7 +70,7 @@ pub fn transcribe_full(
         .create_state()
         .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
 
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    let mut params = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 });
 
     let audio = pad_audio(audio_data);
 
