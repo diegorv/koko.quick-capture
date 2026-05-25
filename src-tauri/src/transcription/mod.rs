@@ -272,13 +272,51 @@ fn collapse_repeated_words(text: &str) -> String {
     if words.len() < 2 {
         return text.to_string();
     }
-    let mut out = vec![words[0]];
-    for w in &words[1..] {
-        if !w.eq_ignore_ascii_case(out.last().unwrap()) {
-            out.push(w);
+
+    let after_2 = collapse_phrase_repeats(&words, 2);
+    let after_3 = collapse_phrase_repeats(&after_2, 3);
+
+    let mut final_out = vec![after_3[0].clone()];
+    for w in &after_3[1..] {
+        if !w.eq_ignore_ascii_case(final_out.last().unwrap()) {
+            final_out.push(w.clone());
         }
     }
-    out.join(" ")
+    final_out.join(" ")
+}
+
+fn collapse_phrase_repeats(words: &[impl AsRef<str>], phrase_len: usize) -> Vec<String> {
+    if words.len() < phrase_len * 2 {
+        return words.iter().map(|w| w.as_ref().to_string()).collect();
+    }
+    let mut out: Vec<String> = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        if i + phrase_len * 2 <= words.len() {
+            let phrase = &words[i..i + phrase_len];
+            let next = &words[i + phrase_len..i + phrase_len * 2];
+            let matches = phrase.iter().zip(next.iter())
+                .all(|(a, b)| a.as_ref().eq_ignore_ascii_case(b.as_ref()));
+            if matches {
+                for w in phrase { out.push(w.as_ref().to_string()); }
+                i += phrase_len;
+                while i + phrase_len <= words.len() {
+                    let candidate = &words[i..i + phrase_len];
+                    let still_matches = phrase.iter().zip(candidate.iter())
+                        .all(|(a, b)| a.as_ref().eq_ignore_ascii_case(b.as_ref()));
+                    if still_matches {
+                        i += phrase_len;
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(words[i].as_ref().to_string());
+        i += 1;
+    }
+    out
 }
 
 fn is_hallucination(text: &str) -> bool {
@@ -528,6 +566,30 @@ mod tests {
     fn strip_legendas_amara() {
         let result = strip_hallucination_artifacts("Texto. Legendas pela comunidade Amara.org");
         assert_eq!(result, "Texto.");
+    }
+
+    #[test]
+    fn collapse_two_word_phrase_repeat() {
+        assert_eq!(collapse_repeated_words("foo bar foo bar"), "foo bar");
+        assert_eq!(collapse_repeated_words("foo bar foo bar foo bar"), "foo bar");
+    }
+
+    #[test]
+    fn collapse_three_word_phrase_repeat() {
+        assert_eq!(collapse_repeated_words("a b c a b c a b c"), "a b c");
+    }
+
+    #[test]
+    fn collapse_phrase_with_trailing() {
+        assert_eq!(collapse_repeated_words("foo bar foo bar baz"), "foo bar baz");
+    }
+
+    #[test]
+    fn collapse_mixed_single_and_phrase() {
+        assert_eq!(
+            collapse_repeated_words("hello hello foo bar foo bar world"),
+            "hello foo bar world"
+        );
     }
 
     #[test]
