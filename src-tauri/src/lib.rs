@@ -465,6 +465,39 @@ pub fn run() {
             app.manage(commands::recording::RecordingState(std::sync::Mutex::new(None)));
             app.manage(commands::recording::WhisperState(std::sync::Mutex::new(None)));
 
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let model_path = recording::model_path();
+                    if !model_path.exists() || !recording::is_model_downloaded() {
+                        eprintln!("[startup] downloading whisper model...");
+                        let h = handle.clone();
+                        match recording::download_model(move |downloaded, total| {
+                            let _ = h.emit("model:download-progress", (downloaded, total));
+                        }).await {
+                            Ok(_) => eprintln!("[startup] model download complete"),
+                            Err(e) => {
+                                eprintln!("[startup] model download failed: {e}");
+                                return;
+                            }
+                        }
+                    }
+                    let whisper: tauri::State<'_, commands::recording::WhisperState> =
+                        handle.state();
+                    let mut guard = whisper.0.lock().expect("whisper mutex poisoned");
+                    if guard.is_none() {
+                        match crate::transcription::create_whisper_context(&model_path) {
+                            Ok(ctx) => {
+                                crate::transcription::warmup(&ctx);
+                                *guard = Some(ctx);
+                                eprintln!("[startup] whisper model loaded");
+                            }
+                            Err(e) => eprintln!("[startup] whisper load failed: {e}"),
+                        }
+                    }
+                });
+            }
+
             // Inbox (main) window is declared in tauri.conf.json with
             // label "inbox" and url "/inbox". It is the app shell;
             // future product screens (Settings, search, etc.) live as
