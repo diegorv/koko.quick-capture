@@ -89,7 +89,7 @@ fn resolve_vad_path() -> Option<String> {
 
 const WHISPER_MIN_SIZE: u64 = 500_000_000;
 const VAD_MIN_SIZE: u64 = 800_000;
-const GGML_MAGIC: [u8; 4] = [0x67, 0x67, 0x6d, 0x6c];
+const GGML_MAGIC: [u8; 4] = [0x6c, 0x6d, 0x67, 0x67];
 const GGUF_MAGIC: [u8; 4] = [0x47, 0x47, 0x55, 0x46];
 
 fn validate_model_file(path: &std::path::Path, min_size: u64) -> bool {
